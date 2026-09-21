@@ -134,7 +134,13 @@ func inTransaction(ctx context.Context, db *sql.DB, write bool, fn func(*sql.Con
 	if err := fn(conn); err != nil {
 		return failure("transaction callback", err)
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	if err := ctx.Err(); err != nil {
+		return failure("commit transaction", err)
+	}
+	// Once COMMIT starts, report its actual result. The driver can otherwise
+	// replace successful execution with a late context error, even though the
+	// durable transaction can no longer be rolled back.
+	if _, err := conn.ExecContext(context.WithoutCancel(ctx), "COMMIT"); err != nil {
 		return failure("commit transaction", err)
 	}
 	committed = true
