@@ -90,6 +90,9 @@ models:
 	if cfg.Routing.SafeFallbackTier != "T4" {
 		t.Fatalf("safe fallback = %q, want T4", cfg.Routing.SafeFallbackTier)
 	}
+	if cfg.ClientAuth.MaxBodyBytes != DefaultMaxBodyBytes {
+		t.Fatalf("max body bytes = %d, want %d", cfg.ClientAuth.MaxBodyBytes, DefaultMaxBodyBytes)
+	}
 }
 
 func TestValidateRejectsMissingSecretAndDuplicateModel(t *testing.T) {
@@ -143,6 +146,14 @@ func TestValidateRejectsNegativeRetentionMaintenanceInterval(t *testing.T) {
 	cfg.SQLite.RetentionMaintenanceInterval = -time.Second
 	if err := cfg.Validate(testEnv); err == nil {
 		t.Fatal("negative retention maintenance interval was accepted")
+	}
+}
+
+func TestValidateRejectsNegativeMaximumBodyBytes(t *testing.T) {
+	cfg := validConfig()
+	cfg.ClientAuth.MaxBodyBytes = -1
+	if err := cfg.Validate(testEnv); err == nil || !strings.Contains(err.Error(), "maximum body bytes") {
+		t.Fatalf("negative maximum body bytes was accepted: %v", err)
 	}
 }
 

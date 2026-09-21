@@ -129,6 +129,43 @@ func TestConfiguredExpectedCostAndLimits(t *testing.T) {
 	}
 }
 
+func TestBootstrapFallsBackToInputPriceForLegacyCachedPriceOmission(t *testing.T) {
+	legacy := configuredApp(t, routingBounds, `
+- id: legacy
+  provider: provider
+  tier: T4
+  available: true
+  capabilities: [text]
+  context_window: 1000000
+  max_output_tokens: 4096
+  input_price: 2
+  output_price: 0
+  success_prior: 1
+`)
+	d, err := decide(legacy, domain.RequestFeatures{InputTokens: 1_000_000, CachedInputTokens: 1_000_000}, nil)
+	if err != nil || len(d.Candidates) != 1 || math.Abs(d.Candidates[0].DirectCost-2) > 1e-12 {
+		t.Fatalf("legacy cached-price fallback lost: decision=%+v err=%v", d, err)
+	}
+
+	explicitZero := configuredApp(t, routingBounds, `
+- id: zero-cache
+  provider: provider
+  tier: T4
+  available: true
+  capabilities: [text]
+  context_window: 1000000
+  max_output_tokens: 4096
+  input_price: 2
+  cached_input_price_usd_per_million: 0
+  output_price: 0
+  success_prior: 1
+`)
+	d, err = decide(explicitZero, domain.RequestFeatures{InputTokens: 1_000_000, CachedInputTokens: 1_000_000}, nil)
+	if err != nil || len(d.Candidates) != 1 || d.Candidates[0].DirectCost != 0 {
+		t.Fatalf("explicit cached-price zero was not preserved: decision=%+v err=%v", d, err)
+	}
+}
+
 func TestConfiguredSignalsAndConfidence(t *testing.T) {
 	for _, signal := range []struct {
 		field     string

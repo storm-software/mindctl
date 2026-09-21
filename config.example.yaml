@@ -3,6 +3,7 @@ listen: ":8080"
 
 client_auth:
   token_env: MINDCTL_GATEWAY_TOKEN
+  max_body_bytes: 16777216
 
 jev:
   base_url: https://api.typesafe.ai

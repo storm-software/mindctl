@@ -115,7 +115,7 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 			ID: model.ID, UpstreamID: model.ID, Provider: model.Provider, Tier: tier,
 			ContextWindow: int64(model.ContextWindow), MaxOutputTokens: int64(model.MaxOutputTokens),
 			LatencyP95: model.LatencyP95, Available: model.Available, Order: index,
-			Pricing:             domain.Pricing{InputPerMillion: model.InputPrice, CachedInputPerMillion: model.CachedInputPriceUSDPerMillion, OutputPerMillion: model.OutputPrice, PerRequestUSD: model.PerRequestPriceUSD},
+			Pricing:             domain.Pricing{InputPerMillion: model.InputPrice, CachedInputPerMillion: model.CachedInputPrice(), OutputPerMillion: model.OutputPrice, PerRequestUSD: model.PerRequestPriceUSD},
 			DefaultSuccessPrior: model.SuccessPrior, SuccessPriors: make(map[domain.TaskType]float64, len(model.TaskSuccessPriors)),
 		}
 		for _, capability := range model.Capabilities {

@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+const DefaultMaxBodyBytes int64 = 16 << 20
 
 // Config is the complete gateway configuration loaded from YAML.
 type Config struct {
@@ -22,7 +26,8 @@ type Config struct {
 
 // ClientAuthConfig configures gateway authentication using a referenced secret.
 type ClientAuthConfig struct {
-	TokenEnv string `yaml:"token_env"`
+	TokenEnv     string `yaml:"token_env"`
+	MaxBodyBytes int64  `yaml:"max_body_bytes"`
 }
 
 // JevConfig configures the Jev classifier using a referenced secret.
@@ -105,6 +110,35 @@ type ModelConfig struct {
 	LatencyP95                    time.Duration      `yaml:"latency_p95"`
 	SuccessPrior                  float64            `yaml:"success_prior"`
 	TaskSuccessPriors             map[string]float64 `yaml:"task_success_priors"`
+	cachedInputPriceConfigured    bool
+}
+
+// UnmarshalYAML keeps legacy catalogs compatible: an omitted cached input
+// price means the ordinary input price, while an explicit zero remains a real
+// configured price.
+func (m *ModelConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain ModelConfig
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*m = ModelConfig(decoded)
+	for index := 0; index+1 < len(value.Content); index += 2 {
+		if value.Content[index].Value == "cached_input_price_usd_per_million" {
+			m.cachedInputPriceConfigured = true
+			break
+		}
+	}
+	return nil
+}
+
+// CachedInputPrice returns the configured cached price or the input price for
+// legacy catalog entries that omitted the optional cached-price field.
+func (m ModelConfig) CachedInputPrice() float64 {
+	if m.cachedInputPriceConfigured || m.CachedInputPriceUSDPerMillion != 0 {
+		return m.CachedInputPriceUSDPerMillion
+	}
+	return m.InputPrice
 }
 
 // Validate checks configuration and referenced environment variables without
@@ -120,6 +154,9 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 
 	requireEnv("client authentication", cfg.ClientAuth.TokenEnv)
+	if cfg.ClientAuth.MaxBodyBytes < 0 {
+		errs = append(errs, errors.New("maximum body bytes must not be negative"))
+	}
 	requireEnv("Jev", cfg.Jev.APIKeyEnv)
 
 	providerIDs := make(map[string]struct{}, len(cfg.Providers))
@@ -242,7 +279,7 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			value float64
 		}{
 			{"input price", model.InputPrice},
-			{"cached input price", model.CachedInputPriceUSDPerMillion},
+			{"cached input price", model.CachedInputPrice()},
 			{"output price", model.OutputPrice},
 			{"per-request price", model.PerRequestPriceUSD},
 		} {

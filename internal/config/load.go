@@ -33,6 +33,9 @@ func Load(path string, getenv func(string) (string, bool)) (Config, error) {
 	if cfg.Routing.SafeFallbackTier == "" {
 		cfg.Routing.SafeFallbackTier = "T4"
 	}
+	if cfg.ClientAuth.MaxBodyBytes == 0 {
+		cfg.ClientAuth.MaxBodyBytes = DefaultMaxBodyBytes
+	}
 	if err := cfg.Validate(getenv); err != nil {
 		return Config{}, err
 	}
