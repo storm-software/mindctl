@@ -140,6 +140,28 @@ func TestAnthropicStreamNormalizesLifecycleAndCompletion(t *testing.T) {
 	}
 }
 
+func TestAnthropicStreamCorrelatesToolStartAndArgumentDelta(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"lookup\",\"input\":{}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\":\"}}\n\n")
+	}))
+	defer server.Close()
+
+	stream, err := newAnthropic(server.URL).Stream(context.Background(), anthropicModel(), textRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	start, err := stream.Next(context.Background())
+	if err != nil || start.ItemID != "toolu_1" || start.CallID != "toolu_1" || start.Name != "lookup" {
+		t.Fatalf("start=%+v err=%v", start, err)
+	}
+	delta, err := stream.Next(context.Background())
+	if err != nil || delta.ItemID != start.ItemID || delta.CallID != start.CallID || delta.Name != start.Name || delta.ArgumentsDelta != `{"city":` {
+		t.Fatalf("delta=%+v start=%+v err=%v", delta, start, err)
+	}
+}
+
 func TestAnthropicStreamPreservesRequestIDOnMalformedFrames(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("request-id", "anthropic-stream-req")

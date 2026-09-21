@@ -129,7 +129,10 @@ type stream struct {
 	usage                         inference.Usage
 	hasInputUsage, hasOutputUsage bool
 	status                        string
+	contentBlocks                 map[int]streamContentIdentity
 }
+
+type streamContentIdentity struct{ itemID, callID, name string }
 
 func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	frame, err := s.reader.Next(ctx)
@@ -152,12 +155,40 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	if event.Status != "" {
 		s.status = event.Status
 	}
+	s.trackContentBlock(frame.Type, frame.Data, &event)
 	if usage != nil {
 		s.mergeUsage(usage)
 		event.Usage = s.usage
 	}
 	event.ProviderRequestID = s.requestID
 	return event, nil
+}
+
+func (s *stream) trackContentBlock(kind string, data []byte, event *inference.Event) {
+	index, ok := contentBlockIndex(data)
+	if !ok {
+		return
+	}
+	if kind == "content_block_start" {
+		if s.contentBlocks == nil {
+			s.contentBlocks = make(map[int]streamContentIdentity)
+		}
+		s.contentBlocks[index] = streamContentIdentity{itemID: event.ItemID, callID: event.CallID, name: event.Name}
+		return
+	}
+	if identity, ok := s.contentBlocks[index]; ok {
+		event.ItemID, event.CallID, event.Name = identity.itemID, identity.callID, identity.name
+	}
+}
+
+func contentBlockIndex(data []byte) (int, bool) {
+	var frame struct {
+		Index *int `json:"index"`
+	}
+	if json.Unmarshal(data, &frame) != nil || frame.Index == nil {
+		return 0, false
+	}
+	return *frame.Index, true
 }
 
 func streamErrorKind(data []byte) provider.ErrorKind {
