@@ -20,6 +20,7 @@ type JevJudgment struct {
 	TierProbabilities                                        map[Tier]float64
 	TaskType                                                 TaskType
 	TaskTypeConfidence                                       float64
+	TaskTypeProbabilities                                    map[TaskType]float64
 	ReasoningScore, CodingScore, BlastRadius, Underspecified float64
 	ResolvedModel                                            string
 	InputTokens, OutputTokens                                int64
