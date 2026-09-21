@@ -75,6 +75,19 @@ func TestDecodeRejectsUnknownNestedFieldsAndMultipleDocuments(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsJSONSchemaFormatWithoutObjectSchema(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"mindctl-auto","input":"hello","text":{"format":{"type":"json_schema","name":"answer"}}}`,
+		`{"model":"mindctl-auto","input":"hello","text":{"format":{"type":"json_schema","name":"answer","schema":null}}}`,
+		`{"model":"mindctl-auto","input":"hello","text":{"format":{"type":"json_schema","name":"answer","schema":[]}}}`,
+	} {
+		_, _, err := decode(t, body, 1<<20)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("body %q err=%v", body, err)
+		}
+	}
+}
+
 func TestAuthenticateUsesConstantTimeTokenMatch(t *testing.T) {
 	called := false
 	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), staticTokens{{ID: "client-a", Value: "client-a"}})

@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -55,10 +56,20 @@ func ValidateRequest(req Request) error {
 			return Invalid(fmt.Sprintf("tools[%d]", i), "must be a named function")
 		}
 	}
-	if format := req.TextFormat; format != nil && (format.Type != "json_schema" || strings.TrimSpace(format.Name) == "") {
-		return Invalid("text.format", "must be a named json_schema format")
+	if format := req.TextFormat; format != nil {
+		if format.Type != "json_schema" || strings.TrimSpace(format.Name) == "" {
+			return Invalid("text.format", "must be a named json_schema format")
+		}
+		if !jsonObject(format.Schema) {
+			return Invalid("text.format.schema", "must be a non-null JSON object")
+		}
 	}
 	return nil
+}
+
+func jsonObject(raw json.RawMessage) bool {
+	var object map[string]json.RawMessage
+	return len(raw) != 0 && json.Unmarshal(raw, &object) == nil && object != nil
 }
 
 func validateItem(item Item) error {
