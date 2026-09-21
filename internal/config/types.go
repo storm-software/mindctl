@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -33,10 +34,14 @@ type JevConfig struct {
 	MaxRetries int           `yaml:"max_retries"`
 }
 
-// SQLiteConfig controls local durable storage. Zero retention means unlimited.
+// SQLiteConfig controls local durable storage. Zero retention means unlimited
+// and starts no retention maintenance. For finite retention, a zero maintenance
+// interval uses the application's bounded default; nonzero intervals are Go
+// duration strings such as "15m".
 type SQLiteConfig struct {
-	Path      string        `yaml:"path"`
-	Retention time.Duration `yaml:"retention"`
+	Path                         string        `yaml:"path"`
+	Retention                    time.Duration `yaml:"retention"`
+	RetentionMaintenanceInterval time.Duration `yaml:"retention_maintenance_interval"`
 }
 
 // EncryptionConfig maps key IDs to environment-variable names.
@@ -45,11 +50,33 @@ type EncryptionConfig struct {
 	Keys        map[string]string `yaml:"keys"`
 }
 
-// RoutingConfig bounds automatic routing. An omitted safe fallback defaults to T4.
+// RoutingConfig supplies the immutable deterministic routing policy. Dollar
+// values are USD, probability values are fractions in [0, 1], and durations
+// use Go duration strings such as "500ms" or "2s". Zero cost/limit values
+// disable the corresponding budget or penalty; zero MinJevConfidence retains
+// the policy's safe default.
 type RoutingConfig struct {
-	MinTier          string `yaml:"min_tier"`
-	MaxTier          string `yaml:"max_tier"`
-	SafeFallbackTier string `yaml:"safe_fallback_tier"`
+	MinTier                    string              `yaml:"min_tier"`
+	MaxTier                    string              `yaml:"max_tier"`
+	SafeFallbackTier           string              `yaml:"safe_fallback_tier"`
+	FailureEscalationCostUSD   float64             `yaml:"failure_escalation_cost_usd"`
+	LatencyPenaltyUSDPerSecond float64             `yaml:"latency_penalty_usd_per_second"`
+	MinSuccessProbability      float64             `yaml:"min_success_probability"`
+	MaxDirectCostUSD           float64             `yaml:"max_direct_cost_usd"`
+	MaxExpectedCostUSD         float64             `yaml:"max_expected_cost_usd"`
+	MaxLatency                 time.Duration       `yaml:"max_latency"`
+	MinJevConfidence           float64             `yaml:"min_jev_confidence"`
+	ReasoningFloors            []SignalFloorConfig `yaml:"reasoning_floors"`
+	CodingFloors               []SignalFloorConfig `yaml:"coding_floors"`
+	RiskFloors                 []SignalFloorConfig `yaml:"risk_floors"`
+	UnderspecificationFloors   []SignalFloorConfig `yaml:"underspecification_floors"`
+}
+
+// SignalFloorConfig raises, but never lowers, the deterministic policy floor
+// when a configured Jev signal reaches Threshold.
+type SignalFloorConfig struct {
+	Threshold float64 `yaml:"threshold"`
+	Floor     string  `yaml:"floor"`
 }
 
 // ProviderConfig configures one provider endpoint and secret reference.
@@ -59,18 +86,25 @@ type ProviderConfig struct {
 	APIKeyEnv string `yaml:"api_key_env"`
 }
 
-// ModelConfig describes one configured provider model.
+// ModelConfig describes one configured provider model. InputPrice and
+// OutputPrice are USD per million tokens; CachedInputPriceUSDPerMillion and
+// PerRequestPriceUSD make their units explicit. Zero MaxOutputTokens advertises
+// no positive output capacity, and zero LatencyP95 means no latency prior.
 type ModelConfig struct {
-	ID                string             `yaml:"id"`
-	Provider          string             `yaml:"provider"`
-	Tier              string             `yaml:"tier"`
-	Capabilities      []string           `yaml:"capabilities"`
-	ContextWindow     int                `yaml:"context_window"`
-	Available         bool               `yaml:"available"`
-	InputPrice        float64            `yaml:"input_price"`
-	OutputPrice       float64            `yaml:"output_price"`
-	SuccessPrior      float64            `yaml:"success_prior"`
-	TaskSuccessPriors map[string]float64 `yaml:"task_success_priors"`
+	ID                            string             `yaml:"id"`
+	Provider                      string             `yaml:"provider"`
+	Tier                          string             `yaml:"tier"`
+	Capabilities                  []string           `yaml:"capabilities"`
+	ContextWindow                 int                `yaml:"context_window"`
+	MaxOutputTokens               int                `yaml:"max_output_tokens"`
+	Available                     bool               `yaml:"available"`
+	InputPrice                    float64            `yaml:"input_price"`
+	CachedInputPriceUSDPerMillion float64            `yaml:"cached_input_price_usd_per_million"`
+	OutputPrice                   float64            `yaml:"output_price"`
+	PerRequestPriceUSD            float64            `yaml:"per_request_price_usd"`
+	LatencyP95                    time.Duration      `yaml:"latency_p95"`
+	SuccessPrior                  float64            `yaml:"success_prior"`
+	TaskSuccessPriors             map[string]float64 `yaml:"task_success_priors"`
 }
 
 // Validate checks configuration and referenced environment variables without
@@ -132,6 +166,63 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	if cfg.SQLite.Retention < 0 {
 		errs = append(errs, errors.New("SQLite retention must not be negative"))
 	}
+	if cfg.SQLite.RetentionMaintenanceInterval < 0 {
+		errs = append(errs, errors.New("SQLite retention maintenance interval must not be negative"))
+	}
+	if cfg.Jev.Timeout < 0 {
+		errs = append(errs, errors.New("Jev timeout must not be negative"))
+	}
+	if cfg.Jev.MaxRetries < 0 {
+		errs = append(errs, errors.New("Jev max retries must not be negative"))
+	}
+	validateRouting := func() {
+		for _, value := range []struct {
+			name  string
+			value float64
+		}{
+			{"failure escalation cost", cfg.Routing.FailureEscalationCostUSD},
+			{"latency penalty", cfg.Routing.LatencyPenaltyUSDPerSecond},
+			{"maximum direct cost", cfg.Routing.MaxDirectCostUSD},
+			{"maximum expected cost", cfg.Routing.MaxExpectedCostUSD},
+		} {
+			if !nonnegativeFinite(value.value) {
+				errs = append(errs, fmt.Errorf("%s must be finite and nonnegative", value.name))
+			}
+		}
+		for _, value := range []struct {
+			name  string
+			value float64
+		}{
+			{"minimum success probability", cfg.Routing.MinSuccessProbability},
+			{"minimum Jev confidence", cfg.Routing.MinJevConfidence},
+		} {
+			if !probability(value.value) {
+				errs = append(errs, fmt.Errorf("%s must be finite and in [0, 1]", value.name))
+			}
+		}
+		if cfg.Routing.MaxLatency < 0 {
+			errs = append(errs, errors.New("maximum latency must not be negative"))
+		}
+		for _, rules := range []struct {
+			name  string
+			rules []SignalFloorConfig
+		}{
+			{"reasoning", cfg.Routing.ReasoningFloors},
+			{"coding", cfg.Routing.CodingFloors},
+			{"risk", cfg.Routing.RiskFloors},
+			{"underspecification", cfg.Routing.UnderspecificationFloors},
+		} {
+			for _, rule := range rules.rules {
+				if !nonnegativeFinite(rule.Threshold) {
+					errs = append(errs, fmt.Errorf("%s signal threshold must be finite and nonnegative", rules.name))
+				}
+				if _, ok := tierRank(rule.Floor); !ok {
+					errs = append(errs, fmt.Errorf("unknown %s signal floor tier: %s", rules.name, rule.Floor))
+				}
+			}
+		}
+	}
+	validateRouting()
 
 	modelIDs := make(map[string]struct{}, len(cfg.Models))
 	for _, model := range cfg.Models {
@@ -146,15 +237,51 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		if _, ok := tierRank(model.Tier); !ok {
 			errs = append(errs, fmt.Errorf("unknown tier for model %s: %s", model.ID, model.Tier))
 		}
-		if model.InputPrice < 0 {
-			errs = append(errs, fmt.Errorf("negative input price for model %s", model.ID))
+		for _, value := range []struct {
+			name  string
+			value float64
+		}{
+			{"input price", model.InputPrice},
+			{"cached input price", model.CachedInputPriceUSDPerMillion},
+			{"output price", model.OutputPrice},
+			{"per-request price", model.PerRequestPriceUSD},
+		} {
+			if value.value < 0 {
+				errs = append(errs, fmt.Errorf("negative %s for model %s", value.name, model.ID))
+				continue
+			}
+			if !nonnegativeFinite(value.value) {
+				errs = append(errs, fmt.Errorf("%s for model %s must be finite and nonnegative", value.name, model.ID))
+			}
 		}
-		if model.OutputPrice < 0 {
-			errs = append(errs, fmt.Errorf("negative output price for model %s", model.ID))
+		if model.ContextWindow < 0 {
+			errs = append(errs, fmt.Errorf("context window for model %s must not be negative", model.ID))
+		}
+		if model.MaxOutputTokens < 0 {
+			errs = append(errs, fmt.Errorf("maximum output tokens for model %s must not be negative", model.ID))
+		}
+		if model.LatencyP95 < 0 {
+			errs = append(errs, fmt.Errorf("P95 latency for model %s must not be negative", model.ID))
+		}
+		if !probability(model.SuccessPrior) {
+			errs = append(errs, fmt.Errorf("success prior for model %s must be finite and in [0, 1]", model.ID))
+		}
+		for task, prior := range model.TaskSuccessPriors {
+			if !probability(prior) {
+				errs = append(errs, fmt.Errorf("success prior for model %s task %s must be finite and in [0, 1]", model.ID, task))
+			}
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+func nonnegativeFinite(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func probability(value float64) bool {
+	return nonnegativeFinite(value) && value <= 1
 }
 
 func tierRank(tier string) (int, bool) {

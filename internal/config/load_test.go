@@ -2,10 +2,12 @@ package config
 
 import (
 	"encoding/base64"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShippedExampleReachesSecretValidation(t *testing.T) {
@@ -133,6 +135,39 @@ func TestValidateAcceptsZeroRetentionAsUnlimited(t *testing.T) {
 	}
 	if err := cfg.Validate(testEnv); err != nil {
 		t.Fatalf("expected valid unlimited-retention config, got %v", err)
+	}
+}
+
+func TestValidateRejectsNegativeRetentionMaintenanceInterval(t *testing.T) {
+	cfg := validConfig()
+	cfg.SQLite.RetentionMaintenanceInterval = -time.Second
+	if err := cfg.Validate(testEnv); err == nil {
+		t.Fatal("negative retention maintenance interval was accepted")
+	}
+}
+
+func TestValidateRejectsInvalidConfiguredPolicyValues(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*RoutingConfig)
+	}{
+		{name: "negative failure escalation cost", mutate: func(r *RoutingConfig) { r.FailureEscalationCostUSD = -0.01 }},
+		{name: "nonfinite latency penalty", mutate: func(r *RoutingConfig) { r.LatencyPenaltyUSDPerSecond = math.Inf(1) }},
+		{name: "negative direct cost limit", mutate: func(r *RoutingConfig) { r.MaxDirectCostUSD = -0.01 }},
+		{name: "nonfinite expected cost limit", mutate: func(r *RoutingConfig) { r.MaxExpectedCostUSD = math.NaN() }},
+		{name: "success probability above one", mutate: func(r *RoutingConfig) { r.MinSuccessProbability = 1.01 }},
+		{name: "Jev confidence below zero", mutate: func(r *RoutingConfig) { r.MinJevConfidence = -0.01 }},
+		{name: "negative latency limit", mutate: func(r *RoutingConfig) { r.MaxLatency = -time.Second }},
+		{name: "invalid reasoning threshold", mutate: func(r *RoutingConfig) { r.ReasoningFloors = []SignalFloorConfig{{Threshold: math.Inf(1), Floor: "T4"}} }},
+		{name: "invalid coding floor", mutate: func(r *RoutingConfig) { r.CodingFloors = []SignalFloorConfig{{Threshold: 1, Floor: "T9"}} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(&cfg.Routing)
+			if err := cfg.Validate(testEnv); err == nil {
+				t.Fatal("invalid policy configuration was accepted")
+			}
+		})
 	}
 }
 

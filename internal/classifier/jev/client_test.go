@@ -18,7 +18,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 )
 
-const validResponse = `{"model":"jev-1.13.0","answers":{"minimum_tier":{"type":"choice","choice":"T4","probabilities":{"T4":0.9,"T5":0.1},"confidence":0.8},"task_type":{"type":"choice","choice":"coding","probabilities":{"coding":1},"confidence":1},"reasoning_required":{"type":"score","score":4,"legend":{"4":"average"},"probabilities":{"4":1},"confidence":1},"coding_required":{"type":"score","score":4,"legend":{"4":"normal"},"confidence":1},"blast_radius":{"type":"score","score":2,"legend":{"2":"moderate"},"confidence":1},"underspecified":{"type":"noul","noul":0.2}},"usage":{"input_tokens":120,"output_tokens":20}}`
+const validResponse = `{"model":"jev-1.13.0","answers":{"minimum_tier":{"type":"choice","choice":"T4","probabilities":{"T4":0.9,"T5":0.1},"confidence":0.8},"task_type":{"type":"choice","choice":"coding","probabilities":{"coding":1},"confidence":1},"reasoning_required":{"type":"score","score":4,"legend":{"4":"average"},"probabilities":{"4":1},"confidence":0.61},"coding_required":{"type":"score","score":4,"legend":{"4":"normal"},"confidence":0.72},"blast_radius":{"type":"score","score":2,"legend":{"2":"moderate"},"confidence":0.83},"underspecified":{"type":"noul","noul":0.2}},"usage":{"input_tokens":120,"output_tokens":20}}`
 
 func sampleInput() classifier.Input {
 	return classifier.Input{Prompt: "private prompt: implement a parser", Features: domain.RequestFeatures{InputTokens: 120, ContextTokens: 400, MaxOutputTokens: 200, NeedsText: true, NeedsFunctions: true, HostedToolTypes: []string{"search"}}, CurrentModel: "current", AvailableModels: []string{"current", "other"}}
@@ -74,14 +74,21 @@ func TestClientClassifyMapsTypedAnswers(t *testing.T) {
 				}
 			}
 		}
-		var tiers map[string]any
-		if json.Unmarshal(req.Questions["minimum_tier"].Criteria, &tiers) != nil || len(tiers) != 7 {
-			t.Error("invalid tier criteria")
+		var tiers map[string]string
+		if err := json.Unmarshal(req.Questions["minimum_tier"].Criteria, &tiers); err != nil {
+			t.Fatalf("decode tier criteria: %v", err)
 		}
-		for _, tier := range []string{"T0", "T1", "T2", "T3", "T4", "T5", "T6"} {
-			if _, ok := tiers[tier]; !ok {
-				t.Errorf("missing tier %s", tier)
-			}
+		wantTiers := map[string]string{
+			"T0": "Trivial work, extraction, and classification",
+			"T1": "Normal generation",
+			"T2": "Very easy reasoning and very simple coding",
+			"T3": "Easy reasoning and simple coding",
+			"T4": "Average reasoning and normal coding",
+			"T5": "Difficult reasoning and complex coding",
+			"T6": "Very difficult reasoning and very complex coding",
+		}
+		if !reflect.DeepEqual(tiers, wantTiers) {
+			t.Errorf("tier criteria=%v, want %v", tiers, wantTiers)
 		}
 		var tasks map[string]any
 		if json.Unmarshal(req.Questions["task_type"].Criteria, &tasks) != nil || len(tasks) != 8 {
@@ -94,7 +101,7 @@ func TestClientClassifyMapsTypedAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MinimumTier != domain.T4 || got.TierConfidence != .8 || !reflect.DeepEqual(got.TierProbabilities, map[domain.Tier]float64{domain.T4: .9, domain.T5: .1}) || got.TaskType != domain.TaskCoding || got.TaskTypeConfidence != 1 || !reflect.DeepEqual(got.TaskTypeProbabilities, map[domain.TaskType]float64{domain.TaskCoding: 1}) || got.ReasoningScore != 4 || got.CodingScore != 4 || got.BlastRadius != 2 || got.Underspecified != .2 || got.ResolvedModel != "jev-1.13.0" || got.InputTokens != 120 || got.OutputTokens != 20 || got.Latency <= 0 || calls.Load() != 1 {
+	if got.MinimumTier != domain.T4 || got.TierConfidence != .8 || !reflect.DeepEqual(got.TierProbabilities, map[domain.Tier]float64{domain.T4: .9, domain.T5: .1}) || got.TaskType != domain.TaskCoding || got.TaskTypeConfidence != 1 || !reflect.DeepEqual(got.TaskTypeProbabilities, map[domain.TaskType]float64{domain.TaskCoding: 1}) || got.ReasoningScore != 4 || got.ReasoningConfidence != .61 || got.CodingScore != 4 || got.CodingConfidence != .72 || got.BlastRadius != 2 || got.BlastRadiusConfidence != .83 || got.Underspecified != .2 || got.ResolvedModel != "jev-1.13.0" || got.InputTokens != 120 || got.OutputTokens != 20 || got.Latency <= 0 || calls.Load() != 1 {
 		t.Fatalf("judgment=%+v calls=%d", got, calls.Load())
 	}
 }

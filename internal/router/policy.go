@@ -251,6 +251,11 @@ func (p *Policy) validate(in DecisionInput) error {
 				return fmt.Errorf("invalid Jev score")
 			}
 		}
+		for _, confidence := range []float64{j.ReasoningConfidence, j.CodingConfidence, j.BlastRadiusConfidence} {
+			if !probability(confidence) {
+				return fmt.Errorf("invalid Jev score confidence")
+			}
+		}
 	}
 	return nil
 }

@@ -115,6 +115,68 @@ func TestRepositoryPersistsDecisionWithoutPlaintext(t *testing.T) {
 	assertCount(t, reopened.SQL(), "schema_migrations", 1)
 }
 
+func TestRepositoryRoundTripsJevScoreConfidences(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "router.db")
+	db := openTestDB(t, path)
+	record := sampleRecord()
+	record.Judgment.ReasoningConfidence = .61
+	record.Judgment.CodingConfidence = .72
+	record.Judgment.BlastRadiusConfidence = .83
+	insertRecord(t, db, record)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestDB(t, path)
+	got, err := reopened.GetRequest(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Judgment == nil || got.Judgment.ReasoningConfidence != .61 || got.Judgment.CodingConfidence != .72 || got.Judgment.BlastRadiusConfidence != .83 {
+		t.Fatalf("score confidences were not preserved: %+v", got.Judgment)
+	}
+}
+
+func TestRepositoryReplaysActualPolicyDecisionAfterReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "router.db")
+	db := openTestDB(t, path)
+	minimum, maximum := domain.T3, domain.T6
+	input := router.DecisionInput{
+		Features: domain.RequestFeatures{InputTokens: 2_000, CachedInputTokens: 500, MaxOutputTokens: 200, NeedsText: true},
+		Models: []domain.Model{
+			{ID: "cheap", Provider: "provider", Tier: domain.T4, ContextWindow: 8_192, MaxOutputTokens: 1_024, Capabilities: domain.Capabilities{Text: true}, Pricing: domain.Pricing{InputPerMillion: .1, CachedInputPerMillion: .01, OutputPerMillion: .5, PerRequestUSD: .0001}, SuccessPriors: map[domain.TaskType]float64{domain.TaskCoding: .7}, DefaultSuccessPrior: .7, LatencyP95: 200 * time.Millisecond, Available: true, Order: 0},
+			{ID: "reliable", Provider: "provider", Tier: domain.T5, ContextWindow: 8_192, MaxOutputTokens: 1_024, Capabilities: domain.Capabilities{Text: true}, Pricing: domain.Pricing{InputPerMillion: .2, CachedInputPerMillion: .02, OutputPerMillion: 1, PerRequestUSD: .0002}, SuccessPriors: map[domain.TaskType]float64{domain.TaskCoding: .99}, DefaultSuccessPrior: .99, LatencyP95: 100 * time.Millisecond, Available: true, Order: 1},
+		},
+		Floor: domain.T3, TaskType: domain.TaskCoding, MinTier: &minimum, MaxTier: &maximum,
+		Judgment:            &domain.JevJudgment{MinimumTier: domain.T4, TierConfidence: .8, ReasoningScore: 4, ReasoningConfidence: .61, CodingConfidence: .72, BlastRadiusConfidence: .83},
+		ProviderCredentials: map[string]bool{"provider": true}, ProviderAvailability: map[string]bool{"provider": true},
+	}
+	policy := router.PolicyConfig{
+		FailureEscalationCost: .01, LatencyPenaltyPerSecond: .001, MinJevConfidence: .7,
+		ReasoningFloors: []router.SignalFloor{{Threshold: 4, Floor: domain.T5}},
+	}
+	decision, err := router.NewPolicy(policy).Decide(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := storage.RequestRecord{ID: "replay", Decision: decision, Replay: storage.ReplaySnapshot{Input: input, Policy: policy}}
+	insertRecord(t, db, record)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openTestDB(t, path)
+	got, err := reopened.GetRequest(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := router.NewPolicy(got.Replay.Policy).Decide(got.Replay.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(replayed, got.Decision) {
+		t.Fatalf("replayed decision differs\n got: %+v\nwant: %+v", replayed, got.Decision)
+	}
+}
+
 // Mutating callers' or readers' nested maps/slices must not change stored replay.
 func TestGetRequestReturnsIndependentSnapshots(t *testing.T) {
 	db := openTestDB(t, filepath.Join(t.TempDir(), "router.db"))

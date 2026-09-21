@@ -15,14 +15,17 @@ type RequestFeatures struct {
 // JevJudgment is the classifier signal consumed by deterministic routing
 // policy. It intentionally contains no provider-specific behavior.
 type JevJudgment struct {
-	MinimumTier                                              Tier
-	TierConfidence                                           float64
-	TierProbabilities                                        map[Tier]float64
-	TaskType                                                 TaskType
-	TaskTypeConfidence                                       float64
-	TaskTypeProbabilities                                    map[TaskType]float64
-	ReasoningScore, CodingScore, BlastRadius, Underspecified float64
-	ResolvedModel                                            string
-	InputTokens, OutputTokens                                int64
-	Latency                                                  time.Duration
+	MinimumTier                         Tier
+	TierConfidence                      float64
+	TierProbabilities                   map[Tier]float64
+	TaskType                            TaskType
+	TaskTypeConfidence                  float64
+	TaskTypeProbabilities               map[TaskType]float64
+	ReasoningScore, ReasoningConfidence float64
+	CodingScore, CodingConfidence       float64
+	BlastRadius, BlastRadiusConfidence  float64
+	Underspecified                      float64
+	ResolvedModel                       string
+	InputTokens, OutputTokens           int64
+	Latency                             time.Duration
 }

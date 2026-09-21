@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/storage"
 )
 
 func fixture(t *testing.T) (config.Config, map[string]string) {
@@ -117,6 +119,156 @@ func TestCloseIsConcurrentIdempotentAndReleasesSQLite(t *testing.T) {
 		t.Fatal("closed app operational state is incorrect")
 	}
 }
+
+func TestFiniteRetentionMaintenanceDeletesOnlyEncryptedContent(t *testing.T) {
+	cfg, env := fixture(t)
+	cfg.SQLite.Retention = time.Hour
+	cfg.SQLite.RetentionMaintenanceInterval = time.Minute
+	clock := newManualRetentionClock(time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC))
+	completed := make(chan error, 1)
+	var a *App
+	var err error
+	a, err = newWithLookupWithMaintenance(context.Background(), cfg, lookup(env), retentionMaintenanceOptions{
+		Clock:            clock,
+		OperationTimeout: time.Second,
+		DeleteExpiredContent: func(ctx context.Context, retention time.Duration, now time.Time) (int64, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				return 0, errors.New("retention operation has no deadline")
+			}
+			return a.store.DeleteExpiredContent(ctx, retention, now)
+		},
+		OnCycleComplete: func(err error) { completed <- err },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	record := storage.RequestRecord{
+		ID:         "expired-content",
+		CreatedAt:  clock.Now().Add(-time.Hour - time.Nanosecond),
+		Prompt:     []byte("expired prompt"),
+		Answer:     []byte("expired answer"),
+		RawContent: []byte("expired raw content"),
+		RejectedOutputs: [][]byte{
+			[]byte("expired rejection"),
+		},
+		Decision: router.Decision{Tier: domain.T4, ModelID: "first", Provider: "provider", Reasons: []string{"retained telemetry"}},
+	}
+	if err := a.store.WithTx(context.Background(), func(tx storage.Tx) error { return tx.InsertRequest(record) }); err != nil {
+		t.Fatal(err)
+	}
+	clock.Tick()
+	if err := <-completed; err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.store.GetRequest(context.Background(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Prompt != nil || got.Answer != nil || got.RawContent != nil || len(got.RejectedOutputs) != 0 || !reflect.DeepEqual(got.Decision, record.Decision) {
+		t.Fatalf("retention removed telemetry or left encrypted content: %+v", got)
+	}
+}
+
+func TestZeroRetentionDoesNotStartMaintenance(t *testing.T) {
+	cfg, env := fixture(t)
+	clock := newManualRetentionClock(time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC))
+	a, err := newWithLookupWithMaintenance(context.Background(), cfg, lookup(env), retentionMaintenanceOptions{Clock: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	if a.maintenance != nil || clock.newTickerCalls != 0 {
+		t.Fatalf("unlimited retention started maintenance: maintenance=%v ticks=%d", a.maintenance, clock.newTickerCalls)
+	}
+}
+
+func TestRetentionMaintenanceFailureChangesReadiness(t *testing.T) {
+	cfg, env := fixture(t)
+	cfg.SQLite.Retention = time.Hour
+	clock := newManualRetentionClock(time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC))
+	completed := make(chan error, 1)
+	a, err := newWithLookupWithMaintenance(context.Background(), cfg, lookup(env), retentionMaintenanceOptions{
+		Clock: clock,
+		DeleteExpiredContent: func(context.Context, time.Duration, time.Time) (int64, error) {
+			return 0, errors.New("retention delete failed")
+		},
+		OnCycleComplete: func(err error) { completed <- err },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	clock.Tick()
+	if err := <-completed; err == nil {
+		t.Fatal("maintenance failure was lost")
+	}
+	if status(a, "/healthz") != http.StatusOK || status(a, "/readyz") != http.StatusServiceUnavailable {
+		t.Fatal("maintenance failure did not change readiness independently of health")
+	}
+}
+
+func TestCloseWaitsForRetentionMaintenanceBeforeClosingSQLite(t *testing.T) {
+	cfg, env := fixture(t)
+	cfg.SQLite.Retention = time.Hour
+	clock := newManualRetentionClock(time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC))
+	started := make(chan struct{})
+	pingWhileStopping := make(chan error, 1)
+	var a *App
+	var err error
+	a, err = newWithLookupWithMaintenance(context.Background(), cfg, lookup(env), retentionMaintenanceOptions{
+		Clock: clock,
+		DeleteExpiredContent: func(ctx context.Context, _ time.Duration, _ time.Time) (int64, error) {
+			close(started)
+			<-ctx.Done()
+			pingWhileStopping <- a.store.SQL().Ping()
+			return 0, ctx.Err()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	clock.Tick()
+	<-started
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-pingWhileStopping; err != nil {
+		t.Fatalf("SQLite closed before retention maintenance stopped: %v", err)
+	}
+	if err := a.store.SQL().Ping(); err == nil {
+		t.Fatal("SQLite remains open after shutdown")
+	}
+}
+
+type manualRetentionTicker struct {
+	ch      chan time.Time
+	stop    sync.Once
+	stopped chan struct{}
+}
+
+func (t *manualRetentionTicker) C() <-chan time.Time { return t.ch }
+func (t *manualRetentionTicker) Stop()               { t.stop.Do(func() { close(t.stopped) }) }
+
+type manualRetentionClock struct {
+	now            time.Time
+	ticker         *manualRetentionTicker
+	newTickerCalls int
+}
+
+func newManualRetentionClock(now time.Time) *manualRetentionClock {
+	return &manualRetentionClock{now: now, ticker: &manualRetentionTicker{ch: make(chan time.Time, 1), stopped: make(chan struct{})}}
+}
+
+func (c *manualRetentionClock) Now() time.Time { return c.now }
+
+func (c *manualRetentionClock) NewTicker(time.Duration) retentionTicker {
+	c.newTickerCalls++
+	return c.ticker
+}
+
+func (c *manualRetentionClock) Tick() { c.ticker.ch <- c.now }
 
 func TestNewFailsWhenEncryptionKeyIsMissing(t *testing.T) {
 	cfg, env := fixture(t)

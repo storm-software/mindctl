@@ -178,3 +178,28 @@ func hasRejection(rejections []Rejection, modelID string, code RejectionCode) bo
 func tierPtr(tier domain.Tier) *domain.Tier {
 	return &tier
 }
+
+func TestHostedToolsRequireEnabledEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tools   map[string]bool
+		allowed bool
+	}{
+		{name: "nil", tools: nil, allowed: false},
+		{name: "false only", tools: map[string]bool{"search": false}, allowed: false},
+		{name: "mixed", tools: map[string]bool{"search": false, "execute": true}, allowed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, rejected := EligibleModels(EligibilityInput{
+				Models:   []domain.Model{{ID: "model", Available: true, Capabilities: domain.Capabilities{HostedTools: tc.tools}}},
+				Features: domain.RequestFeatures{NeedsHostedTools: true},
+			})
+			if (len(got) == 1) != tc.allowed {
+				t.Fatalf("eligible=%d, allowed=%t", len(got), tc.allowed)
+			}
+			if !tc.allowed && (len(rejected) != 1 || rejected[0].Code != RejectTools) {
+				t.Fatalf("rejected=%+v", rejected)
+			}
+		})
+	}
+}

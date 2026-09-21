@@ -103,7 +103,14 @@ func EligibleModels(input EligibilityInput) ([]domain.Model, []Rejection) {
 		}
 		if input.Features.NeedsHostedTools || len(input.Features.HostedToolTypes) > 0 {
 			if len(input.Features.HostedToolTypes) == 0 {
-				if len(model.Capabilities.HostedTools) == 0 {
+				enabled := false
+				for _, available := range model.Capabilities.HostedTools {
+					if available {
+						enabled = true
+						break
+					}
+				}
+				if !enabled {
 					add(RejectTools, "model lacks hosted tool support")
 				}
 			} else {

@@ -5,16 +5,21 @@ client_auth:
   token_env: MINDCTL_GATEWAY_TOKEN
 
 jev:
-  base_url: https://jev.example.com
-  model: jev-system-one
+  base_url: https://api.typesafe.ai
+  # Replace with the exact versioned Jev model selected and evaluated by the
+  # operator for this deployment. Do not deploy a moving alias.
+  model: operator-selected-evaluated-pin
   api_key_env: JEV_API_KEY
   timeout: 0s
   max_retries: 3
 
 sqlite:
   path: mindctl.db
-  # Zero is the default and means unlimited raw-content retention.
-  retention: 0s
+  # A finite duration enables app-owned deletion of encrypted content only.
+  # Set this to 0s for unlimited retention, which starts no maintenance task.
+  retention: 720h
+  # Used only for finite retention; 0s uses the bounded one-minute default.
+  retention_maintenance_interval: 15m
 
 encryption:
   active_key_id: primary
@@ -25,6 +30,19 @@ routing:
   min_tier: T0
   max_tier: T6
   safe_fallback_tier: T4
+  # All cost values are USD. Zero disables an optional budget or penalty.
+  failure_escalation_cost_usd: 0
+  latency_penalty_usd_per_second: 0
+  min_success_probability: 0
+  max_direct_cost_usd: 0
+  max_expected_cost_usd: 0
+  max_latency: 0s
+  # Zero retains the policy's safe 0.7 confidence default.
+  min_jev_confidence: 0
+  reasoning_floors: []
+  coding_floors: []
+  risk_floors: []
+  underspecification_floors: []
 
 providers:
   - id: openai
@@ -37,8 +55,15 @@ models:
     tier: T4
     capabilities: [chat, tools]
     context_window: 128000
+    # Positive output reservations require this configured capacity.
+    max_output_tokens: 16384
     available: true
+    # input_price and output_price are USD per million tokens.
     input_price: 0
+    cached_input_price_usd_per_million: 0
     output_price: 0
+    per_request_price_usd: 0
+    # Zero means no P95 latency prior is configured.
+    latency_p95: 0s
     success_prior: 1
     task_success_priors: {}
