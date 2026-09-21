@@ -11,6 +11,7 @@ out
 .nx
 
 graphify-out
+.worktrees/
 
 powerlines.d.ts
 .powerlines
