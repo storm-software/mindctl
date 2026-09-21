@@ -131,6 +131,34 @@ func TestGeminiStreamNormalizesTextFunctionAndCompletion(t *testing.T) {
 	}
 }
 
+func TestGeminiStreamEmitsEveryTextPartFromOneFrame(t *testing.T) {
+	stream := geminiSSEStream(t, `{"responseId":"resp_1","candidates":[{"content":{"role":"model","parts":[{"text":"first"},{"text":"second"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`)
+	defer stream.Close()
+
+	first, err := stream.Next(context.Background())
+	if err != nil || first.Delta != "first" || first.ResponseID != "resp_1" || first.Status != "completed" || !first.Usage.Known || first.ProviderRequestID != "gemini-stream-req" {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	second, err := stream.Next(context.Background())
+	if err != nil || second.Delta != "second" || second.ResponseID != "resp_1" || second.Status != "completed" || !second.Usage.Known || second.ProviderRequestID != "gemini-stream-req" {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+}
+
+func TestGeminiStreamEmitsMixedTextAndFunctionPartsFromOneFrame(t *testing.T) {
+	stream := geminiSSEStream(t, `{"responseId":"resp_1","candidates":[{"content":{"role":"model","parts":[{"text":"use tool"},{"functionCall":{"name":"lookup","args":{"city":"Boston"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2}}`)
+	defer stream.Close()
+
+	text, err := stream.Next(context.Background())
+	if err != nil || text.Delta != "use tool" || text.Type != "response.output_text.delta" {
+		t.Fatalf("text=%+v err=%v", text, err)
+	}
+	call, err := stream.Next(context.Background())
+	if err != nil || call.Type != "response.function_call_arguments.delta" || call.Name != "lookup" || call.ArgumentsDelta != `{"city":"Boston"}` || call.ResponseID != "resp_1" || call.Status != "completed" || !call.Usage.Known || call.ProviderRequestID != "gemini-stream-req" {
+		t.Fatalf("call=%+v err=%v", call, err)
+	}
+}
+
 func TestStreamEventMapsTextFrame(t *testing.T) {
 	event, _, _, err := streamEvent([]byte(`{"responseId":"resp_1","candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]}}]}`), "")
 	if err != nil || event.Delta != "hi" {
@@ -172,6 +200,20 @@ func TestGeminiStreamClassifiesProviderErrorWithoutBody(t *testing.T) {
 	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorRateLimit || normalized.RequestID != "gemini-stream-req" || strings.Contains(normalized.Error(), "secret") {
 		t.Fatalf("err=%v", err)
 	}
+}
+
+func geminiSSEStream(t *testing.T, frame string) provider.Stream {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("x-goog-request-id", "gemini-stream-req")
+		_, _ = io.WriteString(w, "data: "+frame+"\n\n")
+	}))
+	t.Cleanup(server.Close)
+	stream, err := newGemini(server.URL).Stream(context.Background(), geminiModel(), textRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stream
 }
 
 func geminiFixture(t *testing.T, check func(string, generateRequest), response string) *httptest.Server {

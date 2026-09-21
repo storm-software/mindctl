@@ -139,9 +139,15 @@ type stream struct {
 	requestID  string
 	responseID string
 	status     string
+	pending    []inference.Event
 }
 
 func (s *stream) Next(ctx context.Context) (inference.Event, error) {
+	if len(s.pending) != 0 {
+		event := s.pending[0]
+		s.pending = s.pending[1:]
+		return event, nil
+	}
 	frame, err := s.reader.Next(ctx)
 	if err != nil {
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
@@ -152,7 +158,7 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	if kind, ok := streamErrorKind(frame.Data); ok {
 		return inference.Event{}, &provider.Error{Kind: kind, RequestID: s.requestID, Err: errors.New("provider stream returned an error")}
 	}
-	event, responseID, status, err := streamEvent(frame.Data, s.responseID)
+	events, responseID, status, err := streamEvents(frame.Data, s.responseID)
 	if err != nil {
 		return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("invalid provider stream event")}
 	}
@@ -162,7 +168,11 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	if status != "" {
 		s.status = status
 	}
-	event.ProviderRequestID = s.requestID
+	for index := range events {
+		events[index].ProviderRequestID = s.requestID
+	}
+	event := events[0]
+	s.pending = append(s.pending, events[1:]...)
 	return event, nil
 }
 
@@ -181,6 +191,14 @@ func streamErrorKind(data []byte) (provider.ErrorKind, bool) {
 }
 
 func streamEvent(data []byte, previousResponseID string) (inference.Event, string, string, error) {
+	events, responseID, status, err := streamEvents(data, previousResponseID)
+	if err != nil {
+		return inference.Event{}, "", "", err
+	}
+	return events[0], responseID, status, nil
+}
+
+func streamEvents(data []byte, previousResponseID string) ([]inference.Event, string, string, error) {
 	var wire struct {
 		ResponseID     string          `json:"responseId"`
 		Candidates     []candidate     `json:"candidates"`
@@ -188,10 +206,10 @@ func streamEvent(data []byte, previousResponseID string) (inference.Event, strin
 		UsageMetadata  json.RawMessage `json:"usageMetadata"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
-		return inference.Event{}, "", "", err
+		return nil, "", "", err
 	}
 	if (wire.PromptFeedback != nil && nonEmptyJSON(wire.PromptFeedback.BlockReason)) || len(wire.Candidates) == 0 {
-		return inference.Event{}, "", "", errors.New("provider stream returned an error")
+		return nil, "", "", errors.New("provider stream returned an error")
 	}
 	responseID := wire.ResponseID
 	if responseID == "" {
@@ -202,30 +220,39 @@ func streamEvent(data []byte, previousResponseID string) (inference.Event, strin
 	if candidate.FinishReason != nil {
 		status, err := finishStatus(candidate.FinishReason)
 		if err != nil || status == "safety" {
-			return inference.Event{}, "", "", errors.New("invalid provider finish reason")
+			return nil, "", "", errors.New("invalid provider finish reason")
 		}
 		event.Type, event.Status = "response.completed", status
 	}
 	if len(wire.UsageMetadata) != 0 && string(wire.UsageMetadata) != "null" {
 		usage, err := parseUsage(wire.UsageMetadata)
 		if err != nil {
-			return inference.Event{}, "", "", err
+			return nil, "", "", err
 		}
 		event.Usage = usage
 	}
 	if len(candidate.Content.Parts) == 0 {
-		return event, responseID, event.Status, nil
+		return []inference.Event{event}, responseID, event.Status, nil
 	}
-	mapped := candidate.Content.Parts[0]
-	switch {
-	case mapped.Text != "":
-		event.Type, event.Delta = "response.output_text.delta", mapped.Text
-	case mapped.FunctionCall != nil:
-		arguments, err := json.Marshal(mapped.FunctionCall.Args)
-		if err != nil {
-			return inference.Event{}, "", "", err
+	events := make([]inference.Event, 0, len(candidate.Content.Parts))
+	for _, mapped := range candidate.Content.Parts {
+		partEvent := event
+		switch {
+		case mapped.Text != "":
+			partEvent.Type, partEvent.Delta = "response.output_text.delta", mapped.Text
+		case mapped.FunctionCall != nil:
+			arguments, err := json.Marshal(mapped.FunctionCall.Args)
+			if err != nil {
+				return nil, "", "", err
+			}
+			partEvent.Type, partEvent.ItemID, partEvent.CallID, partEvent.Name, partEvent.ArgumentsDelta = "response.function_call_arguments.delta", mapped.FunctionCall.Name, mapped.FunctionCall.Name, mapped.FunctionCall.Name, string(arguments)
+		default:
+			continue
 		}
-		event.Type, event.ItemID, event.CallID, event.Name, event.ArgumentsDelta = "response.function_call_arguments.delta", mapped.FunctionCall.Name, mapped.FunctionCall.Name, mapped.FunctionCall.Name, string(arguments)
+		events = append(events, partEvent)
 	}
-	return event, responseID, event.Status, nil
+	if len(events) == 0 {
+		events = append(events, event)
+	}
+	return events, responseID, event.Status, nil
 }
