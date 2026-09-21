@@ -70,11 +70,11 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 	if err != nil {
 		return nil, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, _, err := c.post(ctx, encoded, true)
+	response, requestID, err := c.post(ctx, encoded, true)
 	if err != nil {
 		return nil, err
 	}
-	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body)}, nil
+	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body), requestID: requestID}, nil
 }
 
 func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Response, string, error) {
@@ -118,13 +118,17 @@ func errorKind(status int) provider.ErrorKind {
 }
 
 type stream struct {
-	body   io.ReadCloser
-	reader *provider.SSEReader
+	body      io.ReadCloser
+	reader    *provider.SSEReader
+	requestID string
 }
 
 func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	frame, err := s.reader.Next(ctx)
 	if err != nil {
+		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("provider stream read failed")}
+		}
 		return inference.Event{}, err
 	}
 	if bytes.Equal(frame.Data, []byte("[DONE]")) {
@@ -132,8 +136,9 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	}
 	event, err := streamEvent(frame.Type, frame.Data)
 	if err != nil {
-		return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, Err: errors.New("invalid provider stream event")}
+		return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("invalid provider stream event")}
 	}
+	event.ProviderRequestID = s.requestID
 	return event, nil
 }
 

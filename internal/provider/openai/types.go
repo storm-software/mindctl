@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/storm-software/mindctl/internal/domain"
@@ -83,6 +84,9 @@ type responseUsage struct {
 }
 
 func toResponsesRequest(model domain.Model, request inference.Request, stream bool) (responsesRequest, error) {
+	if strings.TrimSpace(model.UpstreamID) == "" {
+		return responsesRequest{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider upstream model is not configured")}
+	}
 	if err := validateCapabilities(model, request); err != nil {
 		return responsesRequest{}, err
 	}
@@ -96,7 +100,7 @@ func toResponsesRequest(model domain.Model, request inference.Request, stream bo
 	for _, item := range request.Input {
 		encoded, err := json.Marshal(toResponseInput(item))
 		if err != nil {
-			return responsesRequest{}, err
+			return responsesRequest{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request item")}
 		}
 		result.Input = append(result.Input, encoded)
 	}
@@ -142,14 +146,11 @@ func validateCapabilities(model domain.Model, request inference.Request) error {
 		}
 	}
 	for _, tool := range request.Tools {
-		if tool.Type == "function" {
-			if !model.Capabilities.Functions {
-				return unsupported("functions")
-			}
-			continue
-		}
-		if !model.Capabilities.HostedTools[tool.Type] {
+		if tool.Type != "function" {
 			return unsupported(tool.Type)
+		}
+		if !model.Capabilities.Functions {
+			return unsupported("functions")
 		}
 	}
 	if request.TextFormat != nil && !model.Capabilities.JSONSchema {
@@ -160,12 +161,7 @@ func validateCapabilities(model domain.Model, request inference.Request) error {
 
 func unsupported(feature string) error { return &provider.UnsupportedFeatureError{Feature: feature} }
 
-func modelID(model domain.Model) string {
-	if model.UpstreamID != "" {
-		return model.UpstreamID
-	}
-	return model.ID
-}
+func modelID(model domain.Model) string { return model.UpstreamID }
 
 func fromResponsesResponse(response responsesResponse, model domain.Model, requestID string) inference.Result {
 	result := inference.Result{ID: response.ID, Model: modelID(model), ProviderRequestID: requestID, Status: response.Status, Usage: parseUsage(response.Usage)}
@@ -212,7 +208,9 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 		Arguments  string `json:"arguments"`
 		Text       string `json:"text"`
 		Response   *struct {
-			ID string `json:"id"`
+			ID     string          `json:"id"`
+			Status string          `json:"status"`
+			Usage  json.RawMessage `json:"usage"`
 		} `json:"response"`
 		Item *struct {
 			ID     string `json:"id"`
@@ -236,6 +234,10 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 		frame.Name = frame.Item.Name
 	}
 	event := inference.Event{Type: kind, ResponseID: frame.ResponseID, ItemID: frame.ItemID, CallID: frame.CallID, Name: frame.Name, Data: append(json.RawMessage(nil), data...)}
+	if frame.Response != nil {
+		event.Status = frame.Response.Status
+		event.Usage = parseUsage(frame.Response.Usage)
+	}
 	switch {
 	case strings.Contains(kind, "function_call_arguments"):
 		event.ArgumentsDelta = frame.Delta

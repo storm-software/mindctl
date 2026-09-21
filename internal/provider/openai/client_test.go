@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/storm-software/mindctl/internal/domain"
@@ -45,6 +46,44 @@ func TestOpenAIRejectsUnsupportedExplicitFeature(t *testing.T) {
 	}
 }
 
+func TestOpenAIRejectsConfiguredHostedToolWithoutNetworkCall(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	model := openAIModel()
+	model.Capabilities.HostedTools = map[string]bool{"computer_use": true}
+	_, err := newClient(server.URL).Execute(context.Background(), model, hostedToolRequest("computer_use"))
+	var unsupported *provider.UnsupportedFeatureError
+	if !errors.As(err, &unsupported) || unsupported.Feature != "computer_use" || calls.Load() != 0 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestOpenAIRejectsModelWithoutUpstreamIDBeforeNetworkCall(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	model := openAIModel()
+	model.UpstreamID = ""
+	_, err := newClient(server.URL).Execute(context.Background(), model, textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || calls.Load() != 0 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestOpenAISanitizesItemEncodingFailure(t *testing.T) {
+	model := openAIModel()
+	model.Capabilities.Images = true
+	request := textRequest()
+	request.Input = []inference.Item{{Type: "input_image", Role: "user", ImageURL: json.RawMessage("{")}}
+	_, err := newClient("unused").Execute(context.Background(), model, request)
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || normalized.RequestID != "" || normalized.Error() != "provider request failed (invalid_request)" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestOpenAIMissingUsageDoesNotPanic(t *testing.T) {
 	got := executeFixture(t, `{"id":"x","status":"completed","output":[]}`)
 	if got.Usage.Known {
@@ -74,6 +113,41 @@ func TestOpenAIStreamNormalizesTextAndToolEvents(t *testing.T) {
 	tool, err := stream.Next(context.Background())
 	if err != nil || tool.Type != "response.function_call_arguments.delta" || tool.CallID != "call_1" || tool.Name != "lookup" || tool.ArgumentsDelta != "{" {
 		t.Fatalf("event=%+v err=%v", tool, err)
+	}
+}
+
+func TestOpenAIStreamPreservesRequestIDOnEventsAndMalformedFrames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-request-id", "openai-stream-req")
+		_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\n\n")
+	}))
+	defer server.Close()
+	stream, err := newClient(server.URL).Stream(context.Background(), openAIModel(), textRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	_, err = stream.Next(context.Background())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorRetryable || normalized.RequestID != "openai-stream-req" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestOpenAIStreamNormalizesCompletionStatusAndUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-request-id", "openai-stream-req")
+		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1,\"input_tokens_details\":{\"cached_tokens\":2}}}}\n\n")
+	}))
+	defer server.Close()
+	stream, err := newClient(server.URL).Stream(context.Background(), openAIModel(), textRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	event, err := stream.Next(context.Background())
+	if err != nil || event.ProviderRequestID != "openai-stream-req" || event.ResponseID != "upstream" || event.Status != "completed" || !event.Usage.Known || event.Usage.InputTokens != 3 || event.Usage.CachedInputTokens != 2 {
+		t.Fatalf("event=%+v err=%v", event, err)
 	}
 }
 
