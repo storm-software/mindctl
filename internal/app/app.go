@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,7 +63,10 @@ func newWithLookup(ctx context.Context, cfg config.Config, lookup func(string) (
 	if err := cfg.Validate(getenv); err != nil {
 		return nil, err
 	}
-	if !validEndpoint(cfg.Jev.BaseURL) || cfg.Jev.Model == "" || cfg.Jev.Timeout < 0 || cfg.Jev.MaxRetries < 0 {
+	// Jev appends its API path to the base URL string. Even empty query or
+	// fragment markers would put that path in the wrong URL component.
+	if !validEndpoint(cfg.Jev.BaseURL) || strings.ContainsAny(cfg.Jev.BaseURL, "?#") ||
+		strings.TrimSpace(cfg.Jev.Model) == "" || cfg.Jev.Timeout < 0 || cfg.Jev.MaxRetries < 0 {
 		return nil, errors.New("invalid Jev configuration")
 	}
 	keys := make(map[string][]byte, len(cfg.Encryption.Keys))

@@ -148,6 +148,11 @@ func TestNewRejectsInvalidRuntimeConfigWithoutSecretValues(t *testing.T) {
 		{"all models disabled", func(cfg *config.Config, _ map[string]string) { cfg.Models[0].Available = false }},
 		{"unusable provider", func(cfg *config.Config, _ map[string]string) { cfg.Providers[0].BaseURL = "not-a-url" }},
 		{"invalid Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "not-a-url" }},
+		{"whitespace Jev model", func(cfg *config.Config, _ map[string]string) { cfg.Jev.Model = " \t\n" }},
+		{"query Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com?x=1" }},
+		{"empty query Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com?" }},
+		{"fragment Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com#section" }},
+		{"empty fragment Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com#" }},
 		{"invalid Jev retry count", func(cfg *config.Config, _ map[string]string) { cfg.Jev.MaxRetries = -1 }},
 		{"SQLite cannot open", func(cfg *config.Config, _ map[string]string) {
 			cfg.SQLite.Path = filepath.Join(t.TempDir(), "missing", "db")
