@@ -1,0 +1,44 @@
+# Environment-variable names are configuration; do not put secret values here.
+listen: ":8080"
+
+client_auth:
+  token_env: MINDCTL_GATEWAY_TOKEN
+
+jev:
+  base_url: https://jev.example.com
+  model: jev-system-one
+  api_key_env: JEV_API_KEY
+  timeout: 0
+  max_retries: 3
+
+sqlite:
+  path: mindctl.db
+  # Zero is the default and means unlimited raw-content retention.
+  retention: 0
+
+encryption:
+  active_key_id: primary
+  keys:
+    primary: MINDCTL_ENCRYPTION_KEY
+
+routing:
+  min_tier: T0
+  max_tier: T6
+  safe_fallback_tier: T4
+
+providers:
+  - id: openai
+    base_url: https://api.openai.com
+    api_key_env: OPENAI_API_KEY
+
+models:
+  - id: gpt-5
+    provider: openai
+    tier: T4
+    capabilities: [chat, tools]
+    context_window: 128000
+    available: true
+    input_price: 0
+    output_price: 0
+    success_prior: 1
+    task_success_priors: {}
