@@ -61,7 +61,7 @@ func TestNewInitializesStorageKeyringAndStableHandler(t *testing.T) {
 		t.Fatal("operational handler is not stable and ready")
 	}
 	var migrations int
-	if err := a.store.SQL().QueryRow("SELECT count(*) FROM schema_migrations").Scan(&migrations); err != nil || migrations != 1 {
+	if err := a.store.SQL().QueryRow("SELECT count(*) FROM schema_migrations").Scan(&migrations); err != nil || migrations != 2 {
 		t.Fatalf("migrations=%d err=%v", migrations, err)
 	}
 	old, err := contentcrypto.New("old", map[string][]byte{"old": bytes.Repeat([]byte{2}, 32)})

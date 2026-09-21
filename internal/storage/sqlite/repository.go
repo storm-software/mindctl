@@ -10,6 +10,7 @@ import (
 
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
 	"github.com/storm-software/mindctl/internal/storage"
 )
@@ -265,4 +266,258 @@ func (db *DB) DeleteExpiredContent(ctx context.Context, retention time.Duration,
 		return 0, failure("count expired content", err)
 	}
 	return count, nil
+}
+
+func (db *DB) CreateTurn(ctx context.Context, turn storage.NewTurn) error {
+	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		if turn.Conversation.ID == "" || turn.Conversation.ClientID == "" || turn.Response.ID == "" {
+			return failure("validate conversation turn", errors.New("conversation, client, and response IDs are required"))
+		}
+		created := turn.Response.CreatedAt
+		if created.IsZero() {
+			created = time.Now().UTC()
+		}
+		conversationCreated := turn.Conversation.CreatedAt
+		if conversationCreated.IsZero() {
+			conversationCreated = created
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO conversations
+			(id, client_id, created_at, escalation_floor) VALUES (?, ?, ?, ?)
+			ON CONFLICT(id) DO NOTHING`, turn.Conversation.ID, turn.Conversation.ClientID, conversationCreated.UnixNano(), turn.Conversation.Floor); err != nil {
+			return failure("insert conversation", err)
+		}
+		var owner string
+		if err := conn.QueryRowContext(ctx, "SELECT client_id FROM conversations WHERE id = ?", turn.Conversation.ID).Scan(&owner); err != nil {
+			return failure("read conversation owner", err)
+		}
+		if owner != turn.Conversation.ClientID {
+			return storage.ErrNotFound
+		}
+		var sequence int
+		if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence) + 1, 0) FROM responses WHERE conversation_id = ?", turn.Conversation.ID).Scan(&sequence); err != nil {
+			return failure("allocate response sequence", err)
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO responses (id, conversation_id, sequence, created_at, status)
+			VALUES (?, ?, ?, ?, 'pending')`, turn.Response.ID, turn.Conversation.ID, sequence, created.UnixNano()); err != nil {
+			return failure("insert response", err)
+		}
+		return insertTranscriptItems(ctx, conn, db.keyring, turn.Response.ID, "", turn.Input, created)
+	})
+}
+
+func (db *DB) GetConversationTurn(ctx context.Context, clientID, responseID string) (storage.ConversationTurn, error) {
+	var turn storage.ConversationTurn
+	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
+		var conversationCreated, responseCreated int64
+		var provider, model sql.NullString
+		var pinTier sql.NullInt64
+		if err := conn.QueryRowContext(ctx, `SELECT c.id, c.client_id, c.created_at, c.pin_provider, c.pin_model_id,
+			c.pin_tier, c.escalation_floor, r.id, r.conversation_id, r.sequence, r.created_at, r.status
+			FROM responses r JOIN conversations c ON c.id = r.conversation_id
+			WHERE c.client_id = ? AND r.id = ?`, clientID, responseID).Scan(
+			&turn.Conversation.ID, &turn.Conversation.ClientID, &conversationCreated, &provider, &model, &pinTier, &turn.Conversation.Floor,
+			&turn.Response.ID, &turn.Response.ConversationID, &turn.Response.Sequence, &responseCreated, &turn.Response.Status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return storage.ErrNotFound
+			}
+			return failure("read conversation response", err)
+		}
+		turn.Conversation.CreatedAt = time.Unix(0, conversationCreated).UTC()
+		turn.Response.CreatedAt = time.Unix(0, responseCreated).UTC()
+		if provider.Valid || model.Valid || pinTier.Valid {
+			if !provider.Valid || !model.Valid || !pinTier.Valid {
+				return failure("read conversation pin", errors.New("incomplete stored pin"))
+			}
+			turn.Conversation.Pin = &router.Pin{Provider: provider.String, ModelID: model.String, Floor: domain.Tier(pinTier.Int64)}
+		}
+		return db.readTranscript(ctx, conn, &turn)
+	})
+	if err != nil {
+		return storage.ConversationTurn{}, err
+	}
+	return turn, nil
+}
+
+func (db *DB) readTranscript(ctx context.Context, conn *sql.Conn, turn *storage.ConversationTurn) error {
+	rows, err := conn.QueryContext(ctx, `SELECT i.response_id, i.position, i.provider, i.key_id, i.version, i.nonce, i.ciphertext
+		FROM transcript_items i JOIN responses r ON r.id = i.response_id
+		WHERE r.conversation_id = ? AND r.sequence <= ? ORDER BY r.sequence, i.position`, turn.Conversation.ID, turn.Response.Sequence)
+	if err != nil {
+		return failure("read transcript", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entry storage.TranscriptItem
+		var envelope contentcrypto.Envelope
+		if err := rows.Scan(&entry.ResponseID, &entry.Position, &entry.Provider, &envelope.KeyID, &envelope.Version, &envelope.Nonce, &envelope.Ciphertext); err != nil {
+			return failure("decode transcript envelope", err)
+		}
+		plain, err := db.keyring.Decrypt(envelope)
+		if err != nil {
+			return failure("decrypt transcript", err)
+		}
+		if err := json.Unmarshal(plain, &entry.Item); err != nil {
+			return failure("decode transcript item", err)
+		}
+		turn.Transcript = append(turn.Transcript, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return failure("iterate transcript", err)
+	}
+	return nil
+}
+
+func (db *DB) BeginProviderAttempt(ctx context.Context, attempt storage.ProviderAttempt) error {
+	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		if attempt.ID == "" || attempt.ClientID == "" || attempt.ResponseID == "" {
+			return failure("validate provider attempt", errors.New("attempt, client, and response IDs are required"))
+		}
+		var responseStatus string
+		if err := conn.QueryRowContext(ctx, `SELECT r.status FROM responses r JOIN conversations c ON c.id = r.conversation_id
+			WHERE c.client_id = ? AND r.id = ?`, attempt.ClientID, attempt.ResponseID).Scan(&responseStatus); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return storage.ErrNotFound
+			}
+			return failure("read attempt response", err)
+		}
+		if responseStatus != "pending" {
+			return failure("begin provider attempt", errors.New("response is already completed"))
+		}
+		if attempt.Decision.Provider == "" || attempt.Decision.ModelID == "" || !attempt.Decision.Tier.Valid() {
+			return failure("validate provider decision", errors.New("provider, model, and valid tier are required"))
+		}
+		decision, err := json.Marshal(attempt.Decision)
+		if err != nil {
+			return failure("encode provider decision", err)
+		}
+		var sequence int
+		if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence) + 1, 0) FROM provider_attempts WHERE response_id = ?", attempt.ResponseID).Scan(&sequence); err != nil {
+			return failure("allocate attempt sequence", err)
+		}
+		created := attempt.CreatedAt
+		if created.IsZero() {
+			created = time.Now().UTC()
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO provider_attempts
+			(id, response_id, sequence, provider, model_id, tier, decision_json, status, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'started', ?)`, attempt.ID, attempt.ResponseID, sequence, attempt.Decision.Provider,
+			attempt.Decision.ModelID, attempt.Decision.Tier, string(decision), created.UnixNano()); err != nil {
+			return failure("insert provider attempt", err)
+		}
+		return nil
+	})
+}
+
+func (db *DB) CommitConversationResult(ctx context.Context, clientID, responseID string, pin router.Pin, result inference.Result) error {
+	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		if !pin.Floor.Valid() || pin.Provider == "" || pin.ModelID == "" {
+			return failure("validate conversation pin", errors.New("provider, model, and valid tier are required"))
+		}
+		var conversationID, status string
+		if err := conn.QueryRowContext(ctx, `SELECT c.id, r.status FROM responses r JOIN conversations c ON c.id = r.conversation_id
+			WHERE c.client_id = ? AND r.id = ?`, clientID, responseID).Scan(&conversationID, &status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return storage.ErrNotFound
+			}
+			return failure("read commit response", err)
+		}
+		if status != "pending" {
+			return failure("commit response", errors.New("response is already completed"))
+		}
+		now := time.Now().UTC()
+		if err := insertTranscriptItems(ctx, conn, db.keyring, responseID, pin.Provider, result.Output, now); err != nil {
+			return err
+		}
+		var floor domain.Tier
+		if err := conn.QueryRowContext(ctx, "SELECT escalation_floor FROM conversations WHERE id = ?", conversationID).Scan(&floor); err != nil {
+			return failure("read escalation floor", err)
+		}
+		if pin.Floor > floor {
+			floor = pin.Floor
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET pin_provider = ?, pin_model_id = ?, pin_tier = ?, escalation_floor = ? WHERE id = ?`,
+			pin.Provider, pin.ModelID, floor, floor, conversationID); err != nil {
+			return failure("update conversation pin", err)
+		}
+		if _, err := conn.ExecContext(ctx, "UPDATE responses SET status = 'completed' WHERE id = ?", responseID); err != nil {
+			return failure("complete response", err)
+		}
+		body, err := json.Marshal(result)
+		if err != nil {
+			return failure("encode provider result", err)
+		}
+		if err := completeLatestAttempt(ctx, conn, db.keyring, responseID, "succeeded", result.ProviderRequestID, body, now); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (db *DB) FailProviderAttempt(ctx context.Context, clientID, responseID, attemptID string, body []byte) error {
+	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM provider_attempts a JOIN responses r ON r.id = a.response_id
+			JOIN conversations c ON c.id = r.conversation_id WHERE c.client_id = ? AND r.id = ? AND a.id = ? AND a.status = 'started'`, clientID, responseID, attemptID).Scan(&count); err != nil {
+			return failure("read provider attempt", err)
+		}
+		if count == 0 {
+			return storage.ErrNotFound
+		}
+		return completeAttempt(ctx, conn, db.keyring, attemptID, "failed", "", body, time.Now().UTC())
+	})
+}
+
+func insertTranscriptItems(ctx context.Context, conn *sql.Conn, keyring *contentcrypto.Keyring, responseID, provider string, items []inference.Item, created time.Time) error {
+	var offset int
+	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM transcript_items WHERE response_id = ?", responseID).Scan(&offset); err != nil {
+		return failure("count transcript items", err)
+	}
+	for position, item := range items {
+		body, err := json.Marshal(item)
+		if err != nil {
+			return failure("encode transcript item", err)
+		}
+		envelope, err := keyring.Encrypt(body)
+		if err != nil {
+			return failure("encrypt transcript", err)
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO transcript_items
+			(response_id, position, provider, key_id, version, nonce, ciphertext, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			responseID, offset+position, provider, envelope.KeyID, envelope.Version, envelope.Nonce, envelope.Ciphertext, created.UnixNano()); err != nil {
+			return failure("insert transcript item", err)
+		}
+	}
+	return nil
+}
+
+func completeLatestAttempt(ctx context.Context, conn *sql.Conn, keyring *contentcrypto.Keyring, responseID, status, providerRequestID string, body []byte, completed time.Time) error {
+	var attemptID string
+	err := conn.QueryRowContext(ctx, `SELECT id FROM provider_attempts WHERE response_id = ? AND status = 'started' ORDER BY sequence DESC LIMIT 1`, responseID).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return failure("read latest provider attempt", err)
+	}
+	return completeAttempt(ctx, conn, keyring, attemptID, status, providerRequestID, body, completed)
+}
+
+func completeAttempt(ctx context.Context, conn *sql.Conn, keyring *contentcrypto.Keyring, attemptID, status, providerRequestID string, body []byte, completed time.Time) error {
+	envelope, err := keyring.Encrypt(body)
+	if err != nil {
+		return failure("encrypt provider body", err)
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE provider_attempts SET status = ?, provider_request_id = ?, key_id = ?, version = ?, nonce = ?, ciphertext = ?, completed_at = ?
+		WHERE id = ? AND status = 'started'`, status, providerRequestID, envelope.KeyID, envelope.Version, envelope.Nonce, envelope.Ciphertext, completed.UnixNano(), attemptID)
+	if err != nil {
+		return failure("complete provider attempt", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return failure("count completed provider attempt", err)
+	}
+	if count != 1 {
+		return storage.ErrNotFound
+	}
+	return nil
 }

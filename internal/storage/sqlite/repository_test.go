@@ -112,7 +112,7 @@ func TestRepositoryPersistsDecisionWithoutPlaintext(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, record) {
 		t.Fatalf("reopen lost data: %v", err)
 	}
-	assertCount(t, reopened.SQL(), "schema_migrations", 1)
+	assertCount(t, reopened.SQL(), "schema_migrations", 2)
 }
 
 func TestRepositoryRoundTripsJevScoreConfidences(t *testing.T) {
@@ -334,12 +334,12 @@ func TestMigrationsAreOrderedTransactionalAndIdempotent(t *testing.T) {
 		}
 	}
 	assertCount(t, db.SQL(), "second_migration", 1)
-	assertCount(t, db.SQL(), "schema_migrations", 3)
+	assertCount(t, db.SQL(), "schema_migrations", 4)
 	bad := fstest.MapFS{"004_bad.sql": {Data: []byte("CREATE TABLE incomplete (value INTEGER); INVALID SQL")}}
 	if err := migrate(context.Background(), db.SQL(), bad); err == nil {
 		t.Fatal("bad migration accepted")
 	}
-	assertCount(t, db.SQL(), "schema_migrations", 3)
+	assertCount(t, db.SQL(), "schema_migrations", 4)
 	var count int
 	if err := db.SQL().QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 'incomplete'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("failed migration left DDL: count=%d err=%v", count, err)

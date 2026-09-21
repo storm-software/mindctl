@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
 )
 
@@ -53,6 +54,66 @@ type RequestRecord struct {
 // including failures inadvertently ignored by the callback.
 type Tx interface {
 	InsertRequest(RequestRecord) error
+}
+
+// ConversationRecord contains durable, non-content conversation state.
+// Pin and Floor deliberately remain outside encrypted payloads so routing can
+// resume safely without decrypting captured content.
+type ConversationRecord struct {
+	ID, ClientID string
+	CreatedAt    time.Time
+	Pin          *router.Pin
+	Floor        domain.Tier
+}
+
+// ResponseRecord is a gateway-owned response identifier within a conversation.
+type ResponseRecord struct {
+	ID, ConversationID, Status string
+	Sequence                   int
+	CreatedAt                  time.Time
+}
+
+// TranscriptItem is canonical content plus the provider that is allowed to
+// consume its opaque ProviderData. An empty Provider means portable input.
+type TranscriptItem struct {
+	ResponseID string
+	Position   int
+	Provider   string
+	Item       inference.Item
+}
+
+// ConversationTurn is the complete portable transcript available at a response.
+type ConversationTurn struct {
+	Conversation ConversationRecord
+	Response     ResponseRecord
+	Transcript   []TranscriptItem
+}
+
+type NewTurn struct {
+	Conversation ConversationRecord
+	Response     ResponseRecord
+	Input        []inference.Item
+}
+
+// ProviderAttempt is written before any provider I/O. Decision is telemetry;
+// successful Result and failed Error bodies are encrypted by the repository.
+type ProviderAttempt struct {
+	ID, ClientID, ResponseID, Status string
+	Sequence                         int
+	Decision                         router.Decision
+	CreatedAt, CompletedAt           time.Time
+	Result                           *inference.Result
+	Error                            []byte
+}
+
+// ConversationRepository adds the transactional persistence needed by the
+// gateway-owned conversation service.
+type ConversationRepository interface {
+	CreateTurn(context.Context, NewTurn) error
+	GetConversationTurn(context.Context, string, string) (ConversationTurn, error)
+	BeginProviderAttempt(context.Context, ProviderAttempt) error
+	CommitConversationResult(context.Context, string, string, router.Pin, inference.Result) error
+	FailProviderAttempt(context.Context, string, string, string, []byte) error
 }
 
 type Repository interface {
