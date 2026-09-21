@@ -5,9 +5,11 @@ import "time"
 // RequestFeatures are deterministic requirements extracted from one request.
 type RequestFeatures struct {
 	InputTokens, ContextTokens, MaxOutputTokens int64
-	NeedsText, NeedsImages, NeedsFunctions      bool
-	NeedsJSONSchema, NeedsHostedTools           bool
-	HostedToolTypes                             []string
+	// CachedInputTokens is a subset of InputTokens, capped at InputTokens for pricing.
+	CachedInputTokens                      int64
+	NeedsText, NeedsImages, NeedsFunctions bool
+	NeedsJSONSchema, NeedsHostedTools      bool
+	HostedToolTypes                        []string
 }
 
 // JevJudgment is the classifier signal consumed by deterministic routing
