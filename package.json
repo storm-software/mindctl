@@ -1,11 +1,11 @@
 {
-  "name": "@powerlines-monorepo-template/monorepo",
+  "name": "@mindctl/monorepo",
   "version": "0.0.1",
   "type": "module",
   "description": "⚡ A monorepo containing TypeScript utility packages with shared functionality common to many Storm Software applications.",
   "repository": {
     "type": "github",
-    "url": "https://github.com/storm-software/powerlines-monorepo-template.git"
+    "url": "https://github.com/storm-software/mindctl.git"
   },
   "homepage": "https://stormsoftware.com",
   "bugs": {
@@ -29,10 +29,10 @@
     "pnpm": ">=11.1.2"
   },
   "keywords": [
-    "storm-software",
-    "template",
-    "github-template",
-    "monorepo"
+    "ai-agents",
+    "llm",
+    "ai-router",
+    "storm-software"
   ],
   "scripts": {
     "adr": "pnpm log4brains adr new",
@@ -108,7 +108,7 @@
     "defaultBranch": "main",
     "workspaceProtocol": "require"
   },
-  "namespace": "@powerlines-monorepo-template",
+  "namespace": "@mindctl",
   "nx": {
     "includedScripts": [
       "lint-knip",

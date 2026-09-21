@@ -1,6 +1,6 @@
 { ... }:
 {
-  name = "storm-software/powerlines-monorepo-template";
+  name = "storm-software/mindctl";
 
   dotenv.enable = true;
   dotenv.filename = [

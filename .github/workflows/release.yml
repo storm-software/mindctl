@@ -62,26 +62,6 @@ jobs:
     needs:
       - start
     steps:
-      - name: Checkout [Pull Request]
-        uses: actions/checkout@v4
-        if: ${{ github.event_name == 'pull_request' }}
-        with:
-          # By default, PRs will be checked-out based on the Merge Commit, but we want the actual branch HEAD.
-          ref: ${{ github.event.pull_request.head.sha }}
-          # We need to fetch all branches and commits so that Nx affected has a base to compare against.
-          fetch-depth: 0
-          token: ${{ secrets.STORM_BOT_GITHUB_TOKEN }}
-          persist-credentials: false
-
-      - name: Checkout `main` branch
-        uses: actions/checkout@v4
-        if: ${{ github.event_name != 'pull_request' }}
-        with:
-          # We need to fetch all branches and commits so that Nx affected has a base to compare against.
-          fetch-depth: 0
-          token: ${{ secrets.STORM_BOT_GITHUB_TOKEN }}
-          persist-credentials: false
-
       - name: Setup workspace
         uses: storm-software/action-devenv-setup@main
         with:
@@ -90,29 +70,24 @@ jobs:
           gpg-passphrase: ${{ secrets.STORM_BOT_GPG_PASSPHRASE }}
           storm-bot-github-token: ${{ secrets.STORM_BOT_GITHUB_TOKEN }}
 
-      - name: Derive appropriate SHAs for base and head for `nx affected` commands
-        id: setSHAs
-        uses: nrwl/nx-set-shas@v4
-        with:
-          main-branch-name: main
-          workflow-id: release.yml
-          set-environment-variables-for-job: true
-          error-on-no-successful-workflow: false
-
       - name: Release repository updates
-        run: devenv --profile production --no-tui shell release ${{
-          steps.setSHAs.outputs.base }} ${{ steps.setSHAs.outputs.head }}
-        env:
-          NX_BASE: ${{ steps.setSHAs.outputs.base }}
-          NX_HEAD: ${{ steps.setSHAs.outputs.head }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ github.token }}
-          STORM_BOT_GITHUB_TOKEN: ${{ secrets.STORM_BOT_GITHUB_TOKEN }}
-          STORM_WORKSPACE_ROOT: ${{ github.workspace }}
-          STORM_REPOSITORY: ${{ github.repositoryUrl }}
-          NPM_TOKEN: ${{ secrets.STORM_BOT_NPM_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.STORM_BOT_CLOUDFLARE_TOKEN }}
-          TAG: ${{ inputs.tag }}
+        uses: storm-software/action-release@main
+        with:
+          tag: ${{ inputs.tag }}
+          env: |
+            {
+              "GITHUB_ACTOR": "${{ github.actor }}",
+              "GITHUB_REPOSITORY": "${{ github.repository }}",
+              "GITHUB_TOKEN": "${{ github.token }}",
+              "STORM_BOT_GITHUB_TOKEN": "${{ secrets.STORM_BOT_GITHUB_TOKEN }}",
+              "STORM_WORKSPACE_ROOT": "${{ github.workspace }}",
+              "STORM_REPOSITORY": "${{ github.repositoryUrl }}",
+              "NPM_TOKEN": "${{ secrets.STORM_BOT_NPM_TOKEN }}",
+              "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.STORM_BOT_CLOUDFLARE_ACCOUNT }}",
+              "CLOUDFLARE_API_TOKEN": "${{ secrets.STORM_BOT_CLOUDFLARE_TOKEN }}",
+              "ACCESS_KEY_ID": "${{ secrets.CYCLONE_REGISTRY_ACCESS_KEY }}",
+              "SECRET_ACCESS_KEY": "${{ secrets.CYCLONE_REGISTRY_SECRET_KEY }}"
+            }
 
   success:
     needs:

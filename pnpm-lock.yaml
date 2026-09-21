@@ -312,9 +312,9 @@ catalogs:
       version: 8.8.5
 
 overrides:
-  '@powerlines-monorepo-template/tools-config': workspace:*
-  '@powerlines-monorepo-template/tools-scripts': workspace:*
-  '@powerlines-monorepo-template/tools-cspell': workspace:*
+  '@mindctl/tools-config': workspace:*
+  '@mindctl/tools-scripts': workspace:*
+  '@mindctl/tools-cspell': workspace:*
   cookie: '>=0.7.0'
   debug: '>=4.4.0'
   follow-redirects: '>=1.15.9'
@@ -2556,6 +2556,7 @@ packages:
   '@opentelemetry/context-base@0.14.0':
     resolution: {integrity: sha512-sDOAZcYwynHFTbLo6n8kIbLiVF3a3BLkrmehJUyEbT9F+Smbi47kLGS2gG2g0fjBLR/Lr1InPD7kXL7FaTqEkw==}
     engines: {node: '>=8.0.0'}
+    deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
   '@oxc-parser/binding-android-arm-eabi@0.126.0':
     resolution: {integrity: sha512-svyoHt25J4741QJ5aa4R+h0iiBeSRt63Lr3aAZcxy2c/NeSE1IfDeMnSij6rIg7EjxkdlXzz613wUjeCeilBNA==}

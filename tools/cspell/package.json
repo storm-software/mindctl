@@ -1,5 +1,5 @@
 {
-  "name": "@powerlines-monorepo-template/tools-cspell",
+  "name": "@mindctl/tools-cspell",
   "version": "0.0.0",
   "private": true
 }

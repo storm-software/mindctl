@@ -1,5 +1,5 @@
 {
-  "name": "@powerlines-monorepo-template/tools-scripts",
+  "name": "@mindctl/tools-scripts",
   "version": "0.0.1",
   "type": "module",
   "private": true,

@@ -5,13 +5,8 @@ inputs:
     flake: false
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
-  nixpkgs-unstable:
-    url: github:nixos/nixpkgs/nixpkgs-unstable
-  treefmt-nix:
-    url: github:numtide/treefmt-nix
-    inputs:
-      nixpkgs:
-        follows: nixpkgs
 imports:
-  - storm-ops/devenv-modules/base
-  - storm-ops/devenv-modules/core
+  - storm-ops/devenv-modules/pnpm
+  - storm-ops/devenv-modules/go
+  - storm-ops/devenv-modules/graphify
+  - storm-ops/devenv-modules/agents
