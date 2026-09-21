@@ -90,6 +90,44 @@ func TestEligibleModelsPreservesEveryHardConstraint(t *testing.T) {
 	}
 }
 
+func TestEligibleModelsRetainsEveryMissingCapabilityReason(t *testing.T) {
+	got, rejected := EligibleModels(EligibilityInput{
+		Models: []domain.Model{{
+			ID:        "limited",
+			Provider:  "provider-a",
+			Tier:      domain.T4,
+			Available: true,
+		}},
+		Features: domain.RequestFeatures{
+			NeedsText:        true,
+			NeedsImages:      true,
+			NeedsFunctions:   true,
+			NeedsJSONSchema:  true,
+			NeedsHostedTools: true,
+			HostedToolTypes:  []string{"web_search"},
+		},
+	})
+
+	if len(got) != 0 || len(rejected) != 1 {
+		t.Fatalf("eligible=%v rejected=%v", got, rejected)
+	}
+	wantReasons := []string{
+		"model lacks text support",
+		"model lacks image support",
+		"model lacks custom function support",
+		"model lacks JSON Schema support",
+		"model lacks hosted tool support: web_search",
+	}
+	if len(rejected[0].Reasons) != len(wantReasons) {
+		t.Fatalf("reasons=%v", rejected[0].Reasons)
+	}
+	for index, want := range wantReasons {
+		if rejected[0].Reasons[index] != want {
+			t.Fatalf("reasons[%d]=%q, want %q", index, rejected[0].Reasons[index], want)
+		}
+	}
+}
+
 func TestEligibleModelsAppliesMinimumAndMaximumTierBounds(t *testing.T) {
 	models := []domain.Model{
 		{ID: "low", Tier: domain.T3, Available: true},

@@ -65,11 +65,6 @@ func EligibleModels(input EligibilityInput) ([]domain.Model, []Rejection) {
 		codes := append([]RejectionCode(nil), boundCodes...)
 		reasons := append([]string(nil), boundReasons...)
 		add := func(code RejectionCode, reason string) {
-			for _, existing := range codes {
-				if existing == code {
-					return
-				}
-			}
 			codes = append(codes, code)
 			reasons = append(reasons, reason)
 		}
@@ -94,9 +89,11 @@ func EligibleModels(input EligibilityInput) ([]domain.Model, []Rejection) {
 			add(RejectOutput, "model output limit is too small")
 		}
 
-		if (input.Features.NeedsText && !model.Capabilities.Text) ||
-			(input.Features.NeedsImages && !model.Capabilities.Images) {
-			add(RejectModality, "model lacks a required modality")
+		if input.Features.NeedsText && !model.Capabilities.Text {
+			add(RejectModality, "model lacks text support")
+		}
+		if input.Features.NeedsImages && !model.Capabilities.Images {
+			add(RejectModality, "model lacks image support")
 		}
 		if input.Features.NeedsFunctions && !model.Capabilities.Functions {
 			add(RejectTools, "model lacks custom function support")
@@ -156,11 +153,6 @@ func eligibilityBounds(input EligibilityInput) (domain.Tier, *domain.Tier, []Rej
 	var codes []RejectionCode
 	var reasons []string
 	add := func(code RejectionCode, reason string) {
-		for _, existing := range codes {
-			if existing == code {
-				return
-			}
-		}
 		codes = append(codes, code)
 		reasons = append(reasons, reason)
 	}
