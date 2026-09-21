@@ -8,6 +8,13 @@ import (
 	"testing"
 )
 
+func TestShippedExampleReachesSecretValidation(t *testing.T) {
+	_, err := Load("../../config.example.yaml", func(string) (string, bool) { return "", false })
+	if err == nil || !strings.Contains(err.Error(), "MINDCTL_GATEWAY_TOKEN") {
+		t.Fatalf("shipped example did not reach runtime secret validation: %v", err)
+	}
+}
+
 func TestLoadRejectsUnknownField(t *testing.T) {
 	path := writeConfig(t, "listen: ':8080'\nunknown: true\n")
 	_, err := Load(path, func(string) (string, bool) { return "", false })

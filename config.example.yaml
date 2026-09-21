@@ -8,13 +8,13 @@ jev:
   base_url: https://jev.example.com
   model: jev-system-one
   api_key_env: JEV_API_KEY
-  timeout: 0
+  timeout: 0s
   max_retries: 3
 
 sqlite:
   path: mindctl.db
   # Zero is the default and means unlimited raw-content retention.
-  retention: 0
+  retention: 0s
 
 encryption:
   active_key_id: primary
