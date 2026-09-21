@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -21,6 +22,13 @@ func Load(path string, getenv func(string) (string, bool)) (Config, error) {
 	var cfg Config
 	if err := decoder.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return Config{}, fmt.Errorf("decode config: %w", err)
+		}
+		return Config{}, fmt.Errorf("decode config: multiple YAML documents are not allowed")
 	}
 	if cfg.Routing.SafeFallbackTier == "" {
 		cfg.Routing.SafeFallbackTier = "T4"

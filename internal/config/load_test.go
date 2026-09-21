@@ -16,6 +16,39 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsSecondDocument(t *testing.T) {
+	path := writeConfig(t, `
+listen: ":8080"
+client_auth:
+  token_env: GATEWAY_TOKEN
+jev:
+  api_key_env: JEV_API_KEY
+sqlite:
+  path: mindctl.db
+encryption:
+  active_key_id: active
+  keys:
+    active: ENCRYPTION_KEY
+routing:
+  min_tier: T0
+  max_tier: T6
+providers:
+  - id: openai
+    api_key_env: OPENAI_API_KEY
+models:
+  - id: gpt-test
+    provider: openai
+    tier: T4
+---
+unknown: true
+`)
+
+	_, err := Load(path, testEnv)
+	if err == nil || !strings.Contains(err.Error(), "multiple YAML documents") {
+		t.Fatalf("expected second-document error, got %v", err)
+	}
+}
+
 func TestLoadDefaultsSafeFallbackToT4(t *testing.T) {
 	path := writeConfig(t, `
 listen: ":8080"
