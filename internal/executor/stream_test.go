@@ -66,6 +66,22 @@ func TestStreamEscalatesExplicitModelAfterPreEmissionFailureWhenAllowed(t *testi
 	}
 }
 
+func TestStreamStopsAfterEveryExplicitEscalationCandidateFails(t *testing.T) {
+	deps := newStreamDependencies(failingStream(), failingStream())
+	input := deps.input()
+	input.Request.Model = "first"
+	allow := true
+	input.AllowEscalation = &allow
+
+	err := deps.executor.Stream(context.Background(), input, deps.writer)
+	if err == nil {
+		t.Fatal("stream unexpectedly succeeded")
+	}
+	if deps.provider.calls != 2 || len(deps.provider.models) != 2 || deps.provider.models[0] != "first" || deps.provider.models[1] != "second" {
+		t.Fatalf("calls=%d models=%v err=%v", deps.provider.calls, deps.provider.models, err)
+	}
+}
+
 func TestStreamRaisesNextTierAfterVisibleFailureWithSQLiteConversation(t *testing.T) {
 	conversations := sqliteStreamConversation(t)
 	adapter := &scriptedProvider{streams: []provider.Stream{streamThenFail("partial")}}

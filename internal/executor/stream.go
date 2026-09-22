@@ -50,6 +50,11 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		return err
 	}
 	decisions := s.streamCandidates(in, decision)
+	explicitAlternativesExpanded := false
+	scheduled := make(map[string]struct{}, len(decisions))
+	for _, candidate := range decisions {
+		scheduled[candidate.Provider+"\x00"+candidate.ModelID] = struct{}{}
+	}
 	emitted := false
 	var lastErr error
 	for index := 0; index < len(decisions); index++ {
@@ -122,13 +127,21 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 			}
 			return lastErr
 		}
-		if retryableStreamError(err) && index == len(decisions)-1 {
+		if retryableStreamError(err) && index == len(decisions)-1 && !explicitAlternativesExpanded {
+			explicitAlternativesExpanded = true
 			additional, candidateErr := s.explicitStreamCandidates(in, turn, decision)
 			if candidateErr != nil {
 				return errors.Join(lastErr, candidateErr)
 			}
-			if len(additional) != 0 {
-				decisions = append(decisions, additional...)
+			for _, candidate := range additional {
+				identity := candidate.Provider + "\x00" + candidate.ModelID
+				if _, ok := scheduled[identity]; ok {
+					continue
+				}
+				scheduled[identity] = struct{}{}
+				decisions = append(decisions, candidate)
+			}
+			if index < len(decisions)-1 {
 				continue
 			}
 		}
