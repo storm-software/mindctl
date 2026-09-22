@@ -58,7 +58,7 @@ func configuredApp(t *testing.T, routing, models string) *App {
 const routingBounds = "min_tier: T0\nmax_tier: T6\n"
 const policyModels = `
 - id: cheap
-  provider: provider
+  provider: openai
   tier: T4
   available: true
   capabilities: [text]
@@ -71,7 +71,7 @@ const policyModels = `
   latency_p95: 2s
   success_prior: 0.75
 - id: reliable
-  provider: provider
+  provider: openai
   tier: T5
   available: true
   capabilities: [text]
@@ -132,7 +132,7 @@ func TestConfiguredExpectedCostAndLimits(t *testing.T) {
 func TestBootstrapFallsBackToInputPriceForLegacyCachedPriceOmission(t *testing.T) {
 	legacy := configuredApp(t, routingBounds, `
 - id: legacy
-  provider: provider
+  provider: openai
   tier: T4
   available: true
   capabilities: [text]
@@ -149,7 +149,7 @@ func TestBootstrapFallsBackToInputPriceForLegacyCachedPriceOmission(t *testing.T
 
 	explicitZero := configuredApp(t, routingBounds, `
 - id: zero-cache
-  provider: provider
+  provider: openai
   tier: T4
   available: true
   capabilities: [text]

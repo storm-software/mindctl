@@ -31,8 +31,8 @@ func fixture(t *testing.T) (config.Config, map[string]string) {
 			SQLite:     config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "gateway.db")},
 			Encryption: config.EncryptionConfig{ActiveKeyID: "active", Keys: map[string]string{"active": "TEST_ENCRYPTION_KEY", "old": "TEST_OLD_KEY"}},
 			Routing:    config.RoutingConfig{MinTier: "T0", MaxTier: "T6"},
-			Providers:  []config.ProviderConfig{{ID: "provider", BaseURL: "https://provider.example.com", APIKeyEnv: "TEST_PROVIDER_KEY"}},
-			Models:     []config.ModelConfig{{ID: "first", Provider: "provider", Tier: "T4", Available: true, Capabilities: []string{"chat", "tools", "images", "json_schema"}, ContextWindow: 32000, InputPrice: 2, OutputPrice: 8, SuccessPrior: .9, TaskSuccessPriors: map[string]float64{"coding": .95}}},
+			Providers:  []config.ProviderConfig{{ID: "openai", BaseURL: "https://provider.example.com", APIKeyEnv: "TEST_PROVIDER_KEY"}},
+			Models:     []config.ModelConfig{{ID: "first", Provider: "openai", Tier: "T4", Available: true, Capabilities: []string{"chat", "tools", "images", "json_schema"}, ContextWindow: 32000, InputPrice: 2, OutputPrice: 8, SuccessPrior: .9, TaskSuccessPriors: map[string]float64{"coding": .95}}},
 		}, map[string]string{
 			"TEST_GATEWAY_TOKEN": "private-gateway-token", "TEST_JEV_KEY": "private-jev-token", "TEST_PROVIDER_KEY": "private-provider-token",
 			"TEST_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)),
@@ -79,6 +79,32 @@ func TestNewInitializesStorageKeyringAndStableHandler(t *testing.T) {
 	envelope, err = a.keyring.Encrypt([]byte("active proof"))
 	if err != nil || envelope.KeyID != "active" {
 		t.Fatalf("active encryption: %v", err)
+	}
+}
+
+func TestNewUsesTheDefaultResponseBodyLimit(t *testing.T) {
+	cfg, env := fixture(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"upstream","status":"completed","model":"first","output":[]}`))
+	}))
+	t.Cleanup(server.Close)
+	cfg.Jev.BaseURL = server.URL
+	cfg.Providers[0].BaseURL = server.URL
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","input":"hello"}`))
+	req.Header.Set("Authorization", "Bearer "+env["TEST_GATEWAY_TOKEN"])
+	rr := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

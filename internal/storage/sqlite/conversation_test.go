@@ -65,3 +65,23 @@ func TestConversationPersistsEncryptedProviderBodiesAndFiltersOpaqueData(t *test
 		t.Fatalf("cross-provider opaque data leaked: %s", got)
 	}
 }
+
+func TestFailedAttemptPersistsProviderRequestID(t *testing.T) {
+	db := openTestDB(t, filepath.Join(t.TempDir(), "failed-attempt.db"))
+	svc := conversation.New(db)
+	turn, err := svc.Start(context.Background(), "client-a", inference.Request{Model: "mindctl-auto", Input: []inference.Item{{Type: "message", Role: "user", Text: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := svc.BeginAttempt(context.Background(), turn, router.Decision{Provider: "openai", ModelID: "gpt-test", Tier: domain.T3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FailAttempt(context.Background(), attempt, "upstream-failed-1", context.DeadlineExceeded); err != nil {
+		t.Fatal(err)
+	}
+	var requestID string
+	if err := db.SQL().QueryRow("SELECT provider_request_id FROM provider_attempts WHERE id = ?", attempt.ID).Scan(&requestID); err != nil || requestID != "upstream-failed-1" {
+		t.Fatalf("request_id=%q err=%v", requestID, err)
+	}
+}

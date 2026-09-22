@@ -32,8 +32,8 @@ func mainConfig(t *testing.T) string {
 		SQLite:     config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "app.db")},
 		Encryption: config.EncryptionConfig{ActiveKeyID: "active", Keys: map[string]string{"active": "MAIN_ENCRYPTION_KEY"}},
 		Routing:    config.RoutingConfig{MinTier: "T0", MaxTier: "T6"},
-		Providers:  []config.ProviderConfig{{ID: "provider", BaseURL: "https://provider.example.com", APIKeyEnv: "MAIN_PROVIDER_KEY"}},
-		Models:     []config.ModelConfig{{ID: "model", Provider: "provider", Tier: "T4", Available: true, SuccessPrior: 1}},
+		Providers:  []config.ProviderConfig{{ID: "openai", BaseURL: "https://provider.example.com", APIKeyEnv: "MAIN_PROVIDER_KEY"}},
+		Models:     []config.ModelConfig{{ID: "model", Provider: "openai", Tier: "T4", Available: true, SuccessPrior: 1}},
 	}
 	body, err := yaml.Marshal(cfg)
 	if err != nil {

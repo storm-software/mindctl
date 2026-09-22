@@ -113,7 +113,8 @@ type ConversationRepository interface {
 	GetConversationTurn(context.Context, string, string) (ConversationTurn, error)
 	BeginProviderAttempt(context.Context, ProviderAttempt) error
 	CommitConversationResult(context.Context, string, string, router.Pin, inference.Result) error
-	FailProviderAttempt(context.Context, string, string, string, []byte) error
+	FailProviderAttempt(context.Context, string, string, string, string, []byte) error
+	RaiseConversationFloor(context.Context, string, string, domain.Tier) error
 }
 
 type Repository interface {

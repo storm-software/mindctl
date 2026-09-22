@@ -497,7 +497,7 @@ func (db *DB) CommitConversationResult(ctx context.Context, clientID, responseID
 	})
 }
 
-func (db *DB) FailProviderAttempt(ctx context.Context, clientID, responseID, attemptID string, body []byte) error {
+func (db *DB) FailProviderAttempt(ctx context.Context, clientID, responseID, attemptID, providerRequestID string, body []byte) error {
 	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
 		var count int
 		if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM provider_attempts a JOIN responses r ON r.id = a.response_id
@@ -507,7 +507,33 @@ func (db *DB) FailProviderAttempt(ctx context.Context, clientID, responseID, att
 		if count == 0 {
 			return storage.ErrNotFound
 		}
-		return completeAttempt(ctx, conn, db.keyring, attemptID, "failed", "", body, time.Now().UTC())
+		return completeAttempt(ctx, conn, db.keyring, attemptID, "failed", providerRequestID, body, time.Now().UTC())
+	})
+}
+
+// RaiseConversationFloor records a post-emission streaming failure without
+// changing the existing pin or lowering an already stronger floor.
+func (db *DB) RaiseConversationFloor(ctx context.Context, clientID, responseID string, floor domain.Tier) error {
+	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		if !floor.Valid() {
+			return failure("validate conversation floor", errors.New("floor is invalid"))
+		}
+		var conversationID string
+		var current domain.Tier
+		if err := conn.QueryRowContext(ctx, `SELECT c.id, c.escalation_floor FROM responses r
+			JOIN conversations c ON c.id = r.conversation_id WHERE c.client_id = ? AND r.id = ?`, clientID, responseID).Scan(&conversationID, &current); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return storage.ErrNotFound
+			}
+			return failure("read conversation floor", err)
+		}
+		if floor <= current {
+			return nil
+		}
+		if _, err := conn.ExecContext(ctx, "UPDATE conversations SET escalation_floor = ? WHERE id = ?", floor, conversationID); err != nil {
+			return failure("raise conversation floor", err)
+		}
+		return nil
 	})
 }
 

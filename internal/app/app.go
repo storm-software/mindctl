@@ -17,7 +17,13 @@ import (
 	"github.com/storm-software/mindctl/internal/classifier/jev"
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/contentcrypto"
+	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/executor"
+	"github.com/storm-software/mindctl/internal/provider"
+	"github.com/storm-software/mindctl/internal/provider/anthropic"
+	"github.com/storm-software/mindctl/internal/provider/gemini"
+	"github.com/storm-software/mindctl/internal/provider/openai"
 	"github.com/storm-software/mindctl/internal/router"
 	"github.com/storm-software/mindctl/internal/storage/sqlite"
 )
@@ -27,6 +33,7 @@ type App struct {
 	keyring              *contentcrypto.Keyring
 	classifier           classifier.Classifier
 	httpClient           *http.Client
+	executor             *executor.Service
 	policy               *router.Policy
 	catalog              []domain.Model
 	minTier, maxTier     domain.Tier
@@ -96,6 +103,9 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	a := &App{
 		keyring: keyring, policy: router.NewPolicy(policyConfig(cfg.Routing)),
 		providerCredentials: make(map[string]bool), providerAvailability: make(map[string]bool),
+		httpClient: &http.Client{Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, IdleConnTimeout: 90 * time.Second,
+		}},
 	}
 	a.minTier, _ = domain.ParseTier(cfg.Routing.MinTier)
 	a.maxTier, _ = domain.ParseTier(cfg.Routing.MaxTier)
@@ -142,6 +152,11 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	if len(eligible) == 0 {
 		return nil, errors.New("at least one enabled model with a usable provider is required")
 	}
+	providers, err := configuredProviders(cfg.Providers, getenv, a.httpClient)
+	if err != nil {
+		a.httpClient.CloseIdleConnections()
+		return nil, err
+	}
 	// Open owns cleanup on failure, including failed migrations. It is last so
 	// there are no later fallible steps that could leak an initialized database.
 	a.store, err = sqlite.Open(ctx, sqlite.Options{Path: cfg.SQLite.Path, Keyring: keyring})
@@ -149,13 +164,47 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		return nil, errors.New("initialize SQLite storage failed")
 	}
 	a.maintenance = newRetentionMaintenance(cfg.SQLite.Retention, cfg.SQLite.RetentionMaintenanceInterval, a.store.DeleteExpiredContent, maintenanceOptions)
-	a.httpClient = &http.Client{Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment, ForceAttemptHTTP2: true, IdleConnTimeout: 90 * time.Second,
-	}}
 	jevKey, _ := getenv(cfg.Jev.APIKeyEnv)
 	a.classifier = jev.NewClient(cfg.Jev, jevKey, a.httpClient)
-	a.handler = api.Operations(a.ready)
+	a.executor = executor.New(a.classifier, a.policy, provider.NewRegistry(providers), conversation.New(a.store))
+	clientToken, _ := getenv(cfg.ClientAuth.TokenEnv)
+	maxBodyBytes := cfg.ClientAuth.MaxBodyBytes
+	if maxBodyBytes == 0 {
+		maxBodyBytes = config.DefaultMaxBodyBytes
+	}
+	responses := api.NewResponsesHandler(a.executor, api.ResponsesConfig{
+		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
+		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
+	})
+	mux := http.NewServeMux()
+	operations := api.Operations(a.ready)
+	mux.Handle("/healthz", operations)
+	mux.Handle("/readyz", operations)
+	mux.Handle("/v1/responses", api.Authenticate(responses, appTokens{{ID: "configured-client", Value: clientToken}}))
+	a.handler = mux
 	return a, nil
+}
+
+type appTokens []api.Token
+
+func (tokens appTokens) Tokens() []api.Token { return tokens }
+
+func configuredProviders(configs []config.ProviderConfig, getenv func(string) (string, bool), httpClient *http.Client) (map[string]provider.Provider, error) {
+	entries := make(map[string]provider.Provider, len(configs))
+	for _, cfg := range configs {
+		key, _ := getenv(cfg.APIKeyEnv)
+		switch cfg.ID {
+		case "openai":
+			entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
+		case "anthropic":
+			entries[cfg.ID] = anthropic.NewClient(cfg.BaseURL, key, httpClient)
+		case "gemini":
+			entries[cfg.ID] = gemini.NewClient(cfg.BaseURL, key, httpClient)
+		default:
+			return nil, errors.New("unsupported configured provider")
+		}
+	}
+	return entries, nil
 }
 
 func policyConfig(cfg config.RoutingConfig) router.PolicyConfig {

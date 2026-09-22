@@ -228,7 +228,11 @@ func (f *fakeConversations) CommitResult(_ context.Context, _ conversation.Turn,
 	return f.CommitErr
 }
 
-func (f *fakeConversations) FailAttempt(context.Context, conversation.Attempt, error) error {
+func (f *fakeConversations) FailAttempt(context.Context, conversation.Attempt, string, error) error {
 	f.FailCalls++
+	return nil
+}
+
+func (f *fakeConversations) RaiseFloor(context.Context, conversation.Turn, domain.Tier) error {
 	return nil
 }

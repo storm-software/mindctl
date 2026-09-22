@@ -30,6 +30,7 @@ type Input struct {
 	Features                                  domain.RequestFeatures
 	MinTier, MaxTier                          *domain.Tier
 	SafeFallbackTier                          domain.Tier
+	AllowEscalation                           *bool
 	ProviderCredentials, ProviderAvailability map[string]bool
 }
 
@@ -139,7 +140,7 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.Input = turn.TranscriptFor(decision.Provider)
 	result, err := adapter.Execute(ctx, model, request)
 	if err != nil {
-		if failErr := s.conversations.FailAttempt(ctx, attempt, err); failErr != nil {
+		if failErr := s.conversations.FailAttempt(ctx, attempt, providerRequestID(err), err); failErr != nil {
 			return Output{}, errors.Join(err, failErr)
 		}
 		return Output{}, err
@@ -239,6 +240,9 @@ func turnPin(turn conversation.Turn) *router.Pin {
 		return nil
 	}
 	pin := turn.Pin
+	if turn.Floor.Valid() && turn.Floor > pin.Floor {
+		pin.Floor = turn.Floor
+	}
 	return &pin
 }
 
@@ -270,6 +274,14 @@ func explicitError(modelID string, decision router.Decision, err error) error {
 		}
 	}
 	return err
+}
+
+func providerRequestID(err error) string {
+	var providerErr *provider.Error
+	if errors.As(err, &providerErr) {
+		return providerErr.RequestID
+	}
+	return ""
 }
 
 func classifierPrompt(request inference.Request, turn conversation.Turn) string {

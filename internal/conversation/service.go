@@ -23,7 +23,8 @@ type Service interface {
 	Resume(context.Context, string, string) (Turn, error)
 	BeginAttempt(context.Context, Turn, router.Decision) (Attempt, error)
 	CommitResult(context.Context, Turn, router.Pin, inference.Result) error
-	FailAttempt(context.Context, Attempt, error) error
+	FailAttempt(context.Context, Attempt, string, error) error
+	RaiseFloor(context.Context, Turn, domain.Tier) error
 }
 
 type service struct {
@@ -138,11 +139,24 @@ func (s *service) CommitResult(ctx context.Context, turn Turn, pin router.Pin, r
 	return err
 }
 
-func (s *service) FailAttempt(ctx context.Context, attempt Attempt, cause error) error {
+func (s *service) FailAttempt(ctx context.Context, attempt Attempt, providerRequestID string, cause error) error {
 	if cause == nil {
 		cause = errors.New("provider attempt failed")
 	}
-	err := s.store.FailProviderAttempt(ctx, attempt.ClientID, attempt.ResponseID, attempt.ID, []byte(cause.Error()))
+	err := s.store.FailProviderAttempt(ctx, attempt.ClientID, attempt.ResponseID, attempt.ID, providerRequestID, []byte(cause.Error()))
+	if errors.Is(err, storage.ErrNotFound) {
+		return ErrNotFound
+	}
+	return err
+}
+
+// RaiseFloor records the minimum tier required after a stream failed after
+// output reached the caller. It never changes the pinned provider/model.
+func (s *service) RaiseFloor(ctx context.Context, turn Turn, floor domain.Tier) error {
+	if !floor.Valid() {
+		return errors.New("conversation: floor is invalid")
+	}
+	err := s.store.RaiseConversationFloor(ctx, turn.ClientID, turn.ResponseID, floor)
 	if errors.Is(err, storage.ErrNotFound) {
 		return ErrNotFound
 	}

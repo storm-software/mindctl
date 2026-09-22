@@ -46,6 +46,8 @@ routing:
   underspecification_floors: []
 
 providers:
+  # Supported provider IDs are openai, anthropic, and gemini. API keys are
+  # resolved only from the named environment variables at server startup.
   - id: openai
     base_url: https://api.openai.com
     api_key_env: OPENAI_API_KEY

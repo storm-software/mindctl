@@ -110,6 +110,24 @@ func TestCommitRejectsLowerTierPinAndRollsBackTranscript(t *testing.T) {
 	}
 }
 
+func TestRaiseFloorPersistsAStreamingFailureEscalation(t *testing.T) {
+	svc := testConversationService(t)
+	turn, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BeginAttempt(context.Background(), turn, router.Decision{Provider: "openai", ModelID: "gpt-t3", Tier: domain.T3}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RaiseFloor(context.Background(), turn, domain.T4); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := svc.Resume(context.Background(), "client-a", turn.ResponseID)
+	if err != nil || resumed.Floor != domain.T4 {
+		t.Fatalf("floor=%s err=%v", resumed.Floor, err)
+	}
+}
+
 func TestCommitRequiresStartedAttempt(t *testing.T) {
 	svc := testConversationService(t)
 	turn, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
