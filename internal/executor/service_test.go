@@ -75,7 +75,7 @@ func TestExecuteRewritesAndCommitsOnlyGatewayResult(t *testing.T) {
 	deps := fakeDeps()
 	deps.OpenAI.Result = inference.Result{ID: "provider-response", Model: "provider-model", ProviderRequestID: "upstream-1", Status: "completed"}
 	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
-	if err != nil || got.Result.ID != deps.Conversations.Turn.ResponseID || got.Result.Model != got.Decision.ModelID || deps.Conversations.Committed.ID != got.Result.ID || deps.Conversations.Committed.Model != got.Result.Model {
+	if err != nil || got.Result.ID != deps.Conversations.Turn.ResponseID || got.Result.Model != got.Decision.ModelID || got.Result.ProviderRequestID != "" || deps.Conversations.Committed.ID != got.Result.ID || deps.Conversations.Committed.Model != got.Result.Model || deps.Conversations.Committed.ProviderRequestID != "upstream-1" {
 		t.Fatalf("got=%+v committed=%+v err=%v", got, deps.Conversations.Committed, err)
 	}
 }

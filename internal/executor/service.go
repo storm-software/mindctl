@@ -152,7 +152,9 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	if err := s.conversations.CommitResult(ctx, turn, pin, result); err != nil {
 		return Output{}, err
 	}
-	return Output{Result: result, Decision: decision, AttemptID: attempt.ID}, nil
+	callerResult := result
+	callerResult.ProviderRequestID = ""
+	return Output{Result: callerResult, Decision: decision, AttemptID: attempt.ID}, nil
 }
 
 func (s *Service) classify(ctx context.Context, request inference.Request, turn conversation.Turn, features domain.RequestFeatures, models []domain.Model) (domain.JevJudgment, error) {
