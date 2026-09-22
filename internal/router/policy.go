@@ -45,8 +45,12 @@ func NewPolicy(cfg PolicyConfig) *Policy {
 // deterministic capability floor. Provider maps have EligibleModels semantics.
 // A nil Judgment adds no signal; Jev-unavailability fallback is caller-owned.
 type DecisionInput struct {
-	Features                                  domain.RequestFeatures
-	Models                                    []domain.Model
+	Features domain.RequestFeatures
+	Models   []domain.Model
+	// ModelID restricts selection to one configured concrete model. It lets
+	// callers honor explicit model requests while retaining all policy hard
+	// eligibility checks and rejection explanations.
+	ModelID                                   string
 	Floor                                     domain.Tier
 	TaskType                                  domain.TaskType
 	Pin                                       *Pin
@@ -85,6 +89,16 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 	if err := p.validate(in); err != nil {
 		return decision, err
 	}
+	models := in.Models
+	if in.ModelID != "" {
+		models = make([]domain.Model, 0, 1)
+		for _, model := range in.Models {
+			if model.ID == in.ModelID {
+				models = append(models, model)
+			}
+		}
+		decision.Reasons = append(decision.Reasons, fmt.Sprintf("caller selected concrete model: %s", in.ModelID))
+	}
 	floor := in.Floor
 	decision.Reasons = append(decision.Reasons, fmt.Sprintf("request floor: %s", floor))
 	raise := func(next domain.Tier, source string) {
@@ -99,7 +113,7 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 	}
 	if in.Pin != nil {
 		raise(in.Pin.Floor, "conversation pin")
-		for _, model := range in.Models {
+		for _, model := range models {
 			if matchesPin(model, in.Pin) {
 				raise(model.Tier, "pinned model capability")
 			}
@@ -128,7 +142,7 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 			}
 		}
 	}
-	eligible, rejections := EligibleModels(EligibilityInput{Models: in.Models, Features: in.Features, Floor: floor, MinTier: in.MinTier, MaxTier: in.MaxTier, ProviderCredentials: in.ProviderCredentials, ProviderAvailability: in.ProviderAvailability})
+	eligible, rejections := EligibleModels(EligibilityInput{Models: models, Features: in.Features, Floor: floor, MinTier: in.MinTier, MaxTier: in.MaxTier, ProviderCredentials: in.ProviderCredentials, ProviderAvailability: in.ProviderAvailability})
 	decision.Rejections = rejections
 	type candidate struct {
 		model   domain.Model
