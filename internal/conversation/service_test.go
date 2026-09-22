@@ -58,10 +58,84 @@ func startAndCommit(t *testing.T, svc conversation.Service, client string) conve
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.BeginAttempt(context.Background(), turn, router.Decision{Provider: "openai", ModelID: "gpt-test", Tier: domain.T3}); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.CommitResult(context.Background(), turn, pin("openai", "gpt-test", domain.T3), resultWithText("hi")); err != nil {
 		t.Fatal(err)
 	}
 	return turn
+}
+
+func TestBeginAttemptPersistsFirstPinBeforeProviderIO(t *testing.T) {
+	svc := testConversationService(t)
+	turn, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BeginAttempt(context.Background(), turn, router.Decision{Provider: "openai", ModelID: "gpt-test", Tier: domain.T3}); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := svc.Resume(context.Background(), "client-a", turn.ResponseID)
+	if err != nil || resumed.Pin != pin("openai", "gpt-test", domain.T3) || resumed.Floor != domain.T3 {
+		t.Fatalf("resumed=%+v err=%v", resumed, err)
+	}
+}
+
+func TestCommitRejectsLowerTierPinAndRollsBackTranscript(t *testing.T) {
+	svc := testConversationService(t)
+	first, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BeginAttempt(context.Background(), first, router.Decision{Provider: "openai", ModelID: "gpt-t4", Tier: domain.T4}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(context.Background(), first, pin("openai", "gpt-t4", domain.T4), resultWithText("hi")); err != nil {
+		t.Fatal(err)
+	}
+	next, err := svc.Start(context.Background(), "client-a", inference.Request{Model: "mindctl-auto", PreviousResponseID: first.ResponseID, Input: []inference.Item{{Type: "message", Role: "user", Text: "again"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BeginAttempt(context.Background(), next, router.Decision{Provider: "openai", ModelID: "gpt-t4", Tier: domain.T4}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(context.Background(), next, pin("openai", "gpt-t3", domain.T3), resultWithText("must not persist")); err == nil {
+		t.Fatal("lower-tier replacement committed")
+	}
+	resumed, err := svc.Resume(context.Background(), "client-a", next.ResponseID)
+	if err != nil || resumed.Pin != pin("openai", "gpt-t4", domain.T4) || transcriptText(resumed.Transcript) != "hello\nhi\nagain" {
+		t.Fatalf("resumed=%+v err=%v", resumed, err)
+	}
+}
+
+func TestCommitRequiresStartedAttempt(t *testing.T) {
+	svc := testConversationService(t)
+	turn, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(context.Background(), turn, pin("openai", "gpt-test", domain.T3), resultWithText("must not persist")); err == nil {
+		t.Fatal("commit without attempt succeeded")
+	}
+	resumed, err := svc.Resume(context.Background(), "client-a", turn.ResponseID)
+	if err != nil || transcriptText(resumed.Transcript) != "hello" {
+		t.Fatalf("resumed=%+v err=%v", resumed, err)
+	}
+}
+
+func TestStartDropsCallerProviderData(t *testing.T) {
+	svc := testConversationService(t)
+	turn, err := svc.Start(context.Background(), "client-a", inference.Request{Model: "mindctl-auto", Input: []inference.Item{{Type: "message", Role: "user", Text: "hello", ProviderData: []byte(`{"untrusted":true}`)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"openai", "anthropic", "gemini"} {
+		if got := turn.TranscriptFor(provider)[0].ProviderData; got != nil {
+			t.Fatalf("provider %q received caller data: %s", provider, got)
+		}
+	}
 }
 
 func TestResumeRejectsUnknownAndForeignResponse(t *testing.T) {
@@ -79,6 +153,9 @@ func TestCommitAndResumePreservesCanonicalTranscriptAndPin(t *testing.T) {
 	svc := testConversationService(t)
 	started, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BeginAttempt(context.Background(), started, router.Decision{Provider: "openai", ModelID: "gpt-test", Tier: domain.T3}); err != nil {
 		t.Fatal(err)
 	}
 	err = svc.CommitResult(context.Background(), started, pin("openai", "gpt-test", domain.T3), resultWithText("hi"))

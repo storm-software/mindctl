@@ -372,9 +372,13 @@ func (db *DB) BeginProviderAttempt(ctx context.Context, attempt storage.Provider
 		if attempt.ID == "" || attempt.ClientID == "" || attempt.ResponseID == "" {
 			return failure("validate provider attempt", errors.New("attempt, client, and response IDs are required"))
 		}
-		var responseStatus string
-		if err := conn.QueryRowContext(ctx, `SELECT r.status FROM responses r JOIN conversations c ON c.id = r.conversation_id
-			WHERE c.client_id = ? AND r.id = ?`, attempt.ClientID, attempt.ResponseID).Scan(&responseStatus); err != nil {
+		var responseStatus, conversationID string
+		var pinProvider, pinModel sql.NullString
+		var pinTier sql.NullInt64
+		var floor domain.Tier
+		if err := conn.QueryRowContext(ctx, `SELECT r.status, c.id, c.pin_provider, c.pin_model_id, c.pin_tier, c.escalation_floor
+			FROM responses r JOIN conversations c ON c.id = r.conversation_id WHERE c.client_id = ? AND r.id = ?`, attempt.ClientID, attempt.ResponseID).Scan(
+			&responseStatus, &conversationID, &pinProvider, &pinModel, &pinTier, &floor); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return storage.ErrNotFound
 			}
@@ -385,6 +389,25 @@ func (db *DB) BeginProviderAttempt(ctx context.Context, attempt storage.Provider
 		}
 		if attempt.Decision.Provider == "" || attempt.Decision.ModelID == "" || !attempt.Decision.Tier.Valid() {
 			return failure("validate provider decision", errors.New("provider, model, and valid tier are required"))
+		}
+		if pinProvider.Valid || pinModel.Valid || pinTier.Valid {
+			if !pinProvider.Valid || !pinModel.Valid || !pinTier.Valid {
+				return failure("read conversation pin", errors.New("incomplete stored pin"))
+			}
+			if attempt.Decision.Tier < domain.Tier(pinTier.Int64) || attempt.Decision.Tier < floor {
+				return failure("validate provider decision", errors.New("decision tier would lower the conversation pin or floor"))
+			}
+		} else {
+			if attempt.Decision.Tier < floor {
+				return failure("validate provider decision", errors.New("decision tier would lower the conversation floor"))
+			}
+			if attempt.Decision.Tier > floor {
+				floor = attempt.Decision.Tier
+			}
+			if _, err := conn.ExecContext(ctx, `UPDATE conversations SET pin_provider = ?, pin_model_id = ?, pin_tier = ?, escalation_floor = ? WHERE id = ?`,
+				attempt.Decision.Provider, attempt.Decision.ModelID, attempt.Decision.Tier, floor, conversationID); err != nil {
+				return failure("persist initial conversation pin", err)
+			}
 		}
 		decision, err := json.Marshal(attempt.Decision)
 		if err != nil {
@@ -414,6 +437,9 @@ func (db *DB) CommitConversationResult(ctx context.Context, clientID, responseID
 			return failure("validate conversation pin", errors.New("provider, model, and valid tier are required"))
 		}
 		var conversationID, status string
+		var currentProvider, currentModel sql.NullString
+		var currentTier sql.NullInt64
+		var floor domain.Tier
 		if err := conn.QueryRowContext(ctx, `SELECT c.id, r.status FROM responses r JOIN conversations c ON c.id = r.conversation_id
 			WHERE c.client_id = ? AND r.id = ?`, clientID, responseID).Scan(&conversationID, &status); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -424,29 +450,47 @@ func (db *DB) CommitConversationResult(ctx context.Context, clientID, responseID
 		if status != "pending" {
 			return failure("commit response", errors.New("response is already completed"))
 		}
-		now := time.Now().UTC()
-		if err := insertTranscriptItems(ctx, conn, db.keyring, responseID, pin.Provider, result.Output, now); err != nil {
-			return err
+		var attemptID, provider, model string
+		var tier domain.Tier
+		if err := conn.QueryRowContext(ctx, `SELECT id, provider, model_id, tier FROM provider_attempts
+			WHERE response_id = ? AND status = 'started' ORDER BY sequence DESC LIMIT 1`, responseID).Scan(&attemptID, &provider, &model, &tier); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return failure("commit response", errors.New("no started provider attempt"))
+			}
+			return failure("read started provider attempt", err)
 		}
-		var floor domain.Tier
-		if err := conn.QueryRowContext(ctx, "SELECT escalation_floor FROM conversations WHERE id = ?", conversationID).Scan(&floor); err != nil {
-			return failure("read escalation floor", err)
+		if pin.Provider != provider || pin.ModelID != model || pin.Floor != tier {
+			return failure("validate result pin", errors.New("result pin does not match started provider attempt"))
 		}
-		if pin.Floor > floor {
-			floor = pin.Floor
+		if err := conn.QueryRowContext(ctx, `SELECT pin_provider, pin_model_id, pin_tier, escalation_floor FROM conversations WHERE id = ?`, conversationID).Scan(
+			&currentProvider, &currentModel, &currentTier, &floor); err != nil {
+			return failure("read conversation pin", err)
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET pin_provider = ?, pin_model_id = ?, pin_tier = ?, escalation_floor = ? WHERE id = ?`,
-			pin.Provider, pin.ModelID, floor, floor, conversationID); err != nil {
-			return failure("update conversation pin", err)
+		if !currentProvider.Valid || !currentModel.Valid || !currentTier.Valid {
+			return failure("read conversation pin", errors.New("missing stored pin"))
 		}
-		if _, err := conn.ExecContext(ctx, "UPDATE responses SET status = 'completed' WHERE id = ?", responseID); err != nil {
-			return failure("complete response", err)
+		if tier < domain.Tier(currentTier.Int64) || tier < floor {
+			return failure("validate result pin", errors.New("result tier would lower the conversation pin or floor"))
+		}
+		if tier > floor {
+			floor = tier
 		}
 		body, err := json.Marshal(result)
 		if err != nil {
 			return failure("encode provider result", err)
 		}
-		if err := completeLatestAttempt(ctx, conn, db.keyring, responseID, "succeeded", result.ProviderRequestID, body, now); err != nil {
+		now := time.Now().UTC()
+		if err := insertTranscriptItems(ctx, conn, db.keyring, responseID, pin.Provider, result.Output, now); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET pin_provider = ?, pin_model_id = ?, pin_tier = ?, escalation_floor = ? WHERE id = ?`,
+			pin.Provider, pin.ModelID, tier, floor, conversationID); err != nil {
+			return failure("update conversation pin", err)
+		}
+		if _, err := conn.ExecContext(ctx, "UPDATE responses SET status = 'completed' WHERE id = ?", responseID); err != nil {
+			return failure("complete response", err)
+		}
+		if err := completeAttempt(ctx, conn, db.keyring, attemptID, "succeeded", result.ProviderRequestID, body, now); err != nil {
 			return err
 		}
 		return nil
@@ -488,18 +532,6 @@ func insertTranscriptItems(ctx context.Context, conn *sql.Conn, keyring *content
 		}
 	}
 	return nil
-}
-
-func completeLatestAttempt(ctx context.Context, conn *sql.Conn, keyring *contentcrypto.Keyring, responseID, status, providerRequestID string, body []byte, completed time.Time) error {
-	var attemptID string
-	err := conn.QueryRowContext(ctx, `SELECT id FROM provider_attempts WHERE response_id = ? AND status = 'started' ORDER BY sequence DESC LIMIT 1`, responseID).Scan(&attemptID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return failure("read latest provider attempt", err)
-	}
-	return completeAttempt(ctx, conn, keyring, attemptID, status, providerRequestID, body, completed)
 }
 
 func completeAttempt(ctx context.Context, conn *sql.Conn, keyring *contentcrypto.Keyring, attemptID, status, providerRequestID string, body []byte, completed time.Time) error {

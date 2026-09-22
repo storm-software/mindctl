@@ -2,6 +2,7 @@
 package conversation
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -71,10 +72,17 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 	}
 	responseID := randomID("resp_")
 	now := time.Now().UTC()
+	input := make([]inference.Item, len(request.Input))
+	for index, item := range request.Input {
+		input[index] = cloneItem(item)
+		// Caller-supplied metadata has no trusted provider provenance and must
+		// never become a continuation payload for any adapter.
+		input[index].ProviderData = nil
+	}
 	if err := s.store.CreateTurn(ctx, storage.NewTurn{
 		Conversation: storage.ConversationRecord{ID: conversationID, ClientID: clientID, CreatedAt: now},
 		Response:     storage.ResponseRecord{ID: responseID, ConversationID: conversationID, CreatedAt: now, Status: "pending"},
-		Input:        request.Input,
+		Input:        input,
 	}); err != nil {
 		return Turn{}, err
 	}
@@ -154,5 +162,8 @@ func cloneItem(item inference.Item) inference.Item {
 	item.Arguments = append(item.Arguments[:0:0], item.Arguments...)
 	item.Output = append(item.Output[:0:0], item.Output...)
 	item.ProviderData = append(item.ProviderData[:0:0], item.ProviderData...)
+	if bytes.Equal(bytes.TrimSpace(item.ProviderData), []byte("null")) {
+		item.ProviderData = nil
+	}
 	return item
 }
