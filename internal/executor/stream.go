@@ -52,7 +52,8 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 	decisions := s.streamCandidates(in, decision)
 	emitted := false
 	var lastErr error
-	for index, candidate := range decisions {
+	for index := 0; index < len(decisions); index++ {
+		candidate := decisions[index]
 		model, ok := selectedModel(in.Models, candidate)
 		if !ok {
 			lastErr = fmt.Errorf("executor: selected model %q is not configured", candidate.ModelID)
@@ -109,7 +110,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		}
 		if emitted {
 			persistCtx, cancel := persistenceContext(ctx)
-			floorErr := s.conversations.RaiseFloor(persistCtx, turn, candidate.Tier)
+			floorErr := s.conversations.RaiseFloor(persistCtx, turn, nextTier(candidate.Tier))
 			cancel()
 			if floorErr != nil {
 				lastErr = errors.Join(lastErr, floorErr)
@@ -120,6 +121,16 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 				}
 			}
 			return lastErr
+		}
+		if retryableStreamError(err) && index == len(decisions)-1 {
+			additional, candidateErr := s.explicitStreamCandidates(in, turn, decision)
+			if candidateErr != nil {
+				return errors.Join(lastErr, candidateErr)
+			}
+			if len(additional) != 0 {
+				decisions = append(decisions, additional...)
+				continue
+			}
 		}
 		if !retryableStreamError(err) || index == len(decisions)-1 {
 			return lastErr
@@ -175,11 +186,11 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 
 func (s *Service) streamCandidates(in Input, initial router.Decision) []router.Decision {
 	decisions := []router.Decision{initial}
-	allow := in.Request.Model == automaticModel
-	if in.AllowEscalation != nil {
-		allow = *in.AllowEscalation
-	}
+	allow := streamEscalationAllowed(in)
 	if !allow {
+		return decisions
+	}
+	if in.Request.Model != automaticModel {
 		return decisions
 	}
 	// A transport failure before the first frame may be transient even when no
@@ -208,6 +219,55 @@ func (s *Service) streamCandidates(in Input, initial router.Decision) []router.D
 	return decisions
 }
 
+func streamEscalationAllowed(in Input) bool {
+	allow := in.Request.Model == automaticModel
+	if in.AllowEscalation != nil {
+		allow = *in.AllowEscalation
+	}
+	return allow
+}
+
+// explicitStreamCandidates reconstructs the unconstrained policy candidate
+// set only after an opted-in concrete-model stream fails before emission.
+func (s *Service) explicitStreamCandidates(in Input, turn conversation.Turn, initial router.Decision) ([]router.Decision, error) {
+	if in.Request.Model == automaticModel || !streamEscalationAllowed(in) {
+		return nil, nil
+	}
+	features := normalizedFeatures(in.Features, in.Request, turn)
+	floor := initial.Tier
+	if turn.Floor.Valid() && turn.Floor > floor {
+		floor = turn.Floor
+	}
+	decision, err := s.policy.Decide(router.DecisionInput{
+		Features: features, Models: in.Models, Floor: floor, MinTier: in.MinTier, MaxTier: in.MaxTier,
+		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: providerAvailability(in.Models, in.ProviderAvailability, s.providers),
+	})
+	if err != nil {
+		return nil, err
+	}
+	rejected := make(map[string]bool, len(decision.Rejections))
+	for _, rejection := range decision.Rejections {
+		rejected[rejection.ModelID] = true
+	}
+	var alternatives []router.Decision
+	for _, score := range decision.Candidates {
+		if score.ModelID == initial.ModelID || rejected[score.ModelID] {
+			continue
+		}
+		for _, model := range in.Models {
+			if model.ID != score.ModelID || model.Provider != score.Provider || model.Tier < initial.Tier {
+				continue
+			}
+			candidate := decision
+			candidate.ModelID, candidate.Provider, candidate.Tier = model.ID, model.Provider, model.Tier
+			candidate.Reasons = append(append([]string(nil), decision.Reasons...), "retry selected an equal-or-stronger candidate after explicit stream failure")
+			alternatives = append(alternatives, candidate)
+			break
+		}
+	}
+	return alternatives, nil
+}
+
 func (s *Service) failStreamAttempt(ctx context.Context, attempt conversation.Attempt, observedProviderRequestID string, cause error) error {
 	persistCtx, cancel := persistenceContext(ctx)
 	defer cancel()
@@ -234,6 +294,13 @@ func retryableStreamError(err error) bool {
 	}
 }
 
+func nextTier(tier domain.Tier) domain.Tier {
+	if tier >= domain.T6 {
+		return domain.T6
+	}
+	return tier + 1
+}
+
 func drainStream(ctx context.Context, stream provider.Stream, responseID, model string, writer EventWriter) (inference.Result, inference.Event, bool, error) {
 	accumulator := streamAccumulator{model: model, text: make(map[string]int), functions: make(map[string]int)}
 	var completion inference.Event
@@ -243,6 +310,9 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				result := accumulator.result(responseID)
+				if !accumulator.terminal || !provider.IsSuccessfulCompletion(result.Status) {
+					return result, completion, emitted, provider.UnsuccessfulCompletionError(result.ProviderRequestID)
+				}
 				if completion.Type == "" {
 					completion = inference.Event{Type: "response.completed", ResponseID: responseID, Status: result.Status, Usage: result.Usage, ProviderRequestID: result.ProviderRequestID}
 				}
@@ -252,6 +322,9 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model 
 		}
 		event, visible := canonicalStreamEvent(event)
 		accumulator.observe(event)
+		if event.Status != "" && event.Status != "in_progress" && !provider.IsSuccessfulCompletion(event.Status) {
+			return accumulator.result(responseID), completion, emitted, provider.UnsuccessfulCompletionError(accumulator.providerRequestID)
+		}
 		if !visible {
 			continue
 		}
@@ -309,6 +382,7 @@ func canonicalStreamEvent(event inference.Event) (inference.Event, bool) {
 type streamAccumulator struct {
 	model, status, providerRequestID string
 	usage                            inference.Usage
+	terminal                         bool
 	items                            []inference.Item
 	text, functions                  map[string]int
 }
@@ -319,6 +393,9 @@ func (a *streamAccumulator) observe(event inference.Event) {
 	}
 	if event.Status != "" {
 		a.status = event.Status
+		if event.Status != "in_progress" {
+			a.terminal = true
+		}
 	}
 	if event.Usage.Known {
 		a.usage = event.Usage
@@ -374,9 +451,6 @@ func (a *streamAccumulator) appendFunctionArguments(event inference.Event, onlyI
 
 func (a *streamAccumulator) result(responseID string) inference.Result {
 	status := a.status
-	if status == "" {
-		status = "completed"
-	}
 	items := make([]inference.Item, 0, len(a.items))
 	for _, item := range a.items {
 		if item.Type == "function_call" && len(item.Arguments) != 0 && !json.Valid(item.Arguments) {

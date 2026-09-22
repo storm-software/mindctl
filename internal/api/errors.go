@@ -68,7 +68,11 @@ func errorDetail(err error) (int, ErrorDetail) {
 		return http.StatusTooManyRequests, ErrorDetail{Message: "rate limit exceeded", Type: "rate_limit_error", Code: "rate_limit_exceeded"}
 	case isProviderKind(err, provider.ErrorOverloaded), isProviderKind(err, provider.ErrorRetryable):
 		return http.StatusServiceUnavailable, ErrorDetail{Message: "provider is temporarily unavailable", Type: "server_error", Code: "provider_unavailable"}
-	case isProviderKind(err, provider.ErrorInvalidRequest), isProviderKind(err, provider.ErrorAuthentication):
+	case isProviderKind(err, provider.ErrorAuthentication):
+		return http.StatusServiceUnavailable, ErrorDetail{Message: "provider authentication is unavailable", Type: "server_error", Code: "provider_authentication_unavailable"}
+	case isProviderKind(err, provider.ErrorSafetyRefusal):
+		return http.StatusBadRequest, ErrorDetail{Message: "provider refused this request", Type: "invalid_request_error", Code: "safety_refusal"}
+	case isProviderKind(err, provider.ErrorInvalidRequest):
 		return http.StatusBadRequest, ErrorDetail{Message: "provider cannot execute this request", Type: "invalid_request_error", Code: "provider_request_invalid"}
 	case isStorageError(err):
 		return http.StatusServiceUnavailable, ErrorDetail{Message: "gateway persistence is unavailable", Type: "server_error", Code: "persistence_unavailable"}

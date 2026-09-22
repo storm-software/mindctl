@@ -56,7 +56,7 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&wire); err != nil {
 		return inference.Result{}, &provider.Error{Kind: provider.ErrorRetryable, Status: response.StatusCode, RequestID: requestID, Err: errors.New("invalid provider response")}
 	}
-	result, err := fromGenerateResponse(wire, model, requestID)
+	result, err := fromGenerateResponse(wire, model, requestID, request.ID)
 	if err != nil {
 		return inference.Result{}, err
 	}
@@ -77,7 +77,7 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 	if err != nil {
 		return nil, err
 	}
-	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body), requestID: requestID}, nil
+	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body), requestID: requestID, callIDs: newCanonicalCallIDs(request.ID)}, nil
 }
 
 func (c *Client) post(ctx context.Context, modelID string, body []byte, stream bool) (*http.Response, string, error) {
@@ -138,7 +138,7 @@ type stream struct {
 	reader     *provider.SSEReader
 	requestID  string
 	responseID string
-	status     string
+	callIDs    *canonicalCallIDs
 	pending    []inference.Event
 }
 
@@ -158,15 +158,16 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	if kind, ok := streamErrorKind(frame.Data); ok {
 		return inference.Event{}, &provider.Error{Kind: kind, RequestID: s.requestID, Err: errors.New("provider stream returned an error")}
 	}
-	events, responseID, status, err := streamEvents(frame.Data, s.responseID)
+	events, responseID, _, err := streamEventsWithCallIDs(frame.Data, s.responseID, s.callIDs)
 	if err != nil {
+		var normalized *provider.Error
+		if errors.As(err, &normalized) {
+			return inference.Event{}, &provider.Error{Kind: normalized.Kind, Status: normalized.Status, RequestID: s.requestID, Err: normalized.Err}
+		}
 		return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("invalid provider stream event")}
 	}
 	if responseID != "" {
 		s.responseID = responseID
-	}
-	if status != "" {
-		s.status = status
 	}
 	for index := range events {
 		events[index].ProviderRequestID = s.requestID
@@ -199,6 +200,10 @@ func streamEvent(data []byte, previousResponseID string) (inference.Event, strin
 }
 
 func streamEvents(data []byte, previousResponseID string) ([]inference.Event, string, string, error) {
+	return streamEventsWithCallIDs(data, previousResponseID, newCanonicalCallIDs(""))
+}
+
+func streamEventsWithCallIDs(data []byte, previousResponseID string, callIDs *canonicalCallIDs) ([]inference.Event, string, string, error) {
 	var wire struct {
 		ResponseID     string          `json:"responseId"`
 		Candidates     []candidate     `json:"candidates"`
@@ -208,7 +213,10 @@ func streamEvents(data []byte, previousResponseID string) ([]inference.Event, st
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return nil, "", "", err
 	}
-	if (wire.PromptFeedback != nil && nonEmptyJSON(wire.PromptFeedback.BlockReason)) || len(wire.Candidates) == 0 {
+	if wire.PromptFeedback != nil && nonEmptyJSON(wire.PromptFeedback.BlockReason) {
+		return nil, "", "", safetyRefusalError("")
+	}
+	if len(wire.Candidates) == 0 {
 		return nil, "", "", errors.New("provider stream returned an error")
 	}
 	responseID := wire.ResponseID
@@ -219,8 +227,11 @@ func streamEvents(data []byte, previousResponseID string) ([]inference.Event, st
 	event := inference.Event{Type: "response.in_progress", ResponseID: responseID, Status: "in_progress", Data: append(json.RawMessage(nil), data...)}
 	if candidate.FinishReason != nil {
 		status, err := finishStatus(candidate.FinishReason)
-		if err != nil || status == "safety" {
+		if err != nil {
 			return nil, "", "", errors.New("invalid provider finish reason")
+		}
+		if status == "safety" {
+			return nil, "", "", safetyRefusalError("")
 		}
 		event.Type, event.Status = "response.completed", status
 	}
@@ -245,7 +256,8 @@ func streamEvents(data []byte, previousResponseID string) ([]inference.Event, st
 			if err != nil {
 				return nil, "", "", err
 			}
-			partEvent.Type, partEvent.ItemID, partEvent.CallID, partEvent.Name, partEvent.ArgumentsDelta = "response.function_call_arguments.delta", mapped.FunctionCall.Name, mapped.FunctionCall.Name, mapped.FunctionCall.Name, string(arguments)
+			callID := callIDs.Next()
+			partEvent.Type, partEvent.ItemID, partEvent.CallID, partEvent.Name, partEvent.ArgumentsDelta = "response.function_call_arguments.delta", callID, callID, mapped.FunctionCall.Name, string(arguments)
 		default:
 			continue
 		}

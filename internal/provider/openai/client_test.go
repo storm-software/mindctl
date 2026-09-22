@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -148,6 +149,38 @@ func TestOpenAIStreamNormalizesCompletionStatusAndUsage(t *testing.T) {
 	event, err := stream.Next(context.Background())
 	if err != nil || event.ProviderRequestID != "openai-stream-req" || event.ResponseID != "upstream" || event.Status != "completed" || !event.Usage.Known || event.Usage.InputTokens != 3 || event.Usage.CachedInputTokens != 2 {
 		t.Fatalf("event=%+v err=%v", event, err)
+	}
+}
+
+func TestOpenAIStreamRejectsUnsuccessfulTerminalFrames(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		event string
+		data  string
+	}{
+		{"error", "error", `{"error":{"message":"private upstream body"}}`},
+		{"failed", "response.failed", `{"response":{"id":"upstream","status":"failed"}}`},
+		{"cancelled", "response.cancelled", `{"response":{"id":"upstream","status":"cancelled"}}`},
+		{"incomplete", "response.incomplete", `{"response":{"id":"upstream","status":"incomplete"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("x-request-id", "openai-stream-req")
+				_, _ = io.WriteString(w, "event: "+tc.event+"\ndata: "+tc.data+"\n\n")
+			}))
+			defer server.Close()
+
+			stream, err := newClient(server.URL).Stream(context.Background(), openAIModel(), textRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			_, err = stream.Next(context.Background())
+			var normalized *provider.Error
+			if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorRetryable || normalized.RequestID != "openai-stream-req" || strings.Contains(normalized.Error(), "private") {
+				t.Fatalf("err=%v", err)
+			}
+		})
 	}
 }
 

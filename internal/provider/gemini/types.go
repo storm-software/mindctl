@@ -3,6 +3,7 @@ package gemini
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/storm-software/mindctl/internal/domain"
@@ -106,17 +107,21 @@ func toGenerateRequest(model domain.Model, request inference.Request) (generateR
 	}
 
 	result := generateRequest{}
+	functionNames := make(map[string]string)
 	system := request.Instructions
 	for _, item := range request.Input {
 		if item.Type == "message" && item.Role == "system" {
 			system = joinSystem(system, item.Text)
 			continue
 		}
-		role, mapped, err := toContentPart(item)
+		role, mapped, err := toContentPart(item, functionNames)
 		if err != nil {
 			return generateRequest{}, err
 		}
 		result.Contents = appendContent(result.Contents, role, mapped)
+		if item.Type == "function_call" {
+			functionNames[item.CallID] = item.Name
+		}
 	}
 	if system != "" {
 		result.SystemInstruction = &content{Parts: []part{{Text: system}}}
@@ -161,7 +166,7 @@ func joinSystem(before, after string) string {
 	return before + "\n" + after
 }
 
-func toContentPart(item inference.Item) (string, part, error) {
+func toContentPart(item inference.Item, functionNames map[string]string) (string, part, error) {
 	switch item.Type {
 	case "message":
 		mapped := part{Text: item.Text}
@@ -182,7 +187,11 @@ func toContentPart(item inference.Item) (string, part, error) {
 		}
 		return "model", mapped, nil
 	case "function_call_output":
-		return "user", part{FunctionResponse: &functionResponse{Name: item.CallID, Response: append(json.RawMessage(nil), item.Output...)}}, nil
+		name := functionNames[item.CallID]
+		if name == "" {
+			return "", part{}, inference.Invalid("input", "function output has no preceding function call")
+		}
+		return "user", part{FunctionResponse: &functionResponse{Name: name, Response: append(json.RawMessage(nil), item.Output...)}}, nil
 	default:
 		return "", part{}, inference.Invalid("input", "has unsupported item type")
 	}
@@ -256,9 +265,9 @@ func validateCapabilities(model domain.Model, request inference.Request) error {
 
 func unsupported(feature string) error { return &provider.UnsupportedFeatureError{Feature: feature} }
 
-func fromGenerateResponse(response generateResponse, model domain.Model, requestID string) (inference.Result, error) {
+func fromGenerateResponse(response generateResponse, model domain.Model, requestID, callIDPrefix string) (inference.Result, error) {
 	if response.PromptFeedback != nil && nonEmptyJSON(response.PromptFeedback.BlockReason) {
-		return inference.Result{}, normalizedResponseError(requestID, "provider blocked prompt")
+		return inference.Result{}, safetyRefusalError(requestID)
 	}
 	if len(response.Candidates) == 0 {
 		return inference.Result{}, normalizedResponseError(requestID, "provider returned no candidates")
@@ -268,19 +277,20 @@ func fromGenerateResponse(response generateResponse, model domain.Model, request
 		return inference.Result{}, normalizedResponseError(requestID, "invalid provider finish reason")
 	}
 	if finish == "safety" {
-		return inference.Result{}, normalizedResponseError(requestID, "provider rejected unsafe content")
+		return inference.Result{}, safetyRefusalError(requestID)
 	}
 	usage, err := parseUsage(response.UsageMetadata)
 	if err != nil {
 		return inference.Result{}, normalizedResponseError(requestID, "invalid provider usage")
 	}
 	result := inference.Result{ID: response.ResponseID, Model: model.UpstreamID, ProviderRequestID: requestID, Status: finish, Usage: usage}
+	callIDs := newCanonicalCallIDs(callIDPrefix)
 	for _, mapped := range response.Candidates[0].Content.Parts {
 		switch {
 		case mapped.Text != "":
 			result.Output = append(result.Output, inference.Item{Type: "message", Role: "assistant", Text: mapped.Text, ProviderData: makeProviderData(mapped)})
 		case mapped.FunctionCall != nil:
-			result.Output = append(result.Output, inference.Item{Type: "function_call", CallID: mapped.FunctionCall.Name, Name: mapped.FunctionCall.Name, Arguments: append(json.RawMessage(nil), mapped.FunctionCall.Args...), ProviderData: makeProviderData(mapped)})
+			result.Output = append(result.Output, inference.Item{Type: "function_call", CallID: callIDs.Next(), Name: mapped.FunctionCall.Name, Arguments: append(json.RawMessage(nil), mapped.FunctionCall.Args...), ProviderData: makeProviderData(mapped)})
 		}
 	}
 	return result, nil
@@ -339,4 +349,25 @@ func nonEmptyJSON(raw json.RawMessage) bool {
 
 func normalizedResponseError(requestID, message string) error {
 	return &provider.Error{Kind: provider.ErrorRetryable, RequestID: requestID, Err: errors.New(message)}
+}
+
+func safetyRefusalError(requestID string) error {
+	return &provider.Error{Kind: provider.ErrorSafetyRefusal, RequestID: requestID, Err: errors.New("provider refused request")}
+}
+
+type canonicalCallIDs struct {
+	prefix string
+	next   int
+}
+
+func newCanonicalCallIDs(prefix string) *canonicalCallIDs {
+	if prefix == "" {
+		prefix = "gemini"
+	}
+	return &canonicalCallIDs{prefix: prefix}
+}
+
+func (ids *canonicalCallIDs) Next() string {
+	ids.next++
+	return fmt.Sprintf("call_%s_%d", ids.prefix, ids.next)
 }

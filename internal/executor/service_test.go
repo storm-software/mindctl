@@ -80,6 +80,15 @@ func TestExecuteRewritesAndCommitsOnlyGatewayResult(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsUnacceptableProviderStatusBeforeCommit(t *testing.T) {
+	deps := fakeDeps()
+	deps.OpenAI.Result.Status = "failed"
+	_, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
+	if err == nil || deps.Conversations.CommitCalls != 0 || deps.Conversations.FailCalls != 1 {
+		t.Fatalf("commit=%d failed=%d err=%v", deps.Conversations.CommitCalls, deps.Conversations.FailCalls, err)
+	}
+}
+
 type fakeDependencies struct {
 	Executor      *Service
 	Classifier    *fakeClassifier
@@ -201,6 +210,7 @@ type fakeConversations struct {
 	BeginAttemptErr error
 	CommitErr       error
 	BeginCalls      int
+	CommitCalls     int
 	FailCalls       int
 	Committed       inference.Result
 }
@@ -224,6 +234,7 @@ func (f *fakeConversations) BeginAttempt(_ context.Context, turn conversation.Tu
 }
 
 func (f *fakeConversations) CommitResult(_ context.Context, _ conversation.Turn, _ router.Pin, result inference.Result) error {
+	f.CommitCalls++
 	f.Committed = result
 	return f.CommitErr
 }

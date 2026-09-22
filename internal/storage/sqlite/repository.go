@@ -257,13 +257,29 @@ func (db *DB) DeleteExpiredContent(ctx context.Context, retention time.Duration,
 	if retention < 0 {
 		return 0, failure("validate retention", errors.New("retention must be nonnegative"))
 	}
-	result, err := db.db.ExecContext(ctx, "DELETE FROM content_blobs WHERE created_at < ?", now.Add(-retention).UnixNano())
+	cutoff := now.Add(-retention).UnixNano()
+	var count int64
+	err := inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		for _, statement := range []string{
+			"DELETE FROM content_blobs WHERE created_at < ?",
+			"DELETE FROM transcript_items WHERE created_at < ?",
+			`UPDATE provider_attempts SET key_id = NULL, version = NULL, nonce = NULL, ciphertext = NULL
+				WHERE created_at < ? AND ciphertext IS NOT NULL`,
+		} {
+			result, err := conn.ExecContext(ctx, statement, cutoff)
+			if err != nil {
+				return failure("delete expired content", err)
+			}
+			removed, err := result.RowsAffected()
+			if err != nil {
+				return failure("count expired content", err)
+			}
+			count += removed
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, failure("delete expired content", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return 0, failure("count expired content", err)
+		return 0, err
 	}
 	return count, nil
 }

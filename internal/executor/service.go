@@ -145,6 +145,13 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 		}
 		return Output{}, err
 	}
+	if !provider.IsSuccessfulCompletion(result.Status) {
+		err := provider.UnsuccessfulCompletionError(result.ProviderRequestID)
+		if failErr := s.conversations.FailAttempt(ctx, attempt, result.ProviderRequestID, err); failErr != nil {
+			return Output{}, errors.Join(err, failErr)
+		}
+		return Output{}, err
+	}
 	// Provider IDs remain encrypted attempt metadata; callers receive only the
 	// gateway response identity and the actual selected concrete model.
 	result.ID = turn.ResponseID

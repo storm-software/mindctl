@@ -54,6 +54,50 @@ func TestResponsesHandlerMapsSafeGatewayErrors(t *testing.T) {
 	}
 }
 
+func TestResponsesHandlerMapsProviderAuthenticationAsOperationalFailure(t *testing.T) {
+	handler := testResponsesHandler(executor.Output{}, &provider.Error{Kind: provider.ErrorAuthentication, Err: errors.New("private upstream authentication failure")})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, authenticatedRequest(`{"model":"mindctl-auto","input":"hello"}`))
+	var body ErrorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusServiceUnavailable || body.Error.Type != "server_error" || body.Error.Code != "provider_authentication_unavailable" || strings.Contains(rr.Body.String(), "private") {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestResponsesHandlerMapsSafetyRefusalForStreamingAndNonStreaming(t *testing.T) {
+	for _, bodyText := range []string{
+		`{"model":"mindctl-auto","input":"hello"}`,
+		`{"model":"mindctl-auto","input":"hello","stream":true}`,
+	} {
+		handler := testResponsesHandler(executor.Output{}, &provider.Error{Kind: provider.ErrorKind("safety_refusal"), Err: errors.New("private provider refusal")})
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, authenticatedRequest(bodyText))
+		var body ErrorBody
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rr.Code != http.StatusBadRequest || body.Error.Type != "invalid_request_error" || body.Error.Code != "safety_refusal" || strings.Contains(rr.Body.String(), "private") {
+			t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestResponsesHandlerStreamsCanonicalTerminalErrorAfterVisibleOutput(t *testing.T) {
+	handler := testResponsesHandlerWith(visibleThenFailExecutor{})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, authenticatedRequest(`{"model":"mindctl-auto","input":"hello","stream":true}`))
+	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "text/event-stream" || rr.Header().Get("Cache-Control") != "no-cache" || rr.Header().Get("X-Mindctl-Tier") != "T4" || rr.Header().Get("X-Mindctl-Decision-ID") != "att_gateway" || rr.Header().Get("X-Mindctl-Attempts") != "1" {
+		t.Fatalf("status=%d headers=%v body=%s", rr.Code, rr.Header(), rr.Body.String())
+	}
+	want := "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_gateway\",\"item_id\":\"item_gateway\",\"delta\":\"partial\"}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"provider is temporarily unavailable\",\"type\":\"server_error\",\"code\":\"provider_unavailable\"}}\n\n"
+	if rr.Body.String() != want {
+		t.Fatalf("body=%q", rr.Body.String())
+	}
+}
+
 func TestResponsesHandlerRejectsWrongMethodBeforeExecution(t *testing.T) {
 	runner := &stubExecutor{}
 	handler := testResponsesHandlerWith(runner)
@@ -78,7 +122,7 @@ func testResponsesHandler(output executor.Output, err ...error) http.Handler {
 	return testResponsesHandlerWith(runner)
 }
 
-func testResponsesHandlerWith(runner *stubExecutor) http.Handler {
+func testResponsesHandlerWith(runner ResponseExecutor) http.Handler {
 	return Authenticate(NewResponsesHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20, Models: []domain.Model{{ID: "claude-test", Tier: domain.T4}}}), staticTokens{{ID: "client_test", Value: "test-token"}})
 }
 
@@ -92,6 +136,26 @@ type stubExecutor struct {
 	output executor.Output
 	err    error
 	calls  int
+}
+
+type visibleThenFailExecutor struct{}
+
+func (visibleThenFailExecutor) Execute(context.Context, executor.Input) (executor.Output, error) {
+	return executor.Output{}, errors.New("unexpected non-streaming execution")
+}
+
+func (visibleThenFailExecutor) Stream(ctx context.Context, _ executor.Input, writer executor.EventWriter) error {
+	if err := writer.Start(executor.StreamMetadata{ResponseID: "resp_gateway", Model: "gateway-model", DecisionID: "att_gateway", Tier: domain.T4, Attempts: 1}); err != nil {
+		return err
+	}
+	if err := writer.WriteEvent(ctx, inference.Event{Type: "response.output_text.delta", ResponseID: "resp_gateway", ItemID: "item_gateway", Delta: "partial"}); err != nil {
+		return err
+	}
+	err := &provider.Error{Kind: provider.ErrorRetryable, Err: errors.New("private provider failure")}
+	if writeErr := writer.WriteTerminalError(ctx, err); writeErr != nil {
+		return writeErr
+	}
+	return err
 }
 
 func (s *stubExecutor) Execute(context.Context, executor.Input) (executor.Output, error) {

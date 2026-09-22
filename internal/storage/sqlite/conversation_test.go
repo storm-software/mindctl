@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
@@ -83,5 +84,54 @@ func TestFailedAttemptPersistsProviderRequestID(t *testing.T) {
 	var requestID string
 	if err := db.SQL().QueryRow("SELECT provider_request_id FROM provider_attempts WHERE id = ?", attempt.ID).Scan(&requestID); err != nil || requestID != "upstream-failed-1" {
 		t.Fatalf("request_id=%q err=%v", requestID, err)
+	}
+}
+
+func TestDeleteExpiredContentRemovesConversationCiphertextButRetainsAttemptTelemetry(t *testing.T) {
+	db := openTestDB(t, filepath.Join(t.TempDir(), "retention.db"))
+	now := time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC)
+	old := now.Add(-2 * time.Hour)
+
+	legacy := sampleRecord()
+	legacy.ID = "req_retention"
+	legacy.CreatedAt = old
+	insertRecord(t, db, legacy)
+
+	svc := conversation.New(db)
+	turn, err := svc.Start(context.Background(), "client-a", inference.Request{Model: "mindctl-auto", Input: []inference.Item{{Type: "message", Role: "user", Text: "expired transcript"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := svc.BeginAttempt(context.Background(), turn, router.Decision{Provider: "openai", ModelID: "gpt-test", Tier: domain.T3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(context.Background(), turn, router.Pin{Provider: "openai", ModelID: "gpt-test", Floor: domain.T3}, inference.Result{ProviderRequestID: "upstream-retention", Status: "completed", Output: []inference.Item{{Type: "message", Role: "assistant", Text: "expired result"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"transcript_items", "provider_attempts"} {
+		if _, err := db.SQL().Exec("UPDATE "+table+" SET created_at = ?", old.UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	removed, err := db.DeleteExpiredContent(context.Background(), time.Hour, now)
+	if err != nil || removed != 8 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+	assertCount(t, db.SQL(), "content_blobs", 0)
+	assertCount(t, db.SQL(), "transcript_items", 0)
+
+	var status, requestID, decision string
+	var keyMissing, versionMissing, nonceMissing, ciphertextMissing int
+	if err := db.SQL().QueryRow(`SELECT status, provider_request_id, decision_json,
+		key_id IS NULL, version IS NULL, nonce IS NULL, ciphertext IS NULL
+		FROM provider_attempts WHERE id = ?`, attempt.ID).Scan(
+		&status, &requestID, &decision, &keyMissing, &versionMissing, &nonceMissing, &ciphertextMissing,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if status != "succeeded" || requestID != "upstream-retention" || decision == "" || keyMissing != 1 || versionMissing != 1 || nonceMissing != 1 || ciphertextMissing != 1 {
+		t.Fatalf("status=%q requestID=%q decision=%q content-null=%d/%d/%d/%d", status, requestID, decision, keyMissing, versionMissing, nonceMissing, ciphertextMissing)
 	}
 }

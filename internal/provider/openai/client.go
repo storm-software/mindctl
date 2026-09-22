@@ -134,12 +134,27 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	if bytes.Equal(frame.Data, []byte("[DONE]")) {
 		return inference.Event{}, io.EOF
 	}
+	if unsuccessfulTerminalFrame(frame.Type) {
+		return inference.Event{}, provider.UnsuccessfulCompletionError(s.requestID)
+	}
 	event, err := streamEvent(frame.Type, frame.Data)
 	if err != nil {
 		return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("invalid provider stream event")}
+	}
+	if event.Status != "" && event.Status != "in_progress" && !provider.IsSuccessfulCompletion(event.Status) {
+		return inference.Event{}, provider.UnsuccessfulCompletionError(s.requestID)
 	}
 	event.ProviderRequestID = s.requestID
 	return event, nil
 }
 
 func (s *stream) Close() error { return s.body.Close() }
+
+func unsuccessfulTerminalFrame(kind string) bool {
+	switch kind {
+	case "error", "response.failed", "response.cancelled", "response.incomplete":
+		return true
+	default:
+		return false
+	}
+}

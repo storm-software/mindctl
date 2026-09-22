@@ -4,6 +4,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/storm-software/mindctl/internal/domain"
@@ -31,6 +32,7 @@ const (
 	ErrorOverloaded     ErrorKind = "overloaded"
 	ErrorAuthentication ErrorKind = "authentication"
 	ErrorInvalidRequest ErrorKind = "invalid_request"
+	ErrorSafetyRefusal  ErrorKind = "safety_refusal"
 )
 
 // Error has safe, normalized provider failure metadata. Its text deliberately
@@ -44,6 +46,16 @@ type Error struct {
 
 func (e *Error) Error() string { return fmt.Sprintf("provider request failed (%s)", e.Kind) }
 func (e *Error) Unwrap() error { return e.Err }
+
+// IsSuccessfulCompletion reports the only provider terminal state that may be
+// committed as a completed gateway response.
+func IsSuccessfulCompletion(status string) bool { return status == "completed" }
+
+// UnsuccessfulCompletionError keeps an unacceptable terminal state safe for
+// callers while leaving it retryable until stream output becomes visible.
+func UnsuccessfulCompletionError(requestID string) *Error {
+	return &Error{Kind: ErrorRetryable, RequestID: requestID, Err: errors.New("provider did not complete successfully")}
+}
 
 // UnsupportedFeatureError reports a portable feature the concrete model does
 // not support. It is intentionally separate from transport/provider errors.

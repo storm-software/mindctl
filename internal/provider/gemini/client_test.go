@@ -80,6 +80,28 @@ func TestGeminiThoughtSignatureSurvivesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGeminiUsesFunctionNameForCrossProviderFunctionResponses(t *testing.T) {
+	request := inference.Request{Model: "gateway-model", Input: []inference.Item{
+		{Type: "function_call", CallID: "call_openai_1", Name: "lookup", Arguments: json.RawMessage(`{"city":"Boston"}`)},
+		{Type: "function_call_output", CallID: "call_openai_1", Output: json.RawMessage(`{"temperature":70}`)},
+	}}
+	got, err := toGenerateRequest(geminiModel(), request)
+	if err != nil || len(got.Contents) != 2 || got.Contents[1].Parts[0].FunctionResponse == nil || got.Contents[1].Parts[0].FunctionResponse.Name != "lookup" {
+		t.Fatalf("request=%+v err=%v", got, err)
+	}
+}
+
+func TestGeminiCreatesStableUniqueCanonicalCallIDs(t *testing.T) {
+	server := geminiFixture(t, func(string, generateRequest) {}, `{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"lookup","args":{}}},{"functionCall":{"name":"lookup","args":{"city":"Boston"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)
+	defer server.Close()
+	request := textRequest()
+	request.ID = "resp_gateway"
+	got, err := newGemini(server.URL).Execute(context.Background(), geminiModel(), request)
+	if err != nil || len(got.Output) != 2 || got.Output[0].CallID != "call_resp_gateway_1" || got.Output[1].CallID != "call_resp_gateway_2" || got.Output[0].CallID == got.Output[1].CallID {
+		t.Fatalf("result=%+v err=%v", got, err)
+	}
+}
+
 func TestGeminiRejectsMissingUpstreamModelBeforeNetworkCall(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
@@ -101,6 +123,19 @@ func TestGeminiSafetyAndMalformedUsageReturnNormalizedError(t *testing.T) {
 		err := executeGeminiErrorFixture(t, response)
 		var normalized *provider.Error
 		if !errors.As(err, &normalized) {
+			t.Fatalf("err=%v", err)
+		}
+	}
+}
+
+func TestGeminiClassifiesPromptAndSafetyRefusalsAsNonRetryable(t *testing.T) {
+	for _, response := range []string{
+		`{"promptFeedback":{"blockReason":"SAFETY"},"candidates":[],"usageMetadata":{}}`,
+		`{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"SAFETY"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`,
+	} {
+		err := executeGeminiErrorFixture(t, response)
+		var normalized *provider.Error
+		if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorKind("safety_refusal") {
 			t.Fatalf("err=%v", err)
 		}
 	}
@@ -156,6 +191,39 @@ func TestGeminiStreamEmitsMixedTextAndFunctionPartsFromOneFrame(t *testing.T) {
 	call, err := stream.Next(context.Background())
 	if err != nil || call.Type != "response.function_call_arguments.delta" || call.Name != "lookup" || call.ArgumentsDelta != `{"city":"Boston"}` || call.ResponseID != "resp_1" || call.Status != "completed" || !call.Usage.Known || call.ProviderRequestID != "gemini-stream-req" {
 		t.Fatalf("call=%+v err=%v", call, err)
+	}
+}
+
+func TestGeminiStreamCreatesUniqueCallIDsForRepeatedFunctionNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("x-goog-request-id", "gemini-stream-req")
+		_, _ = io.WriteString(w, "data: {\"responseId\":\"provider-response\",\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"lookup\",\"args\":{}}},{\"functionCall\":{\"name\":\"lookup\",\"args\":{\"city\":\"Boston\"}}}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1}}\n\n")
+	}))
+	defer server.Close()
+	request := textRequest()
+	request.ID = "resp_gateway"
+	stream, err := newGemini(server.URL).Stream(context.Background(), geminiModel(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	first, err := stream.Next(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := stream.Next(context.Background())
+	if err != nil || first.CallID != "call_resp_gateway_1" || second.CallID != "call_resp_gateway_2" || first.CallID == second.CallID {
+		t.Fatalf("first=%+v second=%+v err=%v", first, second, err)
+	}
+}
+
+func TestGeminiStreamClassifiesSafetyRefusalAsNonRetryable(t *testing.T) {
+	stream := geminiSSEStream(t, `{"candidates":[{"content":{"role":"model","parts":[]},"finishReason":"SAFETY"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}`)
+	defer stream.Close()
+	_, err := stream.Next(context.Background())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorKind("safety_refusal") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
