@@ -52,6 +52,31 @@ func TestSSEReaderCloseInterruptsBlockedRead(t *testing.T) {
 	}
 }
 
+func TestSSEReaderCancellationInterruptsBlockedRead(t *testing.T) {
+	body := newBlockingBody()
+	reader := NewSSEReader(body)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := reader.Next(ctx)
+		done <- err
+	}()
+	body.waitUntilRead(t)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled SSE read did not return")
+	}
+	if !body.Closed() {
+		t.Fatal("upstream body was not closed on cancellation")
+	}
+}
+
 type blockingBody struct {
 	started   chan struct{}
 	closed    chan struct{}

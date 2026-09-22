@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 )
 
 // SSEEvent is one decoded server-sent event frame.
@@ -16,8 +17,10 @@ type SSEEvent struct {
 
 // SSEReader reads SSE frames without Scanner's token-size ceiling.
 type SSEReader struct {
-	reader *bufio.Reader
-	closer io.Closer
+	reader    *bufio.Reader
+	closer    io.Closer
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewSSEReader builds a line-safe reader for an SSE byte stream.
@@ -35,13 +38,35 @@ func (r *SSEReader) Close() error {
 	if r == nil || r.closer == nil {
 		return nil
 	}
-	return r.closer.Close()
+	r.closeOnce.Do(func() { r.closeErr = r.closer.Close() })
+	return r.closeErr
 }
 
 // Next returns the next complete SSE frame. A canceled context is observed
-// before and after each line read; callers that need to interrupt a blocked
-// read must close the underlying response body.
+// before and after each line read. Cancellation closes an upstream response
+// body to interrupt a blocked read.
 func (r *SSEReader) Next(ctx context.Context) (SSEEvent, error) {
+	done := make(chan struct{})
+	var cancellationDone <-chan struct{}
+	if ctx.Done() != nil {
+		completed := make(chan struct{})
+		cancellationDone = completed
+		go func() {
+			defer close(completed)
+			select {
+			case <-ctx.Done():
+				_ = r.Close()
+			case <-done:
+			}
+		}()
+	}
+	defer func() {
+		close(done)
+		if cancellationDone != nil {
+			<-cancellationDone
+		}
+	}()
+
 	var event SSEEvent
 	var data [][]byte
 	seen := false

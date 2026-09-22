@@ -68,15 +68,15 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 			return err
 		}
 		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
-			return s.failStreamAttempt(ctx, attempt, err)
+			return s.failStreamAttempt(ctx, attempt, "", err)
 		}
 
 		request := in.Request
 		request.ID, request.Model, request.PreviousResponseID = turn.ResponseID, candidate.ModelID, ""
 		request.Input = turn.TranscriptFor(candidate.Provider)
 		stream, err := adapter.Stream(ctx, model, request)
+		var result inference.Result
 		if err == nil {
-			var result inference.Result
 			var completion inference.Event
 			var attemptEmitted bool
 			result, completion, attemptEmitted, err = drainStream(ctx, stream, turn.ResponseID, candidate.ModelID, writer)
@@ -104,7 +104,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		}
 
 		lastErr = err
-		if failErr := s.failStreamAttempt(ctx, attempt, err); failErr != nil {
+		if failErr := s.failStreamAttempt(ctx, attempt, result.ProviderRequestID, err); failErr != nil {
 			lastErr = errors.Join(lastErr, failErr)
 		}
 		if emitted {
@@ -208,10 +208,13 @@ func (s *Service) streamCandidates(in Input, initial router.Decision) []router.D
 	return decisions
 }
 
-func (s *Service) failStreamAttempt(ctx context.Context, attempt conversation.Attempt, cause error) error {
+func (s *Service) failStreamAttempt(ctx context.Context, attempt conversation.Attempt, observedProviderRequestID string, cause error) error {
 	persistCtx, cancel := persistenceContext(ctx)
 	defer cancel()
-	return s.conversations.FailAttempt(persistCtx, attempt, providerRequestID(cause), cause)
+	if observedProviderRequestID == "" {
+		observedProviderRequestID = providerRequestID(cause)
+	}
+	return s.conversations.FailAttempt(persistCtx, attempt, observedProviderRequestID, cause)
 }
 
 func persistenceContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -245,7 +248,7 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model 
 				}
 				return result, completion, emitted, nil
 			}
-			return inference.Result{}, inference.Event{}, emitted, err
+			return accumulator.result(responseID), completion, emitted, err
 		}
 		event, visible := canonicalStreamEvent(event)
 		accumulator.observe(event)
@@ -259,7 +262,7 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model 
 		}
 		emitted = true
 		if err := writer.WriteEvent(ctx, event); err != nil {
-			return inference.Result{}, inference.Event{}, emitted, err
+			return accumulator.result(responseID), completion, emitted, err
 		}
 	}
 }

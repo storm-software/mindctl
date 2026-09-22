@@ -38,6 +38,14 @@ func TestStreamDoesNotRetryAfterVisibleEvent(t *testing.T) {
 	}
 }
 
+func TestStreamFailureRetainsObservedProviderRequestID(t *testing.T) {
+	deps := newStreamDependencies(streamThenFail("partial"))
+	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
+	if err == nil || deps.conversations.failedProviderRequestID != "upstream-request" {
+		t.Fatalf("providerRequestID=%q err=%v", deps.conversations.failedProviderRequestID, err)
+	}
+}
+
 func TestStreamCancellationClosesUpstream(t *testing.T) {
 	stream := &scriptedStream{err: context.Canceled}
 	deps := newStreamDependencies(stream)
@@ -163,10 +171,11 @@ func (s *scriptedStream) Close() error {
 }
 
 type streamConversations struct {
-	turn      conversation.Turn
-	floor     domain.Tier
-	failCalls int
-	committed inference.Result
+	turn                    conversation.Turn
+	floor                   domain.Tier
+	failCalls               int
+	failedProviderRequestID string
+	committed               inference.Result
 }
 
 func (s *streamConversations) Start(_ context.Context, clientID string, _ inference.Request) (conversation.Turn, error) {
@@ -189,8 +198,9 @@ func (s *streamConversations) CommitResult(_ context.Context, _ conversation.Tur
 	return nil
 }
 
-func (s *streamConversations) FailAttempt(context.Context, conversation.Attempt, string, error) error {
+func (s *streamConversations) FailAttempt(_ context.Context, _ conversation.Attempt, providerRequestID string, _ error) error {
 	s.failCalls++
+	s.failedProviderRequestID = providerRequestID
 	return nil
 }
 

@@ -42,7 +42,7 @@ type responsesHandler struct {
 func (h *responsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		WriteError(w, ErrMethodNotAllowed)
 		return
 	}
 	if h.service == nil {

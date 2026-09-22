@@ -61,8 +61,12 @@ func TestResponsesHandlerRejectsWrongMethodBeforeExecution(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	req.Header.Set("Authorization", "Bearer test-token")
 	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusMethodNotAllowed || rr.Header().Get("Allow") != http.MethodPost || runner.calls != 0 {
-		t.Fatalf("status=%d allow=%q calls=%d", rr.Code, rr.Header().Get("Allow"), runner.calls)
+	var body ErrorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusMethodNotAllowed || rr.Header().Get("Allow") != http.MethodPost || rr.Header().Get("Content-Type") != "application/json" || body.Error.Message != "method not allowed" || body.Error.Type != "invalid_request_error" || body.Error.Code != "method_not_allowed" || runner.calls != 0 {
+		t.Fatalf("status=%d allow=%q contentType=%q body=%+v calls=%d", rr.Code, rr.Header().Get("Allow"), rr.Header().Get("Content-Type"), body, runner.calls)
 	}
 }
 

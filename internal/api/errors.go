@@ -19,6 +19,8 @@ var (
 	ErrBodyTooLarge = errors.New("request body too large")
 	// ErrUnauthorized identifies missing or invalid gateway authentication.
 	ErrUnauthorized = errors.New("unauthorized")
+	// ErrMethodNotAllowed identifies an unsupported endpoint method.
+	ErrMethodNotAllowed = errors.New("method not allowed")
 )
 
 type ErrorBody struct {
@@ -43,6 +45,8 @@ func WriteError(w http.ResponseWriter, err error) {
 
 func errorDetail(err error) (int, ErrorDetail) {
 	switch {
+	case errors.Is(err, ErrMethodNotAllowed):
+		return http.StatusMethodNotAllowed, ErrorDetail{Message: "method not allowed", Type: "invalid_request_error", Code: "method_not_allowed"}
 	case errors.Is(err, ErrBodyTooLarge):
 		return http.StatusRequestEntityTooLarge, ErrorDetail{Message: "request body too large", Type: "invalid_request_error", Code: "body_too_large"}
 	case errors.Is(err, ErrUnauthorized):
