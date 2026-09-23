@@ -14,11 +14,12 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 func TestExecuteTranslatesOpenAIRequestAndUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer secret" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer secret" || r.Header.Get("ChatGPT-Account-Id") != "" {
 			t.Fatalf("method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
 		}
 		var body map[string]any
@@ -36,6 +37,94 @@ func TestExecuteTranslatesOpenAIRequestAndUsage(t *testing.T) {
 	got, err := newClient(server.URL).Execute(context.Background(), openAIModel(), textRequest())
 	if err != nil || got.ProviderRequestID != "openai-req" || got.Usage.CachedInputTokens != 2 || len(got.Output) != 1 || got.Output[0].Text != "hi" {
 		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestOpenAIChatGPTOAuthExecuteAndStreamUseRequestCredential(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		invoke func(context.Context, *Client) error
+	}{
+		{"execute", func(ctx context.Context, client *Client) error {
+			_, err := client.Execute(ctx, openAIModel(), textRequest())
+			return err
+		}},
+		{"stream", func(ctx context.Context, client *Client) error {
+			stream, err := client.Stream(ctx, openAIModel(), textRequest())
+			if err != nil {
+				return err
+			}
+			return stream.Close()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/responses" || r.Header.Get("Authorization") != "Bearer oauth.jwt" ||
+					r.Header.Get("ChatGPT-Account-Id") != "account-1" || r.Header.Get("originator") != "mindctl" ||
+					!strings.HasPrefix(r.Header.Get("User-Agent"), "mindctl") || r.Header.Get("X-Untrusted") != "" {
+					t.Fatalf("path=%s headers=%v", r.URL.Path, r.Header)
+				}
+				if tc.name == "stream" {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\"}}\n\n")
+					return
+				}
+				_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"gpt-test","output":[]}`)
+			}))
+			defer server.Close()
+
+			type untrustedContextKey struct{}
+			ctx := context.WithValue(context.Background(), untrustedContextKey{}, "X-Untrusted: private")
+			ctx = upstreamauth.WithChatGPT(ctx, upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+			if err := tc.invoke(ctx, NewChatGPTOAuthClient(server.URL+"/", nil)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestOpenAIChatGPTOAuthRequiresRequestCredentialBeforeNetwork(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+	_, err := NewChatGPTOAuthClient(server.URL, nil).Execute(context.Background(), openAIModel(), textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || calls.Load() != 0 {
+		t.Fatalf("error=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestOpenAIChatGPTOAuthSanitizesAuthenticationFailures(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, "private-upstream-body")
+			}))
+			defer server.Close()
+			ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+			_, err := NewChatGPTOAuthClient(server.URL, nil).Execute(ctx, openAIModel(), textRequest())
+			var normalized *provider.Error
+			if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorAuthentication || strings.Contains(normalized.Error(), "private") || strings.Contains(normalized.Error(), "oauth.jwt") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
+func TestOpenAIRedirectDoesNotForwardChatGPTOAuth(t *testing.T) {
+	var targetCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer origin.Close()
+	ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+	_, err := NewChatGPTOAuthClient(origin.URL, nil).Execute(ctx, openAIModel(), textRequest())
+	if err == nil || targetCalls.Load() != 0 {
+		t.Fatalf("error=%v targetCalls=%d", err, targetCalls.Load())
 	}
 }
 
