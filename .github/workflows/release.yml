@@ -6,11 +6,28 @@ on:
       tag:
         description: override release tag
         required: false
+      mode:
+        description: release path to run manually
+        type: choice
+        default: repository
+        options:
+          - repository
+          - router-package
   push:
     branches:
       - main
       - next
       - experimental
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "cmd/mindctl/**"
+      - "internal/**"
+      - ".goreleaser.yaml"
+      - "Dockerfile"
+      - ".github/workflows/release.yml"
+      - "README.md"
 
 env:
   CI: true
@@ -28,9 +45,12 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    if: github.repository == 'storm-software/mindctl' && (github.ref ==
-      'refs/heads/main' || github.ref == 'refs/heads/next' || github.ref ==
-      'refs/heads/experimental')
+    if: github.repository == 'storm-software/mindctl' && ((github.event_name ==
+      'push' && (github.ref == 'refs/heads/main' || github.ref ==
+      'refs/heads/next' || github.ref == 'refs/heads/experimental')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repository'
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' ||
+      github.ref == 'refs/heads/experimental')))
     steps:
       - name: Send notification - Deployment started
         uses: storm-software/action-notify@main
@@ -53,7 +73,12 @@ jobs:
   process:
     name: "Release"
     if: always() && !cancelled() && !contains(needs.*.result, 'failure') &&
-      github.event.pull_request.draft == false
+      github.repository == 'storm-software/mindctl' && ((github.event_name ==
+      'push' && (github.ref == 'refs/heads/main' || github.ref ==
+      'refs/heads/next' || github.ref == 'refs/heads/experimental')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'repository'
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' ||
+      github.ref == 'refs/heads/experimental')))
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -171,3 +196,98 @@ jobs:
           telegram-token: ${{ secrets.STORM_BOT_TELEGRAM_TOKEN }}
           telegram-chat: ${{ secrets.STORM_BOT_TELEGRAM_NOTIFICATION_CHAT }}
           discord-webhook: ${{ secrets.STORM_BOT_DISCORD_WEBHOOK}}
+
+  router-package:
+    name: Router package
+    if: github.event_name == 'pull_request' || (github.event_name ==
+      'workflow_dispatch' && inputs.mode == 'router-package')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VERSION=snapshot
+            COMMIT=${{ github.sha }}
+            DATE=1970-01-01T00:00:00Z
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindctl-snapshot
+          path: dist/
+
+  router-release:
+    name: Router release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - id: build
+        run: echo "date=$(date --utc +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.metadata.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.build.outputs.date }}
+      - run: gh release edit "${GITHUB_REF_NAME}" --draft=false
+        env:
+          GH_TOKEN: ${{ github.token }}
