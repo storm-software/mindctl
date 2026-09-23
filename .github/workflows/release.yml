@@ -28,7 +28,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    if: github.repository == 'storm-software/shell-shock' && (github.ref ==
+    if: github.repository == 'storm-software/mindctl' && (github.ref ==
       'refs/heads/main' || github.ref == 'refs/heads/next' || github.ref ==
       'refs/heads/experimental')
     steps:

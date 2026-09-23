@@ -100,6 +100,81 @@ func TestRunPrefersExplicitConfigOverHomeConfig(t *testing.T) {
 	}
 }
 
+func TestConfigListDisplaysNestedGroupsWithIndentation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".mindctl")
+	if err := os.Mkdir(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("listen: :8080\nclient_auth:\n  token_env: MINDCTL_GATEWAY_TOKEN\nproviders:\n  - id: openai\n    auth: chatgpt_oauth_passthrough\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"config", "list"}, &stdout, &stderr); err != nil {
+		t.Fatalf("config list: %v", err)
+	}
+	if got, want := stdout.String(), "listen: :8080\nclient_auth:\n  token_env: MINDCTL_GATEWAY_TOKEN\nproviders:\n  - id: openai\n    auth: chatgpt_oauth_passthrough\n"; got != want {
+		t.Errorf("config list output = %q; want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("config list wrote stderr: %q", stderr.String())
+	}
+}
+
+func TestConfigGetPrintsNestedValue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".mindctl")
+	if err := os.Mkdir(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("routing:\n  min_tier: T0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"config", "get", "routing.min_tier"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("config get: %v", err)
+	}
+	if got, want := stdout.String(), "T0\n"; got != want {
+		t.Errorf("config get output = %q; want %q", got, want)
+	}
+}
+
+func TestConfigSetWritesTypedNestedValue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	configDir := filepath.Join(home, ".mindctl")
+	if err := os.Mkdir(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(path, []byte("routing:\n  min_tier: T0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := run(context.Background(), []string{"config", "set", "routing.max_direct_cost_usd", "42"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("config set: %v", err)
+	}
+	var doc map[string]any
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatal(err)
+	}
+	routing, ok := doc["routing"].(map[string]any)
+	if !ok {
+		t.Fatalf("routing = %#v; want mapping", doc["routing"])
+	}
+	if got, want := routing["max_direct_cost_usd"], 42; got != want {
+		t.Errorf("written value = %#v; want %#v", got, want)
+	}
+}
+
 func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {

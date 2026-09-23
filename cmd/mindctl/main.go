@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/storm-software/mindctl/internal/app"
 	"github.com/storm-software/mindctl/internal/config"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -103,7 +104,239 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 			return err
 		},
 	})
+	root.AddCommand(newConfigCommand())
 	return root
+}
+
+func newConfigCommand() *cobra.Command {
+	configCommand := &cobra.Command{
+		Use:   "config",
+		Short: "Read and update the home configuration",
+		Args:  noArgs("unexpected arguments for config"),
+	}
+	configCommand.AddCommand(
+		&cobra.Command{
+			Use:   "list",
+			Short: "Display the home configuration",
+			Args:  noArgs("unexpected arguments for config list"),
+			RunE: func(command *cobra.Command, _ []string) error {
+				document, err := readHomeConfig()
+				if err != nil {
+					return err
+				}
+				body, err := marshalConfig(document)
+				if err != nil {
+					return fmt.Errorf("format config: %w", err)
+				}
+				_, err = command.OutOrStdout().Write(body)
+				return err
+			},
+		},
+		&cobra.Command{
+			Use:   "get <group>.<name>",
+			Short: "Display one home configuration value",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(command *cobra.Command, args []string) error {
+				document, err := readHomeConfig()
+				if err != nil {
+					return err
+				}
+				value, err := configValue(document, args[0])
+				if err != nil {
+					return err
+				}
+				body, err := marshalConfig(value)
+				if err != nil {
+					return fmt.Errorf("format config value: %w", err)
+				}
+				_, err = command.OutOrStdout().Write(body)
+				return err
+			},
+		},
+		&cobra.Command{
+			Use:   "set <group>.<name> <value>",
+			Short: "Set one home configuration value",
+			Args:  cobra.ExactArgs(2),
+			RunE: func(_ *cobra.Command, args []string) error {
+				path, err := homeConfigPath()
+				if err != nil {
+					return err
+				}
+				document, err := readConfig(path)
+				if err != nil {
+					return err
+				}
+				value, err := parseConfigValue(args[1])
+				if err != nil {
+					return err
+				}
+				if err := setConfigValue(document, args[0], value); err != nil {
+					return err
+				}
+				return writeConfig(path, document)
+			},
+		},
+	)
+	return configCommand
+}
+
+func homeConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".mindctl", "config.yaml"), nil
+}
+
+func readHomeConfig() (*yaml.Node, error) {
+	path, err := homeConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	return readConfig(path)
+}
+
+func readConfig(path string) (*yaml.Node, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open config: %w", err)
+	}
+	defer file.Close()
+
+	decoder := yaml.NewDecoder(file)
+	var document yaml.Node
+	if err := decoder.Decode(&document); err != nil {
+		return nil, fmt.Errorf("decode config: %w", err)
+	}
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err != nil {
+			return nil, fmt.Errorf("decode config: %w", err)
+		}
+		return nil, errors.New("decode config: multiple YAML documents are not allowed")
+	}
+	return &document, nil
+}
+
+func configValue(document *yaml.Node, dottedPath string) (*yaml.Node, error) {
+	parts := strings.Split(dottedPath, ".")
+	if len(parts) < 2 || strings.Contains(dottedPath, "..") || strings.HasPrefix(dottedPath, ".") || strings.HasSuffix(dottedPath, ".") {
+		return nil, errors.New("config key must use group.name form")
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("config root must be a mapping")
+	}
+	current := document.Content[0]
+	for _, part := range parts {
+		if current.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("config key %q is not a group", strings.Join(parts[:len(parts)-1], "."))
+		}
+		var next *yaml.Node
+		for index := 0; index < len(current.Content); index += 2 {
+			if current.Content[index].Value == part {
+				next = current.Content[index+1]
+				break
+			}
+		}
+		if next == nil {
+			return nil, fmt.Errorf("config key %q was not found", dottedPath)
+		}
+		current = next
+	}
+	return current, nil
+}
+
+func parseConfigValue(raw string) (*yaml.Node, error) {
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+		return nil, fmt.Errorf("parse config value: %w", err)
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.ScalarNode {
+		return nil, errors.New("config value must be a YAML scalar")
+	}
+	return document.Content[0], nil
+}
+
+func setConfigValue(document *yaml.Node, dottedPath string, value *yaml.Node) error {
+	parts := strings.Split(dottedPath, ".")
+	if len(parts) < 2 || strings.Contains(dottedPath, "..") || strings.HasPrefix(dottedPath, ".") || strings.HasSuffix(dottedPath, ".") {
+		return errors.New("config key must use group.name form")
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return errors.New("config root must be a mapping")
+	}
+	current := document.Content[0]
+	for _, part := range parts[:len(parts)-1] {
+		var next *yaml.Node
+		for index := 0; index < len(current.Content); index += 2 {
+			if current.Content[index].Value == part {
+				next = current.Content[index+1]
+				break
+			}
+		}
+		if next == nil {
+			next = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			current.Content = append(current.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: part}, next)
+		}
+		if next.Kind != yaml.MappingNode {
+			return fmt.Errorf("config key %q is not a group", part)
+		}
+		current = next
+	}
+	name := parts[len(parts)-1]
+	for index := 0; index < len(current.Content); index += 2 {
+		if current.Content[index].Value == name {
+			current.Content[index+1] = value
+			return nil
+		}
+	}
+	current.Content = append(current.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, value)
+	return nil
+}
+
+func writeConfig(path string, document *yaml.Node) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("inspect config: %w", err)
+	}
+	body, err := marshalConfig(document)
+	if err != nil {
+		return fmt.Errorf("format config: %w", err)
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".config-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create temporary config: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
+		temporary.Close()
+		return fmt.Errorf("set temporary config permissions: %w", err)
+	}
+	if _, err := temporary.Write(body); err != nil {
+		temporary.Close()
+		return fmt.Errorf("write temporary config: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary config: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
+}
+
+func marshalConfig(value any) ([]byte, error) {
+	var body strings.Builder
+	encoder := yaml.NewEncoder(&body)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, err
+	}
+	return []byte(body.String()), nil
 }
 
 func noArgs(message string) cobra.PositionalArgs {
