@@ -52,6 +52,7 @@
   - [Go Install](#go-install)
   - [From source](#from-source)
 - [Configuration](#configuration)
+  - [Model and provider availability](#model-and-provider-availability)
   - [Laya system 1 sidecar](#laya-system-1-sidecar)
 - [Development](#development)
   - [Build](#build)
@@ -188,8 +189,8 @@ mindctl model list --all
 mindctl model enable openai.gpt-5
 mindctl model disable openai
 
-mindctl providers list
-mindctl providers list --all
+mindctl provider list
+mindctl provider list --all
 mindctl provider enable openai
 mindctl provider disable openai
 ```

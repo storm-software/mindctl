@@ -96,7 +96,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		},
 	})
 	root.AddCommand(newConfigCommand())
-	root.AddCommand(newModelCommand(settings), newProvidersCommand(settings), newProviderCommand(settings))
+	root.AddCommand(newModelCommand(settings), newProviderListCommand(settings), newProviderCommand(settings))
 	return root
 }
 
@@ -171,17 +171,18 @@ func newModelToggleCommand(settings *viper.Viper, action string, enabled bool) *
 	}
 }
 
-func newProvidersCommand(settings *viper.Viper) *cobra.Command {
-	providersCommand := &cobra.Command{
-		Use:   "providers",
+func newProviderListCommand(settings *viper.Viper) *cobra.Command {
+	providerCommand := &cobra.Command{
+		Use:   "provider",
 		Short: "List routable providers",
-		Args:  noArgs("unexpected arguments for providers"),
+		Args:  noArgs("unexpected arguments for provider"),
 	}
+
 	var all bool
 	listCommand := &cobra.Command{
 		Use:   "list",
 		Short: "List enabled providers",
-		Args:  noArgs("unexpected arguments for providers list"),
+		Args:  noArgs("unexpected arguments for provider list"),
 		RunE: func(command *cobra.Command, _ []string) error {
 			cfg, err := readCommandCatalog(command, settings)
 			if err != nil {
@@ -191,8 +192,9 @@ func newProvidersCommand(settings *viper.Viper) *cobra.Command {
 		},
 	}
 	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
-	providersCommand.AddCommand(listCommand)
-	return providersCommand
+	providerCommand.AddCommand(listCommand)
+
+	return providerCommand
 }
 
 func newProviderCommand(settings *viper.Viper) *cobra.Command {

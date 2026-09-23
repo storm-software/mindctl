@@ -222,10 +222,10 @@ func TestProviderCommandsAliasProviderWideModelChanges(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	if err := run(context.Background(), []string{"--config", path, "providers", "list", "--all"}, &stdout, io.Discard); err != nil {
-		t.Fatalf("providers list --all: %v", err)
+		t.Fatalf("provider list --all: %v", err)
 	}
 	if got, want := stdout.String(), "openai (disabled)\ndeepseek (enabled)\n"; got != want {
-		t.Fatalf("providers list --all output = %q; want %q", got, want)
+		t.Fatalf("provider list --all output = %q; want %q", got, want)
 	}
 
 	if err := run(context.Background(), []string{"--config", path, "provider", "enable", "openai"}, io.Discard, io.Discard); err != nil {
@@ -236,7 +236,7 @@ func TestProviderCommandsAliasProviderWideModelChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, want := stdout.String(), "openai\ndeepseek\n"; got != want {
-		t.Fatalf("providers list output = %q; want %q", got, want)
+		t.Fatalf("provider list output = %q; want %q", got, want)
 	}
 }
 
