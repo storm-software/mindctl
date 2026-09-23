@@ -18,7 +18,7 @@
 </div>
 <br />
 
-**Mindctl** is a LLM router that uses built-in logic and the [Jev system one model](https://typesafe.ai/blog/introducing-system-one-models-and-jev) to intelligently route requests to the appropriate model based on the input data.
+**Mindctl** is an LLM router that uses built-in logic and the [Laya System 1 decision model](https://huggingface.co/convaiinnovations/laya) to intelligently route requests to the appropriate LLM model based on the input prompt.
 
 <br />
 
@@ -142,13 +142,45 @@ chmod 600 ~/.mindctl/config.yaml
 ```
 
 The example configuration references environment variables rather than storing
-secret values. Export values for its gateway token, Jev API key, and encryption
+secret values. Export values for its gateway token, `LAYA_CLASSIFIER_TOKEN`, and encryption
 key before startup. Keep the configuration and SQLite database in locations
 the Mindctl process can read and write, respectively.
 
 Container deployments should continue to mount the configuration explicitly at
 `/etc/mindctl/config.yaml`, as shown above; the image command supplies that
 path through its configuration flag.
+
+## Laya system 1 sidecar
+
+The Laya classifier is optional. To launch the local sidecar, set a shared
+bearer token and start its opt-in Compose profile:
+
+```sh
+export LAYA_CLASSIFIER_TOKEN="$(openssl rand -hex 32)"
+docker compose -f compose.laya.yaml --profile laya up --build -d
+```
+
+`compose.laya.yaml` keeps port 8091 inside the named `mindctl` Docker network;
+it does not publish a host port. Run the gateway in that network and configure
+the endpoint shown in [`config.example.yaml`](config.example.yaml):
+
+```yaml
+classifier:
+  endpoint: http://laya:8091
+  token_env: LAYA_CLASSIFIER_TOKEN
+```
+
+The sidecar requires `Authorization: Bearer <LAYA_CLASSIFIER_TOKEN>` on
+`POST /v1/classify`. It pins `convaiinnovations/laya` and the
+`typed-decisions` variant, downloads model files only on its first startup,
+and retains them in the `laya-model-cache` volume. Normal Go and Python tests
+do not download model weights.
+
+For an operator-managed sidecar, point the same `classifier:` configuration at
+an absolute HTTPS endpoint instead. It must implement the documented
+`mindctl.classifier.v1` bearer-authenticated `/v1/classify` contract; Mindctl
+continues to make deterministic routing decisions and falls back safely when
+the endpoint is unavailable.
 
 # Development
 

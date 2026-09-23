@@ -26,6 +26,11 @@ on:
       - "internal/**"
       - ".goreleaser.yaml"
       - "Dockerfile"
+      - "Dockerfile.laya"
+      - "compose.laya.yaml"
+      - ".dockerignore"
+      - "sidecar/laya/**"
+      - "config.example.yaml"
       - ".github/workflows/release.yml"
       - "README.md"
 
@@ -212,6 +217,11 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --locked --project sidecar/laya pytest -q
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -224,6 +234,11 @@ jobs:
           args: release --snapshot --clean
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+      - run: |
+          test -f Dockerfile.laya
+          docker build --file Dockerfile.laya --tag mindctl-laya:test .
+          docker compose -f compose.laya.yaml config --quiet
+          rg -n 'classifier:|LAYA_CLASSIFIER_TOKEN|compose.laya.yaml|mindctl-laya' README.md config.example.yaml
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -253,6 +268,11 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --locked --project sidecar/laya pytest -q
       - id: build
         run: echo "date=$(date --utc +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@v6
@@ -288,6 +308,22 @@ jobs:
             VERSION=${{ steps.metadata.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.build.outputs.date }}
+      - id: laya-metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-laya
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.laya
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.laya-metadata.outputs.tags }}
+          labels: ${{ steps.laya-metadata.outputs.labels }}
       - run: gh release edit "${GITHUB_REF_NAME}" --draft=false
         env:
           GH_TOKEN: ${{ github.token }}

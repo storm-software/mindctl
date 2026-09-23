@@ -1,0 +1,21 @@
+services:
+  laya:
+    image: mindctl-laya:local
+    build:
+      context: .
+      dockerfile: Dockerfile.laya
+    profiles: [laya]
+    environment:
+      LAYA_CLASSIFIER_TOKEN: ${LAYA_CLASSIFIER_TOKEN:-}
+    expose:
+      - "8091"
+    volumes:
+      - laya-model-cache:/home/laya/.cache/huggingface
+    networks: [mindctl]
+
+volumes:
+  laya-model-cache:
+
+networks:
+  mindctl:
+    name: mindctl

@@ -8,3 +8,6 @@ tmp
 .env
 .env.*
 config.example.yaml
+sidecar/laya/.venv
+sidecar/laya/.pytest_cache
+sidecar/laya/**/__pycache__
