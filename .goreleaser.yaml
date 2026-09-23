@@ -18,11 +18,25 @@ builds:
 archives:
   - id: mindctl
     ids: [mindctl]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}-{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
         formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+brews:
+  - repository:
+      owner: storm-software
+      name: mindctl
+    directory: HomebrewFormula
+    homepage: "https://github.com/storm-software/mindctl"
+    description: "An LLM router that uses built-in logic and system 1 decision models to intelligently route requests to the appropriate LLM based on the input prompt"
+    license: "Apache-2.0"
+    test: |
+      system "#{bin}/mindctl", "--help"
 
 checksum:
   name_template: checksums.txt

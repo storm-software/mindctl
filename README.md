@@ -47,10 +47,12 @@
 
 - [Install](#install)
   - [Native binary](#native-binary)
+  - [Homebrew](#homebrew)
   - [Container](#container)
   - [Go Install](#go-install)
   - [From source](#from-source)
 - [Configuration](#configuration)
+  - [Laya system 1 sidecar](#laya-system-1-sidecar)
 - [Development](#development)
   - [Build](#build)
   - [Development Server](#development-server)
@@ -82,16 +84,23 @@ against `checksums.txt`, unpack it, and run:
 On Linux, run `sha256sum --ignore-missing --check checksums.txt`. On macOS,
 compare `shasum -a 256 <archive>` to the matching `checksums.txt` entry.
 
+## Homebrew
+
+```sh
+brew tap storm-software/mindctl https://github.com/storm-software/mindctl
+brew install mindctl
+```
+
 ## Container
 
 Pull a versioned image and mount a runtime configuration file:
 
 ```sh
-docker pull ghcr.io/storm-software/mindctl:0.0.1
+docker pull ghcr.io/storm-software/mindctl
 docker run --rm -p 8080:8080 \
   -v "$PWD/config.yaml:/etc/mindctl/config.yaml:ro" \
   --env-file .env \
-  ghcr.io/storm-software/mindctl:0.0.1
+  ghcr.io/storm-software/mindctl
 ```
 
 The image runs as a non-root user and contains no usable configuration,

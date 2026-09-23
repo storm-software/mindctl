@@ -19,10 +19,13 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
 
 FROM gcr.io/distroless/static-debian12:nonroot
 LABEL org.opencontainers.image.title="mindctl" \
-  org.opencontainers.image.description="Mindctl AI model router" \
-  org.opencontainers.image.licenses="Apache-2.0"
+  org.opencontainers.image.description="An LLM router that uses built-in logic and system 1 decision models to intelligently route requests to the appropriate LLM based on the input prompt" \
+  org.opencontainers.image.licenses="Apache-2.0" \
+  org.opencontainers.image.vendor="Storm Software" \
+  org.opencontainers.image.url="https://stormsoftware.com/projects/mindctl" \
+  org.opencontainers.image.documentation="https://stormsoftware.com/projects/mindctl"
 COPY --from=build /out/mindctl /usr/local/bin/mindctl
 USER nonroot:nonroot
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/mindctl"]
-CMD ["-config", "/etc/mindctl/config.yaml"]
+CMD ["--config", "/etc/mindctl/config.yaml"]

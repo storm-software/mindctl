@@ -2,7 +2,7 @@
   "name": "@mindctl/monorepo",
   "version": "0.0.1",
   "type": "module",
-  "description": "A LLM router that uses built-in logic and the Jev system one model to intelligently route requests to the appropriate model based on the input data.",
+  "description": "An LLM router that uses built-in logic and system 1 decision models to intelligently route requests to the appropriate LLM based on the input prompt.",
   "repository": {
     "type": "github",
     "url": "https://github.com/storm-software/mindctl.git"

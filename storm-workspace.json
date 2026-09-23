@@ -6,5 +6,11 @@
   "repository": "https://github.com/storm-software/mindctl",
   "packageManager": "pnpm",
   "logLevel": "trace",
-  "docs": "https://docs.stormsoftware.com/projects/mindctl"
+  "docs": "https://docs.stormsoftware.com/projects/mindctl",
+  "release": {
+    "banner": {
+      "url": "https://public.storm-cdn.com/mindctl/media/banner-1280x320-dark.gif",
+      "alt": "Mindctl's logo banner"
+    }
+  }
 }
