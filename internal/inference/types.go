@@ -14,6 +14,7 @@ type Request struct {
 	StreamOptions                               *StreamOptions
 	AccessPrograms                              *AccessPrograms
 	ToolChoice, ServiceTier, PromptCacheKey     string
+	TextVerbosity                               string
 	Include                                     []string
 	ClientMetadata                              map[string]string
 	ParallelToolCalls                           *bool
@@ -50,7 +51,14 @@ type Item struct {
 type Tool struct {
 	Type, Name, Description string
 	Parameters              json.RawMessage
+	Format                  *ToolFormat
+	DeferLoading            *bool
 	Strict                  bool
+}
+
+// ToolFormat defines the syntax accepted by a custom freeform tool.
+type ToolFormat struct {
+	Type, Syntax, Definition string
 }
 
 // JSONSchemaFormat requests JSON Schema structured output.

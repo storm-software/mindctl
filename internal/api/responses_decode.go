@@ -82,7 +82,8 @@ type wireAccessPrograms struct {
 }
 
 type wireText struct {
-	Format *wireJSONSchemaFormat `json:"format"`
+	Verbosity string                `json:"verbosity"`
+	Format    *wireJSONSchemaFormat `json:"format"`
 }
 
 type wireJSONSchemaFormat struct {
@@ -94,11 +95,19 @@ type wireJSONSchemaFormat struct {
 }
 
 type wireTool struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-	Strict      bool            `json:"strict"`
+	Type         string          `json:"type"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Parameters   json.RawMessage `json:"parameters"`
+	Format       *wireToolFormat `json:"format"`
+	DeferLoading *bool           `json:"defer_loading"`
+	Strict       bool            `json:"strict"`
+}
+
+type wireToolFormat struct {
+	Type       string `json:"type"`
+	Syntax     string `json:"syntax"`
+	Definition string `json:"definition"`
 }
 
 type wireInputItem struct {
@@ -147,11 +156,21 @@ func (wire responseRequest) request() (inference.Request, error) {
 		request.AccessPrograms = &inference.AccessPrograms{Cyber: wire.AccessPrograms.Cyber}
 	}
 	for _, tool := range wire.Tools {
-		request.Tools = append(request.Tools, inference.Tool{Type: tool.Type, Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: tool.Strict})
+		decoded := inference.Tool{
+			Type: tool.Type, Name: tool.Name, Description: tool.Description,
+			Parameters: append(json.RawMessage(nil), tool.Parameters...), DeferLoading: cloneBool(tool.DeferLoading), Strict: tool.Strict,
+		}
+		if tool.Format != nil {
+			decoded.Format = &inference.ToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
+		}
+		request.Tools = append(request.Tools, decoded)
 	}
 	if wire.Text != nil && wire.Text.Format != nil {
 		format := wire.Text.Format
 		request.TextFormat = &inference.JSONSchemaFormat{Type: format.Type, Name: format.Name, Description: format.Description, Schema: format.Schema, Strict: format.Strict}
+	}
+	if wire.Text != nil {
+		request.TextVerbosity = wire.Text.Verbosity
 	}
 	return request, nil
 }

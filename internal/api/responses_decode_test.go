@@ -70,6 +70,7 @@ func TestDecodeRejectsUnknownNestedFieldsAndMultipleDocuments(t *testing.T) {
 		`{"model":"mindctl-auto","input":"hello","previous_response_id":"not-a-response-id"}`,
 		`{"model":"mindctl-auto","input":"hello","store":true}`,
 		`{"model":"mindctl-auto","input":"hello","tool_choice":"required"}`,
+		`{"model":"mindctl-auto","input":"hello","text":{"verbosity":"loud"}}`,
 	} {
 		_, _, err := decode(t, body, 1<<20)
 		if !errors.Is(err, ErrInvalidRequest) {

@@ -46,15 +46,24 @@ type responseAccessPrograms struct {
 }
 
 type responseTool struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
-	Strict      bool            `json:"strict,omitempty"`
+	Type         string              `json:"type"`
+	Name         string              `json:"name,omitempty"`
+	Description  string              `json:"description,omitempty"`
+	Parameters   json.RawMessage     `json:"parameters,omitempty"`
+	Format       *responseToolFormat `json:"format,omitempty"`
+	DeferLoading *bool               `json:"defer_loading,omitempty"`
+	Strict       bool                `json:"strict,omitempty"`
+}
+
+type responseToolFormat struct {
+	Type       string `json:"type"`
+	Syntax     string `json:"syntax"`
+	Definition string `json:"definition"`
 }
 
 type responseText struct {
-	Format responseTextFormat `json:"format"`
+	Verbosity string              `json:"verbosity,omitempty"`
+	Format    *responseTextFormat `json:"format,omitempty"`
 }
 
 type responseTextFormat struct {
@@ -147,10 +156,20 @@ func toResponsesRequest(model domain.Model, request inference.Request, stream bo
 		result.Input = append(result.Input, encoded)
 	}
 	for _, tool := range request.Tools {
-		result.Tools = append(result.Tools, responseTool{Type: tool.Type, Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: tool.Strict})
+		encoded := responseTool{
+			Type: tool.Type, Name: tool.Name, Description: tool.Description,
+			Parameters: tool.Parameters, DeferLoading: cloneBoolPointer(tool.DeferLoading), Strict: tool.Strict,
+		}
+		if tool.Format != nil {
+			encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
+		}
+		result.Tools = append(result.Tools, encoded)
 	}
-	if format := request.TextFormat; format != nil {
-		result.Text = &responseText{Format: responseTextFormat{Type: format.Type, Name: format.Name, Description: format.Description, Schema: format.Schema, Strict: format.Strict}}
+	if request.TextVerbosity != "" || request.TextFormat != nil {
+		result.Text = &responseText{Verbosity: request.TextVerbosity}
+		if format := request.TextFormat; format != nil {
+			result.Text.Format = &responseTextFormat{Type: format.Type, Name: format.Name, Description: format.Description, Schema: format.Schema, Strict: format.Strict}
+		}
 	}
 	return result, nil
 }
@@ -208,7 +227,7 @@ func validateCapabilities(model domain.Model, request inference.Request) error {
 		}
 	}
 	for _, tool := range request.Tools {
-		if tool.Type != "function" {
+		if tool.Type != "function" && tool.Type != "custom" {
 			return unsupported(tool.Type)
 		}
 		if !model.Capabilities.Functions {

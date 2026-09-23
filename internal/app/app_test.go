@@ -129,12 +129,19 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 			include, _ := body["include"].([]any)
 			streamOptions, _ := body["stream_options"].(map[string]any)
 			metadata, _ := body["client_metadata"].(map[string]any)
+			textControls, _ := body["text"].(map[string]any)
 			tools, _ := body["tools"].([]any)
+			if len(tools) != 2 {
+				t.Fatalf("body=%v", body)
+			}
+			customTool, _ := tools[1].(map[string]any)
+			customFormat, _ := customTool["format"].(map[string]any)
 			if body["model"] != "first" || body["tool_choice"] != "auto" || body["parallel_tool_calls"] != true ||
 				body["store"] != false || body["stream"] != true || reasoning["effort"] != "high" || reasoning["summary"] != "auto" ||
 				len(include) != 1 || include[0] != "reasoning.encrypted_content" || body["prompt_cache_key"] != "cache-key" ||
 				body["service_tier"] != "priority" || streamOptions["reasoning_summary_delivery"] != "sequential_cutoff" ||
-				metadata["thread_id"] != "thread-1" || len(tools) != 1 {
+				metadata["thread_id"] != "thread-1" || textControls["verbosity"] != "high" ||
+				customTool["type"] != "custom" || customTool["name"] != "apply_patch" || customFormat["type"] != "grammar" {
 				t.Fatalf("body=%v", body)
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -162,8 +169,14 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
   "model":"mindctl-auto",
   "instructions":"be concise",
-  "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}],
-  "tools":[{"type":"function","name":"lookup","description":"find","parameters":{"type":"object"},"strict":true}],
+  "input":[
+    {"type":"message","role":"developer","content":[{"type":"input_text","text":"follow repository instructions"}]},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+  ],
+  "tools":[
+    {"type":"function","name":"lookup","description":"find","parameters":{"type":"object"},"strict":true},
+    {"type":"custom","name":"apply_patch","description":"apply a patch","format":{"type":"grammar","syntax":"lark","definition":"start: PATCH"}}
+  ],
   "tool_choice":"auto",
   "parallel_tool_calls":true,
   "reasoning":{"effort":"high","summary":"auto"},
@@ -173,6 +186,7 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
   "include":["reasoning.encrypted_content"],
   "service_tier":"priority",
   "prompt_cache_key":"cache-key",
+  "text":{"verbosity":"high"},
   "client_metadata":{"thread_id":"thread-1"}
 }`))
 		req.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
