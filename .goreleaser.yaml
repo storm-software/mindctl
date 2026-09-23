@@ -31,6 +31,13 @@ brews:
   - repository:
       owner: storm-software
       name: mindctl
+      branch: "homebrew-{{ .Version }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: storm-software
+          name: mindctl
+          branch: main
     directory: HomebrewFormula
     homepage: "https://github.com/storm-software/mindctl"
     description: "An LLM router that uses built-in logic and system 1 decision models to intelligently route requests to the appropriate LLM based on the input prompt"

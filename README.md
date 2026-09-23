@@ -18,7 +18,7 @@
 </div>
 <br />
 
-**Mindctl** is an LLM router that uses built-in logic and the [Laya System 1 decision model](https://huggingface.co/convaiinnovations/laya) to intelligently route requests to the appropriate LLM model based on the input prompt.
+**Mindctl** is an LLM router that uses built-in logic and a System 1 decision model like [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) or [Laya](https://huggingface.co/convaiinnovations/laya) to intelligently route requests to the appropriate LLM model based on the input prompt.
 
 <br />
 
