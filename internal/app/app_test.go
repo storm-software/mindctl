@@ -113,6 +113,31 @@ func TestNewUsesTheDefaultResponseBodyLimit(t *testing.T) {
 	}
 }
 
+func TestConfiguredProvidersUsesDeepSeekResponsesEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer deepseek-token" {
+			t.Fatalf("method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"deepseek-flash","output":[]}`)
+	}))
+	defer server.Close()
+
+	providers, err := configuredProviders([]config.ProviderConfig{{
+		ID: "deepseek", BaseURL: server.URL, APIKeyEnv: "DEEPSEEK_API_TOKEN",
+	}}, func(name string) (string, bool) {
+		return "deepseek-token", name == "DEEPSEEK_API_TOKEN"
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = providers["deepseek"].Execute(context.Background(), domain.Model{
+		ID: "deepseek-flash", UpstreamID: "deepseek-flash", Capabilities: domain.Capabilities{Text: true},
+	}, inference.Request{Model: "deepseek-flash", Input: []inference.Item{{Type: "message", Role: "user", Text: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUnavailableLayaPreservesT4Fallback(t *testing.T) {
 	cfg, env := fixture(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

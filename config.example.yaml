@@ -46,7 +46,7 @@ routing:
   underspecification_floors: []
 
 providers:
-  # Supported provider IDs are openai, anthropic, and gemini. Authentication
+  # Supported provider IDs are openai, anthropic, gemini, and deepseek. Authentication
   # modes are exclusive. ChatGPT OAuth passthrough needs no OPENAI_API_KEY;
   # Codex supplies its caller-managed credential on each request.
   - id: openai
@@ -57,6 +57,12 @@ providers:
   #   base_url: https://api.openai.com
   #   auth: api_key
   #   api_key_env: OPENAI_API_KEY
+  # DeepSeek's OpenAI-compatible Responses API. Uncomment this provider and
+  # its models below to route through DeepSeek using a separately managed key.
+  # - id: deepseek
+  #   base_url: https://api.deepseek.com
+  #   auth: api_key
+  #   api_key_env: DEEPSEEK_API_TOKEN
 
 models:
   - id: gpt-5
@@ -76,3 +82,36 @@ models:
     latency_p95: 0s
     success_prior: 1
     task_success_priors: {}
+
+  # DeepSeek currently publishes peak and off-peak prices. These conservative
+  # peak USD-per-million-token figures avoid underestimating route cost; cache
+  # hit input is stored separately. Uncomment with the deepseek provider above.
+  # - id: deepseek-flash
+  #   provider: deepseek
+  #   tier: T3
+  #   capabilities: [chat, tools, images, json_schema]
+  #   context_window: 1000000
+  #   max_output_tokens: 384000
+  #   available: true
+  #   input_price: 0.30
+  #   cached_input_price_usd_per_million: 0.006
+  #   output_price: 1.20
+  #   per_request_price_usd: 0
+  #   latency_p95: 0s
+  #   success_prior: 1
+  #   task_success_priors: {}
+
+  # - id: deepseek-v4-pro
+  #   provider: deepseek
+  #   tier: T5
+  #   capabilities: [chat, tools, json_schema]
+  #   context_window: 1000000
+  #   max_output_tokens: 384000
+  #   available: true
+  #   input_price: 1.32
+  #   cached_input_price_usd_per_million: 0.044
+  #   output_price: 3.96
+  #   per_request_price_usd: 0
+  #   latency_p95: 0s
+  #   success_prior: 1
+  #   task_success_priors: {}

@@ -201,6 +201,9 @@ func configuredProviders(configs []config.ProviderConfig, getenv func(string) (s
 				key, _ := getenv(cfg.APIKeyEnv)
 				entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
 			}
+		case "deepseek":
+			key, _ := getenv(cfg.APIKeyEnv)
+			entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
 		case "anthropic":
 			key, _ := getenv(cfg.APIKeyEnv)
 			entries[cfg.ID] = anthropic.NewClient(cfg.BaseURL, key, httpClient)
