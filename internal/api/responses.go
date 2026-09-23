@@ -301,6 +301,12 @@ func streamPayload(event inference.Event, metadata executor.StreamMetadata) any 
 			Input       string `json:"input"`
 		}{Type: event.Type, ResponseID: event.ResponseID, ItemID: event.ItemID, OutputIndex: event.OutputIndex, Input: event.Delta}
 	case "response.output_item.added", "response.output_item.done":
+		if event.ItemType != "custom_tool_call" {
+			return struct {
+				Type     string       `json:"type"`
+				Response responseBody `json:"response"`
+			}{Type: event.Type, Response: responseBody{ID: event.ResponseID, Object: "response", Status: event.Status, Model: metadata.Model, Usage: usageBody(event.Usage)}}
+		}
 		return struct {
 			Type        string `json:"type"`
 			ResponseID  string `json:"response_id,omitempty"`
