@@ -121,6 +121,9 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer oauth.jwt" || r.Header.Get("ChatGPT-Account-Id") != "account-1" {
 				t.Fatalf("headers=%v", r.Header)
 			}
+			if got := r.Header.Get("x-openai-internal-codex-responses-lite"); (call == 3 && got != "true") || (call != 3 && got != "") {
+				t.Fatalf("call=%d responses-lite header=%q", call, got)
+			}
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
@@ -183,6 +186,8 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			if call == 1 {
+				_, _ = w.Write([]byte("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}}\n\n"))
+				_, _ = w.Write([]byte("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_lookup\",\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}}\n\n"))
 				_, _ = w.Write([]byte("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"ctc_1\",\"type\":\"custom_tool_call\",\"call_id\":\"call_patch\",\"name\":\"apply_patch\",\"input\":\"*** Begin Patch\"}}\n\n"))
 			}
 			_, _ = w.Write([]byte("event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"model\":\"first\",\"output\":[]}}\n\n"))
@@ -276,6 +281,11 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"type":"custom_tool_call"`) || !strings.Contains(rr.Body.String(), `"input":"*** Begin Patch"`) {
 		t.Fatalf("custom tool event body=%s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"type":"message"`) || !strings.Contains(rr.Body.String(), `"role":"assistant"`) ||
+		!strings.Contains(rr.Body.String(), `"content":[{"text":"hello","type":"output_text"}]`) ||
+		!strings.Contains(rr.Body.String(), `"type":"function_call"`) || !strings.Contains(rr.Body.String(), `"arguments":"{\"q\":\"x\"}"`) {
+		t.Fatalf("native output item body=%s", rr.Body.String())
 	}
 
 	rr = httptest.NewRecorder()

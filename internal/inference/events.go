@@ -6,7 +6,7 @@ import "encoding/json"
 type Event struct {
 	Type                                                                     string
 	ResponseID, ProviderRequestID, ItemID, ItemType, CallID, Name, Namespace string
-	Delta, Input                                                             string
+	Role, Delta, ItemText, Input                                             string
 	ArgumentsDelta                                                           string
 	OutputIndex                                                              int
 	Status                                                                   string

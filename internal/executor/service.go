@@ -195,7 +195,8 @@ func normalizedFeatures(supplied domain.RequestFeatures, request inference.Reque
 		if item.Type == "input_image" || len(item.ImageURL) != 0 {
 			features.NeedsImages = true
 		}
-		if item.Type == "function_call" || item.Type == "function_call_output" {
+		if item.Type == "function_call" || item.Type == "function_call_output" ||
+			item.Type == "custom_tool_call" || item.Type == "custom_tool_call_output" || item.Type == "additional_tools" {
 			features.NeedsFunctions = true
 		}
 	}

@@ -322,12 +322,15 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 			Usage  json.RawMessage `json:"usage"`
 		} `json:"response"`
 		Item *struct {
-			ID        string `json:"id"`
-			Type      string `json:"type"`
-			CallID    string `json:"call_id"`
-			Name      string `json:"name"`
-			Namespace string `json:"namespace"`
-			Input     string `json:"input"`
+			ID        string            `json:"id"`
+			Type      string            `json:"type"`
+			Role      string            `json:"role"`
+			CallID    string            `json:"call_id"`
+			Name      string            `json:"name"`
+			Namespace string            `json:"namespace"`
+			Input     string            `json:"input"`
+			Arguments string            `json:"arguments"`
+			Content   []responseContent `json:"content"`
 		} `json:"item"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -348,8 +351,17 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 	event := inference.Event{Type: kind, ResponseID: frame.ResponseID, ItemID: frame.ItemID, CallID: frame.CallID, Name: frame.Name, OutputIndex: frame.OutputIndex, Data: append(json.RawMessage(nil), data...)}
 	if frame.Item != nil {
 		event.ItemType = frame.Item.Type
+		event.Role = frame.Item.Role
 		event.Namespace = frame.Item.Namespace
 		event.Input = frame.Item.Input
+		if event.ArgumentsDelta == "" {
+			event.ArgumentsDelta = frame.Item.Arguments
+		}
+		for _, content := range frame.Item.Content {
+			if content.Type == "output_text" {
+				event.ItemText += content.Text
+			}
+		}
 	}
 	if frame.Response != nil {
 		event.Status = frame.Response.Status

@@ -68,7 +68,7 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 	if err != nil {
 		return inference.Result{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, requestID, err := c.post(ctx, encoded, false)
+	response, requestID, err := c.post(ctx, encoded, false, usesResponsesLite(request))
 	if err != nil {
 		return inference.Result{}, err
 	}
@@ -91,7 +91,7 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 	if err != nil {
 		return nil, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, requestID, err := c.post(ctx, encoded, true)
+	response, requestID, err := c.post(ctx, encoded, true, usesResponsesLite(request))
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +116,16 @@ func (c *Client) applyAuthenticationContract(body *responsesRequest, stream bool
 	}
 }
 
-func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Response, string, error) {
+func usesResponsesLite(request inference.Request) bool {
+	for _, item := range request.Input {
+		if item.Type == "additional_tools" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bool) (*http.Response, string, error) {
 	if strings.TrimSpace(c.baseURL) == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
@@ -150,6 +159,9 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Resp
 		request.Header.Set("User-Agent", "mindctl")
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if responsesLite {
+		request.Header.Set("x-openai-internal-codex-responses-lite", "true")
+	}
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
 	}

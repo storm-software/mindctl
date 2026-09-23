@@ -301,35 +301,32 @@ func streamPayload(event inference.Event, metadata executor.StreamMetadata) any 
 			Input       string `json:"input"`
 		}{Type: event.Type, ResponseID: event.ResponseID, ItemID: event.ItemID, OutputIndex: event.OutputIndex, Input: event.Delta}
 	case "response.output_item.added", "response.output_item.done":
-		if event.ItemType != "custom_tool_call" {
+		item := map[string]any{"id": event.ItemID, "type": event.ItemType}
+		switch event.ItemType {
+		case "message":
+			item["role"] = event.Role
+			item["content"] = []map[string]any{{"type": "output_text", "text": event.ItemText}}
+		case "function_call":
+			item["call_id"] = event.CallID
+			item["name"] = event.Name
+			item["arguments"] = event.ArgumentsDelta
+			if event.Namespace != "" {
+				item["namespace"] = event.Namespace
+			}
+		case "custom_tool_call":
+			item["call_id"] = event.CallID
+			item["name"] = event.Name
+			item["input"] = event.Input
+			if event.Namespace != "" {
+				item["namespace"] = event.Namespace
+			}
+		default:
 			return struct {
 				Type     string       `json:"type"`
 				Response responseBody `json:"response"`
 			}{Type: event.Type, Response: responseBody{ID: event.ResponseID, Object: "response", Status: event.Status, Model: metadata.Model, Usage: usageBody(event.Usage)}}
 		}
-		return struct {
-			Type        string `json:"type"`
-			ResponseID  string `json:"response_id,omitempty"`
-			OutputIndex int    `json:"output_index"`
-			Item        struct {
-				ID        string `json:"id,omitempty"`
-				Type      string `json:"type"`
-				CallID    string `json:"call_id,omitempty"`
-				Name      string `json:"name,omitempty"`
-				Namespace string `json:"namespace,omitempty"`
-				Input     string `json:"input,omitempty"`
-			} `json:"item"`
-		}{
-			Type: event.Type, ResponseID: event.ResponseID, OutputIndex: event.OutputIndex,
-			Item: struct {
-				ID        string `json:"id,omitempty"`
-				Type      string `json:"type"`
-				CallID    string `json:"call_id,omitempty"`
-				Name      string `json:"name,omitempty"`
-				Namespace string `json:"namespace,omitempty"`
-				Input     string `json:"input,omitempty"`
-			}{ID: event.ItemID, Type: event.ItemType, CallID: event.CallID, Name: event.Name, Namespace: event.Namespace, Input: event.Input},
-		}
+		return map[string]any{"type": event.Type, "response_id": event.ResponseID, "output_index": event.OutputIndex, "item": item}
 	default:
 		return struct {
 			Type     string       `json:"type"`

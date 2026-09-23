@@ -45,6 +45,22 @@ func TestAutoRouteExcludesProviderWithoutHostedTool(t *testing.T) {
 	}
 }
 
+func TestAutoRouteExcludesTextOnlyModelForResponsesLiteTools(t *testing.T) {
+	deps := fakeDeps()
+	deps.Models = []domain.Model{
+		fakeModel("text-only", "openai", domain.T4, 1),
+		fakeModel("tool-capable", "anthropic", domain.T4, 2),
+	}
+	deps.Models[1].Capabilities.Functions = true
+	input := newAutomaticInput()
+	input.Request.Input = append([]inference.Item{{Type: "additional_tools", Role: "developer", Tools: []inference.Tool{{Type: "function", Name: "lookup"}}}}, input.Request.Input...)
+
+	got, err := deps.Executor.Execute(context.Background(), deps.input(input))
+	if err != nil || got.Decision.ModelID != "tool-capable" || deps.OpenAI.Calls != 0 || deps.Anthropic.Calls != 1 {
+		t.Fatalf("got=%+v openai_calls=%d anthropic_calls=%d err=%v", got, deps.OpenAI.Calls, deps.Anthropic.Calls, err)
+	}
+}
+
 func TestAutoRouteExcludesUnavailableModel(t *testing.T) {
 	deps := fakeDepsWithUnavailableCheapModel()
 	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))

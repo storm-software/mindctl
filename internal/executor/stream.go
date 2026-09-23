@@ -424,7 +424,13 @@ func (a *streamAccumulator) observe(event inference.Event) {
 	case "response.function_call_arguments.done":
 		a.appendFunctionArguments(event, true)
 	case "response.output_item.done":
-		if event.ItemType == "custom_tool_call" {
+		switch event.ItemType {
+		case "message":
+			event.Delta = event.ItemText
+			a.appendText(event, true)
+		case "function_call":
+			a.appendFunctionArguments(event, true)
+		case "custom_tool_call":
 			a.appendCustomToolCall(event)
 		}
 	}
