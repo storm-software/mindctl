@@ -138,6 +138,31 @@ func TestConfiguredProvidersUsesDeepSeekResponsesEndpoint(t *testing.T) {
 	}
 }
 
+func TestConfiguredProvidersUsesMetaResponsesEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer meta-token" {
+			t.Fatalf("method=%s path=%s authorization=%q", r.Method, r.URL.Path, r.Header.Get("Authorization"))
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"muse-spark-1.3","output":[]}`)
+	}))
+	defer server.Close()
+
+	providers, err := configuredProviders([]config.ProviderConfig{{
+		ID: "meta", BaseURL: server.URL, APIKeyEnv: "META_API_KEY",
+	}}, func(name string) (string, bool) {
+		return "meta-token", name == "META_API_KEY"
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = providers["meta"].Execute(context.Background(), domain.Model{
+		ID: "muse-spark-1.3", UpstreamID: "muse-spark-1.3", Capabilities: domain.Capabilities{Text: true},
+	}, inference.Request{Model: "muse-spark-1.3", Input: []inference.Item{{Type: "message", Role: "user", Text: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUnavailableLayaPreservesT4Fallback(t *testing.T) {
 	cfg, env := fixture(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

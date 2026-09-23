@@ -46,7 +46,7 @@ routing:
   underspecification_floors: []
 
 providers:
-  # Supported provider IDs are openai, anthropic, gemini, and deepseek. Authentication
+  # Supported provider IDs are openai, anthropic, gemini, deepseek, and meta. Authentication
   # modes are exclusive. ChatGPT OAuth passthrough needs no OPENAI_API_KEY;
   # Codex supplies its caller-managed credential on each request.
   - id: openai
@@ -63,6 +63,12 @@ providers:
   #   base_url: https://api.deepseek.com
   #   auth: api_key
   #   api_key_env: DEEPSEEK_API_TOKEN
+  # Meta Model API exposes an OpenAI-compatible Responses API. Add only models
+  # enabled for your Meta project to the catalog below.
+  # - id: meta
+  #   base_url: https://api.meta.ai/v1
+  #   auth: api_key
+  #   api_key_env: META_API_KEY
 
 models:
   - id: gpt-5
