@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestShippedExampleReachesSecretValidation(t *testing.T) {
@@ -25,13 +27,25 @@ func TestLoadRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsLegacyJevConfiguration(t *testing.T) {
+	body, err := yaml.Marshal(validConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Load(writeConfig(t, string(body)+"jev:\n  api_key_env: JEV_API_KEY\n"), testEnv)
+	if err == nil || !strings.Contains(err.Error(), "field jev not found") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestLoadRejectsSecondDocument(t *testing.T) {
 	path := writeConfig(t, `
 listen: ":8080"
 client_auth:
   token_env: GATEWAY_TOKEN
-jev:
-  api_key_env: JEV_API_KEY
+classifier:
+  endpoint: https://laya.example.test
+  token_env: LAYA_CLASSIFIER_TOKEN
 sqlite:
   path: mindctl.db
 encryption:
@@ -63,8 +77,9 @@ func TestLoadDefaultsSafeFallbackToT4(t *testing.T) {
 listen: ":8080"
 client_auth:
   token_env: GATEWAY_TOKEN
-jev:
-  api_key_env: JEV_API_KEY
+classifier:
+  endpoint: https://laya.example.test
+  token_env: LAYA_CLASSIFIER_TOKEN
 sqlite:
   path: mindctl.db
 encryption:
@@ -138,6 +153,14 @@ func TestValidateAcceptsZeroRetentionAsUnlimited(t *testing.T) {
 	}
 	if err := cfg.Validate(testEnv); err != nil {
 		t.Fatalf("expected valid unlimited-retention config, got %v", err)
+	}
+}
+
+func TestValidateRejectsEmptyClassifierFragment(t *testing.T) {
+	cfg := validConfig()
+	cfg.Classifier.Endpoint = "https://laya.example.test#"
+	if err := cfg.Validate(testEnv); err == nil || !strings.Contains(err.Error(), "invalid classifier endpoint") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -224,7 +247,7 @@ func TestValidateRejectsInvalidConfiguredPolicyValues(t *testing.T) {
 		{name: "negative direct cost limit", mutate: func(r *RoutingConfig) { r.MaxDirectCostUSD = -0.01 }},
 		{name: "nonfinite expected cost limit", mutate: func(r *RoutingConfig) { r.MaxExpectedCostUSD = math.NaN() }},
 		{name: "success probability above one", mutate: func(r *RoutingConfig) { r.MinSuccessProbability = 1.01 }},
-		{name: "Jev confidence below zero", mutate: func(r *RoutingConfig) { r.MinJevConfidence = -0.01 }},
+		{name: "classifier confidence below zero", mutate: func(r *RoutingConfig) { r.MinClassifierConfidence = -0.01 }},
 		{name: "negative latency limit", mutate: func(r *RoutingConfig) { r.MaxLatency = -time.Second }},
 		{name: "invalid reasoning threshold", mutate: func(r *RoutingConfig) { r.ReasoningFloors = []SignalFloorConfig{{Threshold: math.Inf(1), Floor: "T4"}} }},
 		{name: "invalid coding floor", mutate: func(r *RoutingConfig) { r.CodingFloors = []SignalFloorConfig{{Threshold: 1, Floor: "T9"}} }},
@@ -243,12 +266,8 @@ func validConfig() Config {
 	return Config{
 		Listen:     ":8080",
 		ClientAuth: ClientAuthConfig{TokenEnv: "GATEWAY_TOKEN"},
-		Jev: JevConfig{
-			BaseURL:   "https://jev.example.test",
-			Model:     "jev-system-one",
-			APIKeyEnv: "JEV_API_KEY",
-		},
-		SQLite: SQLiteConfig{Path: "mindctl.db"},
+		Classifier: ClassifierConfig{Endpoint: "https://laya.example.test", TokenEnv: "LAYA_CLASSIFIER_TOKEN"},
+		SQLite:     SQLiteConfig{Path: "mindctl.db"},
 		Encryption: EncryptionConfig{
 			ActiveKeyID: "active",
 			Keys:        map[string]string{"active": "ENCRYPTION_KEY"},
@@ -266,7 +285,7 @@ func validConfig() Config {
 func testEnv(name string) (string, bool) {
 	values := map[string]string{
 		"GATEWAY_TOKEN":          "gateway-token",
-		"JEV_API_KEY":            "jev-key",
+		"LAYA_CLASSIFIER_TOKEN":  "laya-token",
 		"OPENAI_API_KEY":         "provider-key",
 		"ENCRYPTION_KEY":         base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		"INVALID_ENCRYPTION_KEY": "not-base64",

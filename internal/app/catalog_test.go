@@ -185,7 +185,7 @@ func TestConfiguredSignalsAndConfidence(t *testing.T) {
 			}
 		})
 	}
-	for _, tc := range []struct{ setting, want string }{{"", "reliable"}, {"min_jev_confidence: 0.9\n", "cheap"}, {"min_jev_confidence: 0\n", "reliable"}} {
+	for _, tc := range []struct{ setting, want string }{{"", "reliable"}, {"min_classifier_confidence: 0.9\n", "cheap"}, {"min_classifier_confidence: 0\n", "reliable"}} {
 		a := configuredApp(t, routingBounds+tc.setting, policyModels)
 		d, err := decide(a, domain.RequestFeatures{}, &domain.ClassifierJudgment{MinimumTier: domain.T5, TierConfidence: .8})
 		if err != nil || d.ModelID != tc.want {

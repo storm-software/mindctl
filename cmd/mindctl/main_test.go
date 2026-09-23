@@ -23,12 +23,12 @@ import (
 func mainConfig(t *testing.T) string {
 	t.Helper()
 	t.Setenv("MAIN_GATEWAY_TOKEN", "private-gateway-token")
-	t.Setenv("MAIN_JEV_KEY", "private-jev-key")
+	t.Setenv("MAIN_LAYA_TOKEN", "private-laya-token")
 	t.Setenv("MAIN_PROVIDER_KEY", "private-provider-key")
 	t.Setenv("MAIN_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32)))
 	cfg := config.Config{
 		Listen: "127.0.0.1:0", ClientAuth: config.ClientAuthConfig{TokenEnv: "MAIN_GATEWAY_TOKEN"},
-		Jev:        config.JevConfig{BaseURL: "https://jev.example.com", Model: "jev", APIKeyEnv: "MAIN_JEV_KEY"},
+		Classifier: config.ClassifierConfig{Endpoint: "https://laya.example.com", TokenEnv: "MAIN_LAYA_TOKEN"},
 		SQLite:     config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "app.db")},
 		Encryption: config.EncryptionConfig{ActiveKeyID: "active", Keys: map[string]string{"active": "MAIN_ENCRYPTION_KEY"}},
 		Routing:    config.RoutingConfig{MinTier: "T0", MaxTier: "T6"},

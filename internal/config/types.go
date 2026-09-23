@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 
@@ -28,7 +29,7 @@ const (
 type Config struct {
 	Listen     string           `yaml:"listen"`
 	ClientAuth ClientAuthConfig `yaml:"client_auth"`
-	Jev        JevConfig        `yaml:"jev"`
+	Classifier ClassifierConfig `yaml:"classifier"`
 	SQLite     SQLiteConfig     `yaml:"sqlite"`
 	Encryption EncryptionConfig `yaml:"encryption"`
 	Routing    RoutingConfig    `yaml:"routing"`
@@ -50,15 +51,6 @@ func (c ClientAuthConfig) HeaderName() string {
 		return DefaultClientAuthHeader
 	}
 	return c.Header
-}
-
-// JevConfig configures the Jev classifier using a referenced secret.
-type JevConfig struct {
-	BaseURL    string        `yaml:"base_url"`
-	Model      string        `yaml:"model"`
-	APIKeyEnv  string        `yaml:"api_key_env"`
-	Timeout    time.Duration `yaml:"timeout"`
-	MaxRetries int           `yaml:"max_retries"`
 }
 
 // ClassifierConfig configures the provider-neutral classifier endpoint using a
@@ -90,7 +82,7 @@ type EncryptionConfig struct {
 // RoutingConfig supplies the immutable deterministic routing policy. Dollar
 // values are USD, probability values are fractions in [0, 1], and durations
 // use Go duration strings such as "500ms" or "2s". Zero cost/limit values
-// disable the corresponding budget or penalty; zero MinJevConfidence retains
+// disable the corresponding budget or penalty; zero MinClassifierConfidence retains
 // the policy's safe default.
 type RoutingConfig struct {
 	MinTier                    string              `yaml:"min_tier"`
@@ -102,7 +94,7 @@ type RoutingConfig struct {
 	MaxDirectCostUSD           float64             `yaml:"max_direct_cost_usd"`
 	MaxExpectedCostUSD         float64             `yaml:"max_expected_cost_usd"`
 	MaxLatency                 time.Duration       `yaml:"max_latency"`
-	MinJevConfidence           float64             `yaml:"min_jev_confidence"`
+	MinClassifierConfidence    float64             `yaml:"min_classifier_confidence"`
 	ReasoningFloors            []SignalFloorConfig `yaml:"reasoning_floors"`
 	CodingFloors               []SignalFloorConfig `yaml:"coding_floors"`
 	RiskFloors                 []SignalFloorConfig `yaml:"risk_floors"`
@@ -110,7 +102,7 @@ type RoutingConfig struct {
 }
 
 // SignalFloorConfig raises, but never lowers, the deterministic policy floor
-// when a configured Jev signal reaches Threshold.
+// when a configured classifier signal reaches Threshold.
 type SignalFloorConfig struct {
 	Threshold float64 `yaml:"threshold"`
 	Floor     string  `yaml:"floor"`
@@ -203,7 +195,10 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	if cfg.ClientAuth.MaxBodyBytes < 0 {
 		errs = append(errs, errors.New("maximum body bytes must not be negative"))
 	}
-	requireEnv("Jev", cfg.Jev.APIKeyEnv)
+	requireEnv("classifier", cfg.Classifier.TokenEnv)
+	if !validClassifierEndpoint(cfg.Classifier.Endpoint) {
+		errs = append(errs, errors.New("invalid classifier endpoint"))
+	}
 
 	providerIDs := make(map[string]struct{}, len(cfg.Providers))
 	chatGPTOAuthConfigured := false
@@ -269,11 +264,11 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	if cfg.SQLite.RetentionMaintenanceInterval < 0 {
 		errs = append(errs, errors.New("SQLite retention maintenance interval must not be negative"))
 	}
-	if cfg.Jev.Timeout < 0 {
-		errs = append(errs, errors.New("Jev timeout must not be negative"))
+	if cfg.Classifier.Timeout < 0 {
+		errs = append(errs, errors.New("classifier timeout must not be negative"))
 	}
-	if cfg.Jev.MaxRetries < 0 {
-		errs = append(errs, errors.New("Jev max retries must not be negative"))
+	if cfg.Classifier.MaxRetries < 0 {
+		errs = append(errs, errors.New("classifier max retries must not be negative"))
 	}
 	validateRouting := func() {
 		for _, value := range []struct {
@@ -294,7 +289,7 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			value float64
 		}{
 			{"minimum success probability", cfg.Routing.MinSuccessProbability},
-			{"minimum Jev confidence", cfg.Routing.MinJevConfidence},
+			{"minimum classifier confidence", cfg.Routing.MinClassifierConfidence},
 		} {
 			if !probability(value.value) {
 				errs = append(errs, fmt.Errorf("%s must be finite and in [0, 1]", value.name))
@@ -374,6 +369,11 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func validClassifierEndpoint(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && !strings.Contains(raw, "#")
 }
 
 func nonnegativeFinite(value float64) bool {

@@ -8,13 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/storm-software/mindctl/internal/api"
 	"github.com/storm-software/mindctl/internal/classifier"
-	"github.com/storm-software/mindctl/internal/classifier/jev"
+	"github.com/storm-software/mindctl/internal/classifier/laya"
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/conversation"
@@ -74,12 +73,6 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	}
 	if err := cfg.Validate(getenv); err != nil {
 		return nil, err
-	}
-	// Jev appends its API path to the base URL string. Even empty query or
-	// fragment markers would put that path in the wrong URL component.
-	if !validEndpoint(cfg.Jev.BaseURL) || strings.ContainsAny(cfg.Jev.BaseURL, "?#") ||
-		strings.TrimSpace(cfg.Jev.Model) == "" || cfg.Jev.Timeout < 0 || cfg.Jev.MaxRetries < 0 {
-		return nil, errors.New("invalid Jev configuration")
 	}
 	keys := make(map[string][]byte, len(cfg.Encryption.Keys))
 	defer func() {
@@ -171,8 +164,8 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		return nil, errors.New("initialize SQLite storage failed")
 	}
 	a.maintenance = newRetentionMaintenance(cfg.SQLite.Retention, cfg.SQLite.RetentionMaintenanceInterval, a.store.DeleteExpiredContent, maintenanceOptions)
-	jevKey, _ := getenv(cfg.Jev.APIKeyEnv)
-	a.classifier = jev.NewClient(cfg.Jev, jevKey, a.httpClient)
+	classifierToken, _ := getenv(cfg.Classifier.TokenEnv)
+	a.classifier = laya.NewClient(cfg.Classifier, classifierToken, a.httpClient)
 	a.executor = executor.New(a.classifier, a.policy, provider.NewRegistry(providers), conversation.New(a.store))
 	clientToken, _ := getenv(cfg.ClientAuth.TokenEnv)
 	maxBodyBytes := cfg.ClientAuth.MaxBodyBytes
@@ -237,7 +230,7 @@ func policyConfig(cfg config.RoutingConfig) router.PolicyConfig {
 		MaxDirectCost:            cfg.MaxDirectCostUSD,
 		MaxExpectedCost:          cfg.MaxExpectedCostUSD,
 		MaxLatency:               cfg.MaxLatency,
-		MinClassifierConfidence:  cfg.MinJevConfidence,
+		MinClassifierConfidence:  cfg.MinClassifierConfidence,
 		ReasoningFloors:          toSignalFloors(cfg.ReasoningFloors),
 		CodingFloors:             toSignalFloors(cfg.CodingFloors),
 		RiskFloors:               toSignalFloors(cfg.RiskFloors),

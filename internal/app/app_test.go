@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,8 @@ import (
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/executor"
+	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
 	"github.com/storm-software/mindctl/internal/storage"
 )
@@ -29,14 +32,14 @@ func fixture(t *testing.T) (config.Config, map[string]string) {
 	t.Helper()
 	return config.Config{
 			Listen: "127.0.0.1:0", ClientAuth: config.ClientAuthConfig{TokenEnv: "TEST_GATEWAY_TOKEN"},
-			Jev:        config.JevConfig{BaseURL: "https://jev.example.com", Model: "jev", APIKeyEnv: "TEST_JEV_KEY"},
+			Classifier: config.ClassifierConfig{Endpoint: "https://laya.example.com", TokenEnv: "TEST_LAYA_TOKEN"},
 			SQLite:     config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "gateway.db")},
 			Encryption: config.EncryptionConfig{ActiveKeyID: "active", Keys: map[string]string{"active": "TEST_ENCRYPTION_KEY", "old": "TEST_OLD_KEY"}},
 			Routing:    config.RoutingConfig{MinTier: "T0", MaxTier: "T6"},
 			Providers:  []config.ProviderConfig{{ID: "openai", BaseURL: "https://provider.example.com", APIKeyEnv: "TEST_PROVIDER_KEY"}},
 			Models:     []config.ModelConfig{{ID: "first", Provider: "openai", Tier: "T4", Available: true, Capabilities: []string{"chat", "tools", "images", "json_schema"}, ContextWindow: 32000, InputPrice: 2, OutputPrice: 8, SuccessPrior: .9, TaskSuccessPriors: map[string]float64{"coding": .95}}},
 		}, map[string]string{
-			"TEST_GATEWAY_TOKEN": "private-gateway-token", "TEST_JEV_KEY": "private-jev-token", "TEST_PROVIDER_KEY": "private-provider-token",
+			"TEST_GATEWAY_TOKEN": "private-gateway-token", "TEST_LAYA_TOKEN": "private-laya-token", "TEST_PROVIDER_KEY": "private-provider-token",
 			"TEST_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)),
 			"TEST_OLD_KEY":        base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)),
 		}
@@ -94,7 +97,7 @@ func TestNewUsesTheDefaultResponseBodyLimit(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"upstream","status":"completed","model":"first","output":[]}`))
 	}))
 	t.Cleanup(server.Close)
-	cfg.Jev.BaseURL = server.URL
+	cfg.Classifier.Endpoint = server.URL
 	cfg.Providers[0].BaseURL = server.URL
 	a, err := newWithLookup(context.Background(), cfg, lookup(env))
 	if err != nil {
@@ -110,11 +113,38 @@ func TestNewUsesTheDefaultResponseBodyLimit(t *testing.T) {
 	}
 }
 
+func TestUnavailableLayaPreservesT4Fallback(t *testing.T) {
+	cfg, env := fixture(t)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"first","output":[]}`)
+	}))
+	defer provider.Close()
+	cfg.Classifier = config.ClassifierConfig{Endpoint: "http://127.0.0.1:1", TokenEnv: "TEST_LAYA_TOKEN"}
+	cfg.Providers[0].BaseURL = provider.URL
+	env["TEST_LAYA_TOKEN"] = "private-laya-token"
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	output, err := a.executor.Execute(context.Background(), executor.Input{
+		ClientID: "classifier-fallback", Request: inference.Request{Model: "mindctl-auto", Input: []inference.Item{{Type: "message", Role: "user", Text: "hello"}}},
+		Models: a.catalog, Features: domain.RequestFeatures{NeedsText: true}, MinTier: &a.minTier, MaxTier: &a.maxTier, SafeFallbackTier: a.safeFallbackTier,
+		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
+	})
+	if err != nil || output.Decision.Tier < domain.T4 {
+		t.Fatalf("decision=%+v err=%v", output.Decision, err)
+	}
+}
+
 func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	var providerCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v1/systemone":
+		case "/v1/classify":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case "/responses":
 			call := providerCalls.Add(1)
@@ -199,7 +229,7 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 
 	cfg, env := fixture(t)
 	cfg.ClientAuth.Header = "X-Mindctl-Token"
-	cfg.Jev.BaseURL = server.URL
+	cfg.Classifier.Endpoint = server.URL
 	cfg.Providers[0].BaseURL = server.URL
 	cfg.Providers[0].Auth = string(config.ProviderAuthChatGPTOAuthPassthrough)
 	cfg.Providers[0].APIKeyEnv = ""
@@ -513,7 +543,7 @@ func TestNewRejectsInvalidRuntimeConfigWithoutSecretValues(t *testing.T) {
 		mutate func(*config.Config, map[string]string)
 	}{
 		{"missing client token", func(_ *config.Config, env map[string]string) { delete(env, "TEST_GATEWAY_TOKEN") }},
-		{"missing Jev token", func(_ *config.Config, env map[string]string) { delete(env, "TEST_JEV_KEY") }},
+		{"missing classifier token", func(_ *config.Config, env map[string]string) { delete(env, "TEST_LAYA_TOKEN") }},
 		{"missing provider token", func(_ *config.Config, env map[string]string) { delete(env, "TEST_PROVIDER_KEY") }},
 		{"malformed active key", func(_ *config.Config, env map[string]string) {
 			env["TEST_ENCRYPTION_KEY"] = "not-base64-private-secret"
@@ -524,13 +554,16 @@ func TestNewRejectsInvalidRuntimeConfigWithoutSecretValues(t *testing.T) {
 		{"no models", func(cfg *config.Config, _ map[string]string) { cfg.Models = nil }},
 		{"all models disabled", func(cfg *config.Config, _ map[string]string) { cfg.Models[0].Available = false }},
 		{"unusable provider", func(cfg *config.Config, _ map[string]string) { cfg.Providers[0].BaseURL = "not-a-url" }},
-		{"invalid Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "not-a-url" }},
-		{"whitespace Jev model", func(cfg *config.Config, _ map[string]string) { cfg.Jev.Model = " \t\n" }},
-		{"query Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com?x=1" }},
-		{"empty query Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com?" }},
-		{"fragment Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com#section" }},
-		{"empty fragment Jev endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Jev.BaseURL = "https://jev.example.com#" }},
-		{"invalid Jev retry count", func(cfg *config.Config, _ map[string]string) { cfg.Jev.MaxRetries = -1 }},
+		{"invalid classifier endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Classifier.Endpoint = "not-a-url" }},
+		{"query classifier endpoint", func(cfg *config.Config, _ map[string]string) {
+			cfg.Classifier.Endpoint = "https://laya.example.com?x=1"
+		}},
+		{"empty query classifier endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Classifier.Endpoint = "https://laya.example.com?" }},
+		{"fragment classifier endpoint", func(cfg *config.Config, _ map[string]string) {
+			cfg.Classifier.Endpoint = "https://laya.example.com#section"
+		}},
+		{"empty fragment classifier endpoint", func(cfg *config.Config, _ map[string]string) { cfg.Classifier.Endpoint = "https://laya.example.com#" }},
+		{"invalid classifier retry count", func(cfg *config.Config, _ map[string]string) { cfg.Classifier.MaxRetries = -1 }},
 		{"SQLite cannot open", func(cfg *config.Config, _ map[string]string) {
 			cfg.SQLite.Path = filepath.Join(t.TempDir(), "missing", "db")
 		}},
@@ -570,7 +603,7 @@ func TestNewSnapshotsEachResolvedSecretOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
-	if cfg.Jev.APIKeyEnv != "TEST_JEV_KEY" || cfg.Encryption.Keys["active"] != "TEST_ENCRYPTION_KEY" {
+	if cfg.Classifier.TokenEnv != "TEST_LAYA_TOKEN" || cfg.Encryption.Keys["active"] != "TEST_ENCRYPTION_KEY" {
 		t.Fatal("config mutated to resolved secrets")
 	}
 }
@@ -604,7 +637,7 @@ func TestClassifierUsesResolvedSecretAndCloseReleasesItsConnections(t *testing.T
 	cfg, env := fixture(t)
 	closed := make(chan struct{}, 1)
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer private-jev-token" || r.URL.Path != "/v1/systemone" {
+		if r.Header.Get("Authorization") != "Bearer private-laya-token" || r.URL.Path != "/v1/classify" {
 			t.Error("classifier was not wired to its endpoint and resolved credential")
 		}
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -619,7 +652,7 @@ func TestClassifierUsesResolvedSecretAndCloseReleasesItsConnections(t *testing.T
 	}
 	server.Start()
 	defer server.Close()
-	cfg.Jev.BaseURL = server.URL
+	cfg.Classifier.Endpoint = server.URL
 	a, err := newWithLookup(context.Background(), cfg, lookup(env))
 	if err != nil {
 		t.Fatal(err)
