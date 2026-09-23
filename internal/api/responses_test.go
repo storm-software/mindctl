@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/storm-software/mindctl/internal/domain"
@@ -14,6 +15,7 @@ import (
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 func TestResponsesHandlerReturnsActualModelAndRoutingHeaders(t *testing.T) {
@@ -115,39 +117,104 @@ func TestResponsesHandlerRejectsWrongMethodBeforeExecution(t *testing.T) {
 }
 
 func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testing.T) {
-	for _, tc := range []struct {
-		name                   string
-		authorization, account string
-		want                   bool
+	cases := []struct {
+		label, authorization, account string
+		wantOAuth                     bool
 	}{
-		{"complete", "Bearer oauth.jwt", "account-1", true},
-		{"missing account", "Bearer oauth.jwt", "", false},
-		{"missing token", "", "account-1", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			runner := &stubExecutor{output: executor.Output{Result: inference.Result{Status: "completed"}}}
-			responses := NewResponsesHandler(runner, ResponsesConfig{
-				MaxBodyBytes:          1 << 20,
-				Models:                []domain.Model{{ID: "gpt-test", Provider: "openai", Tier: domain.T4}},
-				ProviderCredentials:   map[string]bool{"openai": true, "anthropic": true},
-				ChatGPTOAuthProviders: map[string]bool{"openai": true},
-			})
-			h := Authenticate(CaptureChatGPTOAuth(responses), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}})
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","input":"hello"}`))
+		{"first", "Bearer oauth.first", "account-1", true},
+		{"second", "Bearer oauth.second", "account-2", true},
+		{"missing", "Bearer oauth.missing", "", false},
+	}
+	release := make(chan struct{})
+	runner := &concurrentCredentialRecorder{
+		started:      make(chan struct{}, len(cases)),
+		release:      release,
+		observations: make(map[string]credentialObservation),
+	}
+	responses := NewResponsesHandler(runner, ResponsesConfig{
+		MaxBodyBytes:          1 << 20,
+		Models:                []domain.Model{{ID: "gpt-test", Provider: "openai", Tier: domain.T4}},
+		ProviderCredentials:   map[string]bool{"openai": true, "anthropic": true},
+		ChatGPTOAuthProviders: map[string]bool{"openai": true},
+	})
+	h := Authenticate(CaptureChatGPTOAuth(responses), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}})
+
+	statuses := make(chan int, len(cases))
+	var requests sync.WaitGroup
+	for _, tc := range cases {
+		requests.Go(func() {
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","instructions":"`+tc.label+`","input":"hello"}`))
 			req.Header.Set("X-Mindctl-Token", "gateway")
-			if tc.authorization != "" {
-				req.Header.Set("Authorization", tc.authorization)
-			}
+			req.Header.Set("Authorization", tc.authorization)
 			if tc.account != "" {
 				req.Header.Set("ChatGPT-Account-Id", tc.account)
 			}
-			h.ServeHTTP(httptest.NewRecorder(), req)
-			if runner.input.ProviderCredentials["openai"] != tc.want || !runner.input.ProviderCredentials["anthropic"] {
-				t.Fatalf("credentials=%v", runner.input.ProviderCredentials)
-			}
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			statuses <- rr.Code
 		})
 	}
+	for range cases {
+		<-runner.started
+	}
+	close(release)
+	requests.Wait()
+	close(statuses)
+	for status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("status=%d", status)
+		}
+	}
+
+	for _, tc := range cases {
+		got, ok := runner.observation(tc.label)
+		if !ok || got.oauthAvailable != tc.wantOAuth || !got.anthropicAvailable {
+			t.Fatalf("label=%s observation=%+v present=%v", tc.label, got, ok)
+		}
+		if tc.wantOAuth && (got.credential.AccessToken != strings.TrimPrefix(tc.authorization, "Bearer ") || got.credential.AccountID != tc.account) {
+			t.Fatalf("label=%s credential=%+v", tc.label, got.credential)
+		}
+		if !tc.wantOAuth && got.hasCredential {
+			t.Fatalf("label=%s unexpectedly captured credential=%+v", tc.label, got.credential)
+		}
+	}
+}
+
+type credentialObservation struct {
+	credential                    upstreamauth.ChatGPTCredential
+	hasCredential, oauthAvailable bool
+	anthropicAvailable            bool
+}
+
+type concurrentCredentialRecorder struct {
+	mu           sync.Mutex
+	started      chan struct{}
+	release      <-chan struct{}
+	observations map[string]credentialObservation
+}
+
+func (r *concurrentCredentialRecorder) Execute(ctx context.Context, input executor.Input) (executor.Output, error) {
+	r.started <- struct{}{}
+	<-r.release
+	credential, ok := upstreamauth.ChatGPT(ctx)
+	r.mu.Lock()
+	r.observations[input.Request.Instructions] = credentialObservation{
+		credential: credential, hasCredential: ok,
+		oauthAvailable: input.ProviderCredentials["openai"], anthropicAvailable: input.ProviderCredentials["anthropic"],
+	}
+	r.mu.Unlock()
+	return executor.Output{Result: inference.Result{Status: "completed"}}, nil
+}
+
+func (r *concurrentCredentialRecorder) Stream(context.Context, executor.Input, executor.EventWriter) error {
+	return errors.New("unexpected streaming execution")
+}
+
+func (r *concurrentCredentialRecorder) observation(label string) (credentialObservation, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	value, ok := r.observations[label]
+	return value, ok
 }
 
 func testResponsesHandler(output executor.Output, err ...error) http.Handler {

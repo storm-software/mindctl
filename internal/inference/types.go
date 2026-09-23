@@ -10,8 +10,31 @@ type Request struct {
 	Input                                       []Item
 	Tools                                       []Tool
 	TextFormat                                  *JSONSchemaFormat
+	Reasoning                                   *ReasoningOptions
+	StreamOptions                               *StreamOptions
+	AccessPrograms                              *AccessPrograms
+	ToolChoice, ServiceTier, PromptCacheKey     string
+	Include                                     []string
+	ClientMetadata                              map[string]string
+	ParallelToolCalls                           *bool
 	Stream                                      bool
 	MaxOutputTokens                             int64
+}
+
+// ReasoningOptions carries Responses API reasoning controls without coupling
+// them to a particular authentication mode.
+type ReasoningOptions struct {
+	Effort, Summary, Context string
+}
+
+// StreamOptions controls delivery of streamed reasoning summaries.
+type StreamOptions struct {
+	ReasoningSummaryDelivery string
+}
+
+// AccessPrograms selects an account-authorized Responses access program.
+type AccessPrograms struct {
+	Cyber string
 }
 
 // Item is a portable text, image, function-call, or function-result item.

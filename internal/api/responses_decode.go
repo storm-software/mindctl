@@ -47,14 +47,38 @@ func DecodeResponseRequest(w http.ResponseWriter, r *http.Request, maxBodyBytes 
 }
 
 type responseRequest struct {
-	Model              string          `json:"model"`
-	Instructions       string          `json:"instructions"`
-	Input              json.RawMessage `json:"input"`
-	Tools              []wireTool      `json:"tools"`
-	Text               *wireText       `json:"text"`
-	Stream             bool            `json:"stream"`
-	MaxOutputTokens    int64           `json:"max_output_tokens"`
-	PreviousResponseID string          `json:"previous_response_id"`
+	Model              string              `json:"model"`
+	Instructions       string              `json:"instructions"`
+	Input              json.RawMessage     `json:"input"`
+	Tools              []wireTool          `json:"tools"`
+	ToolChoice         string              `json:"tool_choice"`
+	ParallelToolCalls  *bool               `json:"parallel_tool_calls"`
+	Reasoning          *wireReasoning      `json:"reasoning"`
+	Store              *bool               `json:"store"`
+	Text               *wireText           `json:"text"`
+	Stream             bool                `json:"stream"`
+	StreamOptions      *wireStreamOptions  `json:"stream_options"`
+	Include            []string            `json:"include"`
+	ServiceTier        string              `json:"service_tier"`
+	PromptCacheKey     string              `json:"prompt_cache_key"`
+	ClientMetadata     map[string]string   `json:"client_metadata"`
+	AccessPrograms     *wireAccessPrograms `json:"access_programs"`
+	MaxOutputTokens    int64               `json:"max_output_tokens"`
+	PreviousResponseID string              `json:"previous_response_id"`
+}
+
+type wireReasoning struct {
+	Effort  string `json:"effort"`
+	Summary string `json:"summary"`
+	Context string `json:"context"`
+}
+
+type wireStreamOptions struct {
+	ReasoningSummaryDelivery string `json:"reasoning_summary_delivery"`
+}
+
+type wireAccessPrograms struct {
+	Cyber string `json:"cyber"`
 }
 
 type wireText struct {
@@ -96,11 +120,32 @@ type wireContentPart struct {
 }
 
 func (wire responseRequest) request() (inference.Request, error) {
+	if wire.Store != nil && *wire.Store {
+		return inference.Request{}, inference.Invalid("store", "must be false")
+	}
+	if wire.ToolChoice != "" && wire.ToolChoice != "auto" {
+		return inference.Request{}, inference.Invalid("tool_choice", "only auto is supported")
+	}
 	input, err := decodeInput(wire.Input)
 	if err != nil {
 		return inference.Request{}, err
 	}
-	request := inference.Request{Model: wire.Model, Instructions: wire.Instructions, Input: input, Stream: wire.Stream, MaxOutputTokens: wire.MaxOutputTokens, PreviousResponseID: wire.PreviousResponseID}
+	request := inference.Request{
+		Model: wire.Model, Instructions: wire.Instructions, Input: input,
+		ToolChoice: wire.ToolChoice, ParallelToolCalls: cloneBool(wire.ParallelToolCalls),
+		Include: append([]string(nil), wire.Include...), ServiceTier: wire.ServiceTier,
+		PromptCacheKey: wire.PromptCacheKey, ClientMetadata: cloneStrings(wire.ClientMetadata),
+		Stream: wire.Stream, MaxOutputTokens: wire.MaxOutputTokens, PreviousResponseID: wire.PreviousResponseID,
+	}
+	if wire.Reasoning != nil {
+		request.Reasoning = &inference.ReasoningOptions{Effort: wire.Reasoning.Effort, Summary: wire.Reasoning.Summary, Context: wire.Reasoning.Context}
+	}
+	if wire.StreamOptions != nil {
+		request.StreamOptions = &inference.StreamOptions{ReasoningSummaryDelivery: wire.StreamOptions.ReasoningSummaryDelivery}
+	}
+	if wire.AccessPrograms != nil {
+		request.AccessPrograms = &inference.AccessPrograms{Cyber: wire.AccessPrograms.Cyber}
+	}
 	for _, tool := range wire.Tools {
 		request.Tools = append(request.Tools, inference.Tool{Type: tool.Type, Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters, Strict: tool.Strict})
 	}
@@ -109,6 +154,25 @@ func (wire responseRequest) request() (inference.Request, error) {
 		request.TextFormat = &inference.JSONSchemaFormat{Type: format.Type, Name: format.Name, Description: format.Description, Schema: format.Schema, Strict: format.Strict}
 	}
 	return request, nil
+}
+
+func cloneStrings(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func decodeInput(raw json.RawMessage) ([]inference.Item, error) {

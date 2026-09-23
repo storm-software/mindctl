@@ -63,6 +63,7 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 	if err != nil {
 		return inference.Result{}, err
 	}
+	c.applyAuthenticationContract(&body, false)
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return inference.Result{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
@@ -85,6 +86,7 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 	if err != nil {
 		return nil, err
 	}
+	c.applyAuthenticationContract(&body, true)
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
@@ -94,6 +96,24 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 		return nil, err
 	}
 	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body), requestID: requestID}, nil
+}
+
+func (c *Client) applyAuthenticationContract(body *responsesRequest, stream bool) {
+	if c.auth != authChatGPTOAuth {
+		return
+	}
+	if body.ToolChoice == "" {
+		body.ToolChoice = "auto"
+	}
+	if body.ParallelToolCalls == nil {
+		body.ParallelToolCalls = boolPointer(false)
+	}
+	body.Store = boolPointer(false)
+	body.Stream = boolPointer(stream)
+	if body.Include == nil {
+		include := []string{}
+		body.Include = &include
+	}
 }
 
 func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Response, string, error) {

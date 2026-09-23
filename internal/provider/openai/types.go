@@ -11,14 +11,38 @@ import (
 )
 
 type responsesRequest struct {
-	Model              string            `json:"model"`
-	Instructions       string            `json:"instructions,omitempty"`
-	Input              []json.RawMessage `json:"input"`
-	Tools              []responseTool    `json:"tools,omitempty"`
-	Text               *responseText     `json:"text,omitempty"`
-	Stream             bool              `json:"stream,omitempty"`
-	MaxOutputTokens    int64             `json:"max_output_tokens,omitempty"`
-	PreviousResponseID string            `json:"previous_response_id,omitempty"`
+	Model              string                  `json:"model"`
+	Instructions       string                  `json:"instructions,omitempty"`
+	Input              []json.RawMessage       `json:"input"`
+	Tools              []responseTool          `json:"tools,omitempty"`
+	ToolChoice         string                  `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool                   `json:"parallel_tool_calls,omitempty"`
+	Reasoning          *responseReasoning      `json:"reasoning,omitempty"`
+	Store              *bool                   `json:"store,omitempty"`
+	Text               *responseText           `json:"text,omitempty"`
+	Stream             *bool                   `json:"stream,omitempty"`
+	StreamOptions      *responseStreamOptions  `json:"stream_options,omitempty"`
+	Include            *[]string               `json:"include,omitempty"`
+	ServiceTier        string                  `json:"service_tier,omitempty"`
+	PromptCacheKey     string                  `json:"prompt_cache_key,omitempty"`
+	ClientMetadata     map[string]string       `json:"client_metadata,omitempty"`
+	AccessPrograms     *responseAccessPrograms `json:"access_programs,omitempty"`
+	MaxOutputTokens    int64                   `json:"max_output_tokens,omitempty"`
+	PreviousResponseID string                  `json:"previous_response_id,omitempty"`
+}
+
+type responseReasoning struct {
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Context string `json:"context,omitempty"`
+}
+
+type responseStreamOptions struct {
+	ReasoningSummaryDelivery string `json:"reasoning_summary_delivery"`
+}
+
+type responseAccessPrograms struct {
+	Cyber string `json:"cyber"`
 }
 
 type responseTool struct {
@@ -94,8 +118,26 @@ func toResponsesRequest(model domain.Model, request inference.Request, stream bo
 		return responsesRequest{}, err
 	}
 	result := responsesRequest{
-		Model: modelID(model), Instructions: request.Instructions, Stream: stream,
+		Model: modelID(model), Instructions: request.Instructions, ToolChoice: request.ToolChoice,
+		ParallelToolCalls: cloneBoolPointer(request.ParallelToolCalls), ServiceTier: request.ServiceTier,
+		PromptCacheKey: request.PromptCacheKey, ClientMetadata: cloneStringMap(request.ClientMetadata),
 		MaxOutputTokens: request.MaxOutputTokens, PreviousResponseID: request.PreviousResponseID,
+	}
+	if stream {
+		result.Stream = boolPointer(true)
+	}
+	if request.Include != nil {
+		include := append([]string(nil), request.Include...)
+		result.Include = &include
+	}
+	if request.Reasoning != nil {
+		result.Reasoning = &responseReasoning{Effort: request.Reasoning.Effort, Summary: request.Reasoning.Summary, Context: request.Reasoning.Context}
+	}
+	if request.StreamOptions != nil {
+		result.StreamOptions = &responseStreamOptions{ReasoningSummaryDelivery: request.StreamOptions.ReasoningSummaryDelivery}
+	}
+	if request.AccessPrograms != nil {
+		result.AccessPrograms = &responseAccessPrograms{Cyber: request.AccessPrograms.Cyber}
 	}
 	for _, item := range request.Input {
 		encoded, err := json.Marshal(toResponseInput(item))
@@ -111,6 +153,26 @@ func toResponsesRequest(model domain.Model, request inference.Request, stream bo
 		result.Text = &responseText{Format: responseTextFormat{Type: format.Type, Name: format.Name, Description: format.Description, Schema: format.Schema, Strict: format.Strict}}
 	}
 	return result, nil
+}
+
+func boolPointer(value bool) *bool { return &value }
+
+func cloneBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	return boolPointer(*value)
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func toResponseInput(item inference.Item) responseInputItem {

@@ -29,6 +29,11 @@ func TestExecuteTranslatesOpenAIRequestAndUsage(t *testing.T) {
 		if body["model"] != "gpt-test" || body["input"] == nil || body["instructions"] != "be concise" {
 			t.Fatalf("body=%v", body)
 		}
+		for _, field := range []string{"tool_choice", "parallel_tool_calls", "reasoning", "store", "include"} {
+			if _, present := body[field]; present {
+				t.Fatalf("legacy API-key request unexpectedly contains %q: %v", field, body)
+			}
+		}
 		w.Header().Set("x-request-id", "openai-req")
 		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":3,"output_tokens":1,"input_tokens_details":{"cached_tokens":2}}}`)
 	}))
@@ -63,6 +68,16 @@ func TestOpenAIChatGPTOAuthExecuteAndStreamUseRequestCredential(t *testing.T) {
 					r.Header.Get("ChatGPT-Account-Id") != "account-1" || r.Header.Get("originator") != "mindctl" ||
 					!strings.HasPrefix(r.Header.Get("User-Agent"), "mindctl") || r.Header.Get("X-Untrusted") != "" {
 					t.Fatalf("path=%s headers=%v", r.URL.Path, r.Header)
+				}
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body["tool_choice"] != "auto" || body["parallel_tool_calls"] != false || body["store"] != false || body["stream"] != (tc.name == "stream") {
+					t.Fatalf("body=%v", body)
+				}
+				if include, ok := body["include"].([]any); !ok || len(include) != 0 {
+					t.Fatalf("include=%v body=%v", body["include"], body)
 				}
 				if tc.name == "stream" {
 					w.Header().Set("Content-Type", "text/event-stream")

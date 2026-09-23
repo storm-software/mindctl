@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -120,7 +121,24 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer oauth.jwt" || r.Header.Get("ChatGPT-Account-Id") != "account-1" {
 				t.Fatalf("headers=%v", r.Header)
 			}
-			_, _ = w.Write([]byte(`{"id":"upstream","status":"completed","model":"first","output":[]}`))
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			reasoning, _ := body["reasoning"].(map[string]any)
+			include, _ := body["include"].([]any)
+			streamOptions, _ := body["stream_options"].(map[string]any)
+			metadata, _ := body["client_metadata"].(map[string]any)
+			tools, _ := body["tools"].([]any)
+			if body["model"] != "first" || body["tool_choice"] != "auto" || body["parallel_tool_calls"] != true ||
+				body["store"] != false || body["stream"] != true || reasoning["effort"] != "high" || reasoning["summary"] != "auto" ||
+				len(include) != 1 || include[0] != "reasoning.encrypted_content" || body["prompt_cache_key"] != "cache-key" ||
+				body["service_tier"] != "priority" || streamOptions["reasoning_summary_delivery"] != "sequential_cutoff" ||
+				metadata["thread_id"] != "thread-1" || len(tools) != 1 {
+				t.Fatalf("body=%v", body)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"model\":\"first\",\"output\":[]}}\n\n"))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -141,7 +159,22 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	request := func(accountID string) *http.Request {
-		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","input":"hello"}`))
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+  "model":"mindctl-auto",
+  "instructions":"be concise",
+  "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}],
+  "tools":[{"type":"function","name":"lookup","description":"find","parameters":{"type":"object"},"strict":true}],
+  "tool_choice":"auto",
+  "parallel_tool_calls":true,
+  "reasoning":{"effort":"high","summary":"auto"},
+  "store":false,
+  "stream":true,
+  "stream_options":{"reasoning_summary_delivery":"sequential_cutoff"},
+  "include":["reasoning.encrypted_content"],
+  "service_tier":"priority",
+  "prompt_cache_key":"cache-key",
+  "client_metadata":{"thread_id":"thread-1"}
+}`))
 		req.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
 		req.Header.Set("Authorization", "Bearer oauth.jwt")
 		if accountID != "" {
