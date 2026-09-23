@@ -118,6 +118,6 @@
       "release"
     ]
   },
-  "prettier": "@storm-software/prettier/recommended.json",
+  "prettier": "./prettier.config.cjs",
   "triggerEmptyDevReleaseByIncrementingThisNumber": 0
 }
