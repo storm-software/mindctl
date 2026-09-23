@@ -172,6 +172,7 @@ to Codex. Configure Mindctl with `chatgpt_oauth_passthrough` as shown in
 the Codex `config.toml`:
 
 ```toml
+model = "mindctl-auto"
 model_provider = "mindctl"
 
 [model_providers.mindctl]
@@ -181,6 +182,9 @@ wire_api = "responses"
 requires_openai_auth = true
 env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
 ```
+
+`mindctl-auto` enables Mindctl's automatic routing. A concrete model name is an
+explicit selection and must match a model ID in Mindctl's configured catalog.
 
 Sign in to Codex with ChatGPT and export `MINDCTL_GATEWAY_TOKEN` with the same
 gateway token supplied to Mindctl. Do not set `OPENAI_API_KEY` for this

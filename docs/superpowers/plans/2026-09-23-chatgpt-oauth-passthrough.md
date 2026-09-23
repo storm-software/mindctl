@@ -531,6 +531,7 @@ Expected: PASS; the example reaches runtime-secret validation without YAML/schem
 Add a “ChatGPT subscription routing” section with:
 
 ```toml
+model = "mindctl-auto"
 model_provider = "mindctl"
 
 [model_providers.mindctl]
@@ -540,6 +541,9 @@ wire_api = "responses"
 requires_openai_auth = true
 env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
 ```
+
+Document that `mindctl-auto` enables automatic routing and concrete model IDs
+must exist in Mindctl's configured catalog.
 
 Explain that the user signs into Codex with ChatGPT, exports only `MINDCTL_GATEWAY_TOKEN` for Mindctl client authentication, and does not set `OPENAI_API_KEY` for this provider. State that upstream model access and usage limits remain account-dependent.
 

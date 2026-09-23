@@ -93,6 +93,7 @@ authentication, and supplies the separate Mindctl token through an
 environment-backed header:
 
 ```toml
+model = "mindctl-auto"
 model_provider = "mindctl"
 
 [model_providers.mindctl]
@@ -102,6 +103,9 @@ wire_api = "responses"
 requires_openai_auth = true
 env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
 ```
+
+`mindctl-auto` enables automatic routing. Concrete model IDs remain explicit
+selections and must exist in Mindctl's configured catalog.
 
 Codex supplies `Authorization: Bearer <access-token>` and, for the selected
 workspace, `ChatGPT-Account-Id`. Codex owns token refresh and updates these
