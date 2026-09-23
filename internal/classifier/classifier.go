@@ -11,7 +11,7 @@ import (
 var ErrUnavailable = errors.New("classifier unavailable")
 
 type Classifier interface {
-	Classify(context.Context, Input) (domain.JevJudgment, error)
+	Classify(context.Context, Input) (domain.ClassifierJudgment, error)
 }
 
 type Input struct {

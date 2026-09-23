@@ -165,9 +165,9 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	return Output{Result: callerResult, Decision: decision, AttemptID: attempt.ID}, nil
 }
 
-func (s *Service) classify(ctx context.Context, request inference.Request, turn conversation.Turn, features domain.RequestFeatures, models []domain.Model) (domain.JevJudgment, error) {
+func (s *Service) classify(ctx context.Context, request inference.Request, turn conversation.Turn, features domain.RequestFeatures, models []domain.Model) (domain.ClassifierJudgment, error) {
 	if s.classifier == nil {
-		return domain.JevJudgment{}, classifier.ErrUnavailable
+		return domain.ClassifierJudgment{}, classifier.ErrUnavailable
 	}
 	available := make([]string, 0, len(models))
 	for _, model := range models {

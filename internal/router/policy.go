@@ -8,7 +8,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 )
 
-// SignalFloor raises the required tier when a Jev score reaches Threshold.
+// SignalFloor raises the required tier when a classifier score reaches Threshold.
 // Score scales are supplied by the classifier contract; rules have no defaults.
 type SignalFloor struct {
 	Threshold float64
@@ -17,13 +17,13 @@ type SignalFloor struct {
 
 // PolicyConfig contains offline policy parameters. Costs are USD; the latency
 // penalty is USD per second of model P95 latency. Zero maxima disable those
-// limits. MinJevConfidence defaults to 0.7 when zero. Score-based rules only
+// limits. MinClassifierConfidence defaults to 0.7 when zero. Score-based rules only
 // raise floors, even when the separate tier-choice confidence is low.
 type PolicyConfig struct {
 	FailureEscalationCost, LatencyPenaltyPerSecond                      float64
 	MinSuccessProbability, MaxDirectCost, MaxExpectedCost               float64
 	MaxLatency                                                          time.Duration
-	MinJevConfidence                                                    float64
+	MinClassifierConfidence                                             float64
 	ReasoningFloors, CodingFloors, RiskFloors, UnderspecificationFloors []SignalFloor
 }
 
@@ -31,8 +31,8 @@ type PolicyConfig struct {
 type Policy struct{ config PolicyConfig }
 
 func NewPolicy(cfg PolicyConfig) *Policy {
-	if cfg.MinJevConfidence == 0 {
-		cfg.MinJevConfidence = .7
+	if cfg.MinClassifierConfidence == 0 {
+		cfg.MinClassifierConfidence = .7
 	}
 	cfg.ReasoningFloors = append([]SignalFloor(nil), cfg.ReasoningFloors...)
 	cfg.CodingFloors = append([]SignalFloor(nil), cfg.CodingFloors...)
@@ -43,7 +43,7 @@ func NewPolicy(cfg PolicyConfig) *Policy {
 
 // DecisionInput supplies already extracted requirements. Floor includes any
 // deterministic capability floor. Provider maps have EligibleModels semantics.
-// A nil Judgment adds no signal; Jev-unavailability fallback is caller-owned.
+// A nil Judgment adds no signal; classifier-unavailability fallback is caller-owned.
 type DecisionInput struct {
 	Features domain.RequestFeatures
 	Models   []domain.Model
@@ -55,7 +55,7 @@ type DecisionInput struct {
 	TaskType                                  domain.TaskType
 	Pin                                       *Pin
 	MinTier, MaxTier                          *domain.Tier
-	Judgment                                  *domain.JevJudgment
+	Judgment                                  *domain.ClassifierJudgment
 	ProviderCredentials, ProviderAvailability map[string]bool
 }
 
@@ -120,10 +120,10 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 		}
 	}
 	if j := in.Judgment; j != nil {
-		if j.TierConfidence >= p.config.MinJevConfidence {
-			raise(j.MinimumTier, "Jev minimum")
+		if j.TierConfidence >= p.config.MinClassifierConfidence {
+			raise(j.MinimumTier, "classifier minimum")
 		} else {
-			decision.Reasons = append(decision.Reasons, "Jev tier choice ignored below confidence threshold; existing floor retained")
+			decision.Reasons = append(decision.Reasons, "classifier tier choice ignored below confidence threshold; existing floor retained")
 		}
 		for _, signal := range []struct {
 			name  string
@@ -239,7 +239,7 @@ func (p *Policy) validate(in DecisionInput) error {
 			return fmt.Errorf("policy costs must be finite and nonnegative")
 		}
 	}
-	if !probability(cfg.MinSuccessProbability) || !probability(cfg.MinJevConfidence) || cfg.MaxLatency < 0 {
+	if !probability(cfg.MinSuccessProbability) || !probability(cfg.MinClassifierConfidence) || cfg.MaxLatency < 0 {
 		return fmt.Errorf("invalid policy probability or latency")
 	}
 	for _, rules := range [][]SignalFloor{cfg.ReasoningFloors, cfg.CodingFloors, cfg.RiskFloors, cfg.UnderspecificationFloors} {
@@ -258,16 +258,16 @@ func (p *Policy) validate(in DecisionInput) error {
 	}
 	if j := in.Judgment; j != nil {
 		if !j.MinimumTier.Valid() || !probability(j.TierConfidence) {
-			return fmt.Errorf("invalid Jev tier or confidence")
+			return fmt.Errorf("invalid classifier tier or confidence")
 		}
 		for _, v := range []float64{j.ReasoningScore, j.CodingScore, j.BlastRadius, j.Underspecified} {
 			if !nonnegativeFinite(v) {
-				return fmt.Errorf("invalid Jev score")
+				return fmt.Errorf("invalid classifier score")
 			}
 		}
 		for _, confidence := range []float64{j.ReasoningConfidence, j.CodingConfidence, j.BlastRadiusConfidence} {
 			if !probability(confidence) {
-				return fmt.Errorf("invalid Jev score confidence")
+				return fmt.Errorf("invalid classifier score confidence")
 			}
 		}
 	}

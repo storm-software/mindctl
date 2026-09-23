@@ -101,7 +101,7 @@ func TestClientClassifyMapsTypedAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MinimumTier != domain.T4 || got.TierConfidence != .8 || !reflect.DeepEqual(got.TierProbabilities, map[domain.Tier]float64{domain.T4: .9, domain.T5: .1}) || got.TaskType != domain.TaskCoding || got.TaskTypeConfidence != 1 || !reflect.DeepEqual(got.TaskTypeProbabilities, map[domain.TaskType]float64{domain.TaskCoding: 1}) || got.ReasoningScore != 4 || got.ReasoningConfidence != .61 || got.CodingScore != 4 || got.CodingConfidence != .72 || got.BlastRadius != 2 || got.BlastRadiusConfidence != .83 || got.Underspecified != .2 || got.ResolvedModel != "jev-1.13.0" || got.InputTokens != 120 || got.OutputTokens != 20 || got.Latency <= 0 || calls.Load() != 1 {
+	if got.MinimumTier != domain.T4 || got.TierConfidence != .8 || !reflect.DeepEqual(got.TierProbabilities, map[domain.Tier]float64{domain.T4: .9, domain.T5: .1}) || got.TaskType != domain.TaskCoding || got.TaskTypeConfidence != 1 || !reflect.DeepEqual(got.TaskTypeProbabilities, map[domain.TaskType]float64{domain.TaskCoding: 1}) || got.ReasoningScore != 4 || got.ReasoningConfidence != .61 || got.CodingScore != 4 || got.CodingConfidence != .72 || got.BlastRadius != 2 || got.BlastRadiusConfidence != .83 || got.Underspecified != .2 || got.Classifier != "jev" || got.ResolvedModel != "jev-1.13.0" || got.Latency <= 0 || calls.Load() != 1 {
 		t.Fatalf("judgment=%+v calls=%d", got, calls.Load())
 	}
 }
@@ -171,7 +171,7 @@ func TestClientRejectsMalformedAnswers(t *testing.T) {
 			}))
 			defer server.Close()
 			got, err := testClient(server.URL, 2, time.Second).Classify(context.Background(), sampleInput())
-			if !errors.Is(err, classifier.ErrUnavailable) || calls.Load() != 1 || !reflect.DeepEqual(got, domain.JevJudgment{}) {
+			if !errors.Is(err, classifier.ErrUnavailable) || calls.Load() != 1 || !reflect.DeepEqual(got, domain.ClassifierJudgment{}) {
 				t.Fatalf("got=%+v err=%v calls=%d", got, err, calls.Load())
 			}
 		})

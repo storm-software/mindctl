@@ -46,7 +46,7 @@ type RequestRecord struct {
 	RejectedOutputs [][]byte
 	RawContent      []byte
 	Decision        router.Decision
-	Judgment        *domain.JevJudgment
+	Judgment        *domain.ClassifierJudgment
 	Replay          ReplaySnapshot
 }
 

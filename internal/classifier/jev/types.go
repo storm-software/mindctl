@@ -73,10 +73,10 @@ type response struct {
 	} `json:"usage"`
 }
 
-func parseJudgment(body []byte) (domain.JevJudgment, error) {
+func parseJudgment(body []byte) (domain.ClassifierJudgment, error) {
 	var wire response
 	if json.Unmarshal(body, &wire) != nil || strings.TrimSpace(wire.Model) == "" || wire.Usage.InputTokens == nil || wire.Usage.OutputTokens == nil || *wire.Usage.InputTokens < 0 || *wire.Usage.OutputTokens < 0 {
-		return domain.JevJudgment{}, classifier.ErrUnavailable
+		return domain.ClassifierJudgment{}, classifier.ErrUnavailable
 	}
 	tier, task := wire.Answers["minimum_tier"], wire.Answers["task_type"]
 	validTier := func(s string) bool { _, err := domain.ParseTier(s); return err == nil }
@@ -85,10 +85,10 @@ func parseJudgment(body []byte) (domain.JevJudgment, error) {
 	reasoning, coding, risk := wire.Answers["reasoning_required"], wire.Answers["coding_required"], wire.Answers["blast_radius"]
 	noul := wire.Answers["underspecified"]
 	if !validChoice(tier, validTier) || !validChoice(task, validTask) || !validScore(reasoning, 6) || !validScore(coding, 6) || !validScore(risk, 4) || noul.Type != "noul" || !inRange(noul.Noul, 1) {
-		return domain.JevJudgment{}, classifier.ErrUnavailable
+		return domain.ClassifierJudgment{}, classifier.ErrUnavailable
 	}
 	minimum, _ := domain.ParseTier(tier.Choice)
-	j := domain.JevJudgment{
+	j := domain.ClassifierJudgment{
 		MinimumTier:           minimum,
 		TierConfidence:        *tier.Confidence,
 		TierProbabilities:     make(map[domain.Tier]float64, len(tier.Probabilities)),
@@ -102,9 +102,8 @@ func parseJudgment(body []byte) (domain.JevJudgment, error) {
 		BlastRadius:           *risk.Score,
 		BlastRadiusConfidence: *risk.Confidence,
 		Underspecified:        *noul.Noul,
+		Classifier:            "jev",
 		ResolvedModel:         wire.Model,
-		InputTokens:           *wire.Usage.InputTokens,
-		OutputTokens:          *wire.Usage.OutputTokens,
 	}
 	for key, value := range tier.Probabilities {
 		t, _ := domain.ParseTier(key)

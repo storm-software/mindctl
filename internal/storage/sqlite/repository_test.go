@@ -55,7 +55,7 @@ func sampleRecord() storage.RequestRecord {
 			},
 			Rejections: []router.Rejection{{ModelID: "small", Code: router.RejectTier, Codes: []router.RejectionCode{router.RejectTier, router.RejectContext}, Reasons: []string{"below floor", "context too small"}}},
 		},
-		Judgment: &domain.JevJudgment{MinimumTier: domain.T3, TierConfidence: .9, TierProbabilities: map[domain.Tier]float64{domain.T3: .9, domain.T4: .1}, TaskType: domain.TaskCoding, TaskTypeConfidence: .8, TaskTypeProbabilities: map[domain.TaskType]float64{domain.TaskCoding: .8, domain.TaskReasoning: .2}, CodingScore: 3, ReasoningScore: 2, BlastRadius: 1, Underspecified: .1, ResolvedModel: "jev-pinned", InputTokens: 50, OutputTokens: 20, Latency: time.Millisecond},
+		Judgment: &domain.ClassifierJudgment{MinimumTier: domain.T3, TierConfidence: .9, TierProbabilities: map[domain.Tier]float64{domain.T3: .9, domain.T4: .1}, TaskType: domain.TaskCoding, TaskTypeConfidence: .8, TaskTypeProbabilities: map[domain.TaskType]float64{domain.TaskCoding: .8, domain.TaskReasoning: .2}, CodingScore: 3, ReasoningScore: 2, BlastRadius: 1, Underspecified: .1, Classifier: "jev", ResolvedModel: "jev-pinned", Latency: time.Millisecond},
 		Replay: storage.ReplaySnapshot{
 			Input: router.DecisionInput{
 				Features: domain.RequestFeatures{InputTokens: 100, CachedInputTokens: 20, MaxOutputTokens: 50, NeedsText: true, HostedToolTypes: []string{"search"}},
@@ -115,7 +115,7 @@ func TestRepositoryPersistsDecisionWithoutPlaintext(t *testing.T) {
 	assertCount(t, reopened.SQL(), "schema_migrations", 2)
 }
 
-func TestRepositoryRoundTripsJevScoreConfidences(t *testing.T) {
+func TestRepositoryRoundTripsClassifierScoreConfidences(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "router.db")
 	db := openTestDB(t, path)
 	record := sampleRecord()
@@ -147,11 +147,11 @@ func TestRepositoryReplaysActualPolicyDecisionAfterReopen(t *testing.T) {
 			{ID: "reliable", Provider: "provider", Tier: domain.T5, ContextWindow: 8_192, MaxOutputTokens: 1_024, Capabilities: domain.Capabilities{Text: true}, Pricing: domain.Pricing{InputPerMillion: .2, CachedInputPerMillion: .02, OutputPerMillion: 1, PerRequestUSD: .0002}, SuccessPriors: map[domain.TaskType]float64{domain.TaskCoding: .99}, DefaultSuccessPrior: .99, LatencyP95: 100 * time.Millisecond, Available: true, Order: 1},
 		},
 		Floor: domain.T3, TaskType: domain.TaskCoding, MinTier: &minimum, MaxTier: &maximum,
-		Judgment:            &domain.JevJudgment{MinimumTier: domain.T4, TierConfidence: .8, ReasoningScore: 4, ReasoningConfidence: .61, CodingConfidence: .72, BlastRadiusConfidence: .83},
+		Judgment:            &domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: .8, ReasoningScore: 4, ReasoningConfidence: .61, CodingConfidence: .72, BlastRadiusConfidence: .83},
 		ProviderCredentials: map[string]bool{"provider": true}, ProviderAvailability: map[string]bool{"provider": true},
 	}
 	policy := router.PolicyConfig{
-		FailureEscalationCost: .01, LatencyPenaltyPerSecond: .001, MinJevConfidence: .7,
+		FailureEscalationCost: .01, LatencyPenaltyPerSecond: .001, MinClassifierConfidence: .7,
 		ReasoningFloors: []router.SignalFloor{{Threshold: 4, Floor: domain.T5}},
 	}
 	decision, err := router.NewPolicy(policy).Decide(input)

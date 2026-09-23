@@ -237,7 +237,7 @@ func policyConfig(cfg config.RoutingConfig) router.PolicyConfig {
 		MaxDirectCost:            cfg.MaxDirectCostUSD,
 		MaxExpectedCost:          cfg.MaxExpectedCostUSD,
 		MaxLatency:               cfg.MaxLatency,
-		MinJevConfidence:         cfg.MinJevConfidence,
+		MinClassifierConfidence:  cfg.MinJevConfidence,
 		ReasoningFloors:          toSignalFloors(cfg.ReasoningFloors),
 		CodingFloors:             toSignalFloors(cfg.CodingFloors),
 		RiskFloors:               toSignalFloors(cfg.RiskFloors),

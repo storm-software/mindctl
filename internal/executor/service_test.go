@@ -13,7 +13,7 @@ import (
 	"github.com/storm-software/mindctl/internal/router"
 )
 
-func TestExecuteSkipsJevForCompatibleConversationPin(t *testing.T) {
+func TestExecuteSkipsClassifierForCompatibleConversationPin(t *testing.T) {
 	deps := fakeDepsWithPin("gpt-pinned", domain.T3)
 	got, err := deps.Executor.Execute(context.Background(), deps.input(inputWithPreviousResponse()))
 	if err != nil || deps.Classifier.Calls != 0 || deps.OpenAI.Calls != 1 || got.Result.Model != "gpt-pinned" {
@@ -21,7 +21,7 @@ func TestExecuteSkipsJevForCompatibleConversationPin(t *testing.T) {
 	}
 }
 
-func TestExecuteUsesJevForUncertainAutomaticRequest(t *testing.T) {
+func TestExecuteUsesClassifierForUncertainAutomaticRequest(t *testing.T) {
 	deps := fakeDepsWithJudgment(domain.T4)
 	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
 	if err != nil || deps.Classifier.Calls != 1 || got.Decision.Tier < domain.T4 {
@@ -136,7 +136,7 @@ func (d *fakeDependencies) input(input Input) Input {
 }
 
 func fakeDeps() *fakeDependencies {
-	classifier := &fakeClassifier{Judgment: domain.JevJudgment{MinimumTier: domain.T4, TierConfidence: 1, TaskType: domain.TaskGeneration}}
+	classifier := &fakeClassifier{Judgment: domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: 1, TaskType: domain.TaskGeneration}}
 	openai := &fakeProvider{Result: inference.Result{ID: "provider-response", Model: "provider-model", ProviderRequestID: "upstream-1", Status: "completed"}}
 	anthropic := &fakeProvider{Result: inference.Result{ID: "provider-response", Model: "provider-model", ProviderRequestID: "upstream-2", Status: "completed"}}
 	conversations := &fakeConversations{Turn: conversation.Turn{ConversationID: "conv_test", ResponseID: "resp_test", ClientID: "client_test", Floor: domain.T0}}
@@ -211,11 +211,11 @@ func hostedToolInput(tool string) Input {
 
 type fakeClassifier struct {
 	Calls    int
-	Judgment domain.JevJudgment
+	Judgment domain.ClassifierJudgment
 	Err      error
 }
 
-func (f *fakeClassifier) Classify(context.Context, classifier.Input) (domain.JevJudgment, error) {
+func (f *fakeClassifier) Classify(context.Context, classifier.Input) (domain.ClassifierJudgment, error) {
 	f.Calls++
 	return f.Judgment, f.Err
 }

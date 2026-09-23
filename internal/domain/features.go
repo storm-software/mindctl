@@ -38,9 +38,9 @@ func (f RequestFeatures) Normalize() RequestFeatures {
 	return f
 }
 
-// JevJudgment is the classifier signal consumed by deterministic routing
+// ClassifierJudgment is the classifier signal consumed by deterministic routing
 // policy. It intentionally contains no provider-specific behavior.
-type JevJudgment struct {
+type ClassifierJudgment struct {
 	MinimumTier                         Tier
 	TierConfidence                      float64
 	TierProbabilities                   map[Tier]float64
@@ -51,7 +51,7 @@ type JevJudgment struct {
 	CodingScore, CodingConfidence       float64
 	BlastRadius, BlastRadiusConfidence  float64
 	Underspecified                      float64
-	ResolvedModel                       string
-	InputTokens, OutputTokens           int64
+	Classifier, ResolvedModel           string
+	ModelRevision                       string
 	Latency                             time.Duration
 }

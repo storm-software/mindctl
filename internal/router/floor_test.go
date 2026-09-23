@@ -15,15 +15,15 @@ func TestUnavailableClassifierFallsBackToT4(t *testing.T) {
 func TestFloorFromJudgmentPreservesPinAndPolicyConfidence(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		judgment       *domain.JevJudgment
+		judgment       *domain.ClassifierJudgment
 		pin            *Pin
 		fallback, want domain.Tier
 	}{
 		{"strong pin", nil, &Pin{ModelID: "pinned", Provider: "openai", Floor: domain.T5}, domain.T4, domain.T5},
 		{"pin wins over fallback", nil, &Pin{Floor: domain.T2}, domain.T4, domain.T2},
 		{"configured fallback", nil, nil, domain.T6, domain.T6},
-		{"successful signal left to policy", &domain.JevJudgment{MinimumTier: domain.T6, TierConfidence: .1}, nil, domain.T4, domain.T0},
-		{"successful signal preserves pin", &domain.JevJudgment{MinimumTier: domain.T1, TierConfidence: 1}, &Pin{Floor: domain.T5}, domain.T4, domain.T5},
+		{"successful signal left to policy", &domain.ClassifierJudgment{MinimumTier: domain.T6, TierConfidence: .1}, nil, domain.T4, domain.T0},
+		{"successful signal preserves pin", &domain.ClassifierJudgment{MinimumTier: domain.T1, TierConfidence: 1}, &Pin{Floor: domain.T5}, domain.T4, domain.T5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := FloorFromJudgment(tc.judgment, tc.pin, tc.fallback); got != tc.want {

@@ -84,7 +84,7 @@ const policyModels = `
   success_prior: 0.99
 `
 
-func decide(a *App, features domain.RequestFeatures, judgment *domain.JevJudgment) (router.Decision, error) {
+func decide(a *App, features domain.RequestFeatures, judgment *domain.ClassifierJudgment) (router.Decision, error) {
 	return a.policy.Decide(router.DecisionInput{Models: a.catalog, Features: features, Judgment: judgment,
 		Floor: domain.T0, MinTier: &a.minTier, MaxTier: &a.maxTier,
 		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability})
@@ -169,13 +169,13 @@ func TestBootstrapFallsBackToInputPriceForLegacyCachedPriceOmission(t *testing.T
 func TestConfiguredSignalsAndConfidence(t *testing.T) {
 	for _, signal := range []struct {
 		field     string
-		judgment  domain.JevJudgment
+		judgment  domain.ClassifierJudgment
 		threshold string
 	}{
-		{"reasoning_floors", domain.JevJudgment{ReasoningScore: 4}, "4"},
-		{"coding_floors", domain.JevJudgment{CodingScore: 4}, "4"},
-		{"risk_floors", domain.JevJudgment{BlastRadius: 3}, "3"},
-		{"underspecification_floors", domain.JevJudgment{Underspecified: .8}, "0.8"},
+		{"reasoning_floors", domain.ClassifierJudgment{ReasoningScore: 4}, "4"},
+		{"coding_floors", domain.ClassifierJudgment{CodingScore: 4}, "4"},
+		{"risk_floors", domain.ClassifierJudgment{BlastRadius: 3}, "3"},
+		{"underspecification_floors", domain.ClassifierJudgment{Underspecified: .8}, "0.8"},
 	} {
 		t.Run(signal.field, func(t *testing.T) {
 			a := configuredApp(t, routingBounds+signal.field+": [{threshold: "+signal.threshold+", floor: T5}]\n", policyModels)
@@ -187,7 +187,7 @@ func TestConfiguredSignalsAndConfidence(t *testing.T) {
 	}
 	for _, tc := range []struct{ setting, want string }{{"", "reliable"}, {"min_jev_confidence: 0.9\n", "cheap"}, {"min_jev_confidence: 0\n", "reliable"}} {
 		a := configuredApp(t, routingBounds+tc.setting, policyModels)
-		d, err := decide(a, domain.RequestFeatures{}, &domain.JevJudgment{MinimumTier: domain.T5, TierConfidence: .8})
+		d, err := decide(a, domain.RequestFeatures{}, &domain.ClassifierJudgment{MinimumTier: domain.T5, TierConfidence: .8})
 		if err != nil || d.ModelID != tc.want {
 			t.Fatalf("confidence ignored: model=%s err=%v", d.ModelID, err)
 		}

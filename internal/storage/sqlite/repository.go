@@ -174,7 +174,7 @@ func (db *DB) GetRequest(ctx context.Context, id string) (storage.RequestRecord,
 		var judgment string
 		err = conn.QueryRowContext(ctx, "SELECT judgment_json FROM jev_judgments WHERE request_id = ?", id).Scan(&judgment)
 		if err == nil {
-			record.Judgment = new(domain.JevJudgment)
+			record.Judgment = new(domain.ClassifierJudgment)
 			if err := json.Unmarshal([]byte(judgment), record.Judgment); err != nil {
 				return failure("decode judgment", err)
 			}

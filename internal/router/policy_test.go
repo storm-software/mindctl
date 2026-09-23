@@ -92,7 +92,7 @@ func TestPolicyCombinesFloorsAndConfidence(t *testing.T) {
 	for tier := domain.T0; tier <= domain.T6; tier++ {
 		models = append(models, policyModel(tier.String(), tier, float64(tier), 1))
 	}
-	config := PolicyConfig{MinJevConfidence: .8, ReasoningFloors: []SignalFloor{{Threshold: 4, Floor: domain.T4}}, CodingFloors: []SignalFloor{{Threshold: 5, Floor: domain.T5}}, RiskFloors: []SignalFloor{{Threshold: 3, Floor: domain.T6}}, UnderspecificationFloors: []SignalFloor{{Threshold: .7, Floor: domain.T5}}}
+	config := PolicyConfig{MinClassifierConfidence: .8, ReasoningFloors: []SignalFloor{{Threshold: 4, Floor: domain.T4}}, CodingFloors: []SignalFloor{{Threshold: 5, Floor: domain.T5}}, RiskFloors: []SignalFloor{{Threshold: 3, Floor: domain.T6}}, UnderspecificationFloors: []SignalFloor{{Threshold: .7, Floor: domain.T5}}}
 	for _, tc := range []struct {
 		name  string
 		input DecisionInput
@@ -100,14 +100,14 @@ func TestPolicyCombinesFloorsAndConfidence(t *testing.T) {
 	}{
 		{"caller", DecisionInput{MinTier: tierPtr(domain.T3)}, domain.T3},
 		{"base", DecisionInput{Floor: domain.T4}, domain.T4},
-		{"jev", DecisionInput{Judgment: &domain.JevJudgment{MinimumTier: domain.T5, TierConfidence: .8}}, domain.T5},
-		{"low confidence cannot lower", DecisionInput{Floor: domain.T4, Judgment: &domain.JevJudgment{MinimumTier: domain.T1, TierConfidence: .1}}, domain.T4},
-		{"confidence gate", DecisionInput{Floor: domain.T2, Judgment: &domain.JevJudgment{MinimumTier: domain.T6, TierConfidence: .79}}, domain.T2},
-		{"reasoning", DecisionInput{Judgment: &domain.JevJudgment{ReasoningScore: 4}}, domain.T4},
-		{"coding", DecisionInput{Judgment: &domain.JevJudgment{CodingScore: 5}}, domain.T5},
-		{"risk", DecisionInput{Judgment: &domain.JevJudgment{BlastRadius: 3}}, domain.T6},
-		{"underspecified", DecisionInput{Judgment: &domain.JevJudgment{Underspecified: .7}}, domain.T5},
-		{"below threshold", DecisionInput{Judgment: &domain.JevJudgment{ReasoningScore: 3.9, CodingScore: 4.9, BlastRadius: 2.9, Underspecified: .69}}, domain.T0},
+		{"classifier", DecisionInput{Judgment: &domain.ClassifierJudgment{MinimumTier: domain.T5, TierConfidence: .8}}, domain.T5},
+		{"low confidence cannot lower", DecisionInput{Floor: domain.T4, Judgment: &domain.ClassifierJudgment{MinimumTier: domain.T1, TierConfidence: .1}}, domain.T4},
+		{"confidence gate", DecisionInput{Floor: domain.T2, Judgment: &domain.ClassifierJudgment{MinimumTier: domain.T6, TierConfidence: .79}}, domain.T2},
+		{"reasoning", DecisionInput{Judgment: &domain.ClassifierJudgment{ReasoningScore: 4}}, domain.T4},
+		{"coding", DecisionInput{Judgment: &domain.ClassifierJudgment{CodingScore: 5}}, domain.T5},
+		{"risk", DecisionInput{Judgment: &domain.ClassifierJudgment{BlastRadius: 3}}, domain.T6},
+		{"underspecified", DecisionInput{Judgment: &domain.ClassifierJudgment{Underspecified: .7}}, domain.T5},
+		{"below threshold", DecisionInput{Judgment: &domain.ClassifierJudgment{ReasoningScore: 3.9, CodingScore: 4.9, BlastRadius: 2.9, Underspecified: .69}}, domain.T0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.input.Models = models
@@ -116,6 +116,17 @@ func TestPolicyCombinesFloorsAndConfidence(t *testing.T) {
 				t.Fatalf("decision=%+v err=%v", got, err)
 			}
 		})
+	}
+}
+
+func TestClassifierMinimumReasonIsProviderNeutral(t *testing.T) {
+	got, err := NewPolicy(PolicyConfig{MinClassifierConfidence: .7}).Decide(
+		DecisionInput{Floor: domain.T0, Judgment: &domain.ClassifierJudgment{
+			MinimumTier: domain.T4, TierConfidence: .8,
+		}, Models: []domain.Model{policyModel("t4", domain.T4, 0, 1)}},
+	)
+	if err != nil || !strings.Contains(strings.Join(got.Reasons, "\n"), "classifier minimum raised floor from T0 to T4") {
+		t.Fatalf("decision=%+v err=%v", got, err)
 	}
 }
 
@@ -203,7 +214,7 @@ func TestPolicyReplayIsDeterministicAndDoesNotMutateInputs(t *testing.T) {
 	rules := []SignalFloor{{Threshold: 4, Floor: domain.T4}}
 	p := NewPolicy(PolicyConfig{ReasoningFloors: rules})
 	rules[0].Floor = domain.T6
-	in := DecisionInput{Models: []domain.Model{policyModel("first", domain.T4, 1, 1), policyModel("second", domain.T6, 2, 1)}, Judgment: &domain.JevJudgment{ReasoningScore: 4}}
+	in := DecisionInput{Models: []domain.Model{policyModel("first", domain.T4, 1, 1), policyModel("second", domain.T6, 2, 1)}, Judgment: &domain.ClassifierJudgment{ReasoningScore: 4}}
 	want, err := p.Decide(in)
 	if err != nil || want.ModelID != "first" {
 		t.Fatalf("decision=%+v err=%v", want, err)

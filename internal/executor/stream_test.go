@@ -86,7 +86,7 @@ func TestStreamRaisesNextTierAfterVisibleFailureWithSQLiteConversation(t *testin
 	conversations := sqliteStreamConversation(t)
 	adapter := &scriptedProvider{streams: []provider.Stream{streamThenFail("partial")}}
 	service := New(
-		&fakeClassifier{Judgment: domain.JevJudgment{MinimumTier: domain.T4, TierConfidence: 1}},
+		&fakeClassifier{Judgment: domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: 1}},
 		router.NewPolicy(router.PolicyConfig{}),
 		provider.NewRegistry(map[string]provider.Provider{"openai": adapter}),
 		conversations,
@@ -203,7 +203,7 @@ func newStreamDependencies(streams ...provider.Stream) *streamDependencies {
 		streamModel("second", 1),
 	}
 	return &streamDependencies{
-		executor: New(&fakeClassifier{Judgment: domain.JevJudgment{MinimumTier: domain.T4, TierConfidence: 1}}, router.NewPolicy(router.PolicyConfig{}), provider.NewRegistry(map[string]provider.Provider{"openai": adapter}), conversations),
+		executor: New(&fakeClassifier{Judgment: domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: 1}}, router.NewPolicy(router.PolicyConfig{}), provider.NewRegistry(map[string]provider.Provider{"openai": adapter}), conversations),
 		provider: adapter, conversations: conversations, writer: &streamWriter{}, models: models,
 	}
 }
