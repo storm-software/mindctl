@@ -69,17 +69,9 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			path := settings.GetString("config")
-			if !command.Flags().Changed("config") {
-				candidate, err := userConfigPath()
-				if err != nil {
-					return err
-				}
-				if _, err := os.Stat(candidate); err == nil {
-					path = candidate
-				} else if !errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("inspect user config: %w", err)
-				}
+			path, err := selectedConfigPath(command, settings)
+			if err != nil {
+				return err
 			}
 			settings.SetConfigFile(path)
 			if err := settings.ReadInConfig(); err != nil {
@@ -104,7 +96,220 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		},
 	})
 	root.AddCommand(newConfigCommand())
+	root.AddCommand(newModelCommand(settings), newProvidersCommand(settings), newProviderCommand(settings))
 	return root
+}
+
+func selectedConfigPath(command *cobra.Command, settings *viper.Viper) (string, error) {
+	path := settings.GetString("config")
+	if command.Root().PersistentFlags().Changed("config") {
+		return path, nil
+	}
+	candidate, err := userConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("inspect user config: %w", err)
+	}
+	return path, nil
+}
+
+func newModelCommand(settings *viper.Viper) *cobra.Command {
+	modelCommand := &cobra.Command{
+		Use:   "model",
+		Short: "List and update routable models",
+		Args:  noArgs("unexpected arguments for model"),
+	}
+	var all bool
+	listCommand := &cobra.Command{
+		Use:   "list",
+		Short: "List enabled models grouped by provider",
+		Args:  noArgs("unexpected arguments for model list"),
+		RunE: func(command *cobra.Command, _ []string) error {
+			cfg, err := readCommandCatalog(command, settings)
+			if err != nil {
+				return err
+			}
+			return writeModelList(command.OutOrStdout(), cfg, all)
+		},
+	}
+	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled models")
+	modelCommand.AddCommand(
+		listCommand,
+		newModelToggleCommand(settings, "enable", true),
+		newModelToggleCommand(settings, "disable", false),
+	)
+	return modelCommand
+}
+
+func newModelToggleCommand(settings *viper.Viper, action string, enabled bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   action + " <provider[.model]>",
+		Short: action + " one model or every model for a provider",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			cfg, err := readCatalog(command, settings)
+			if err != nil {
+				return err
+			}
+			statePath, err := config.ProvidersPath()
+			if err != nil {
+				return err
+			}
+			providerID, modelID, hasModel := strings.Cut(args[0], ".")
+			if providerID == "" || (hasModel && modelID == "") {
+				return errors.New("model target must use provider or provider.model form")
+			}
+			if hasModel {
+				return config.SetModelEnabled(statePath, cfg, providerID, modelID, enabled)
+			}
+			return config.SetProviderEnabled(statePath, cfg, providerID, enabled)
+		},
+	}
+}
+
+func newProvidersCommand(settings *viper.Viper) *cobra.Command {
+	providersCommand := &cobra.Command{
+		Use:   "providers",
+		Short: "List routable providers",
+		Args:  noArgs("unexpected arguments for providers"),
+	}
+	var all bool
+	listCommand := &cobra.Command{
+		Use:   "list",
+		Short: "List enabled providers",
+		Args:  noArgs("unexpected arguments for providers list"),
+		RunE: func(command *cobra.Command, _ []string) error {
+			cfg, err := readCommandCatalog(command, settings)
+			if err != nil {
+				return err
+			}
+			return writeProviderList(command.OutOrStdout(), cfg, all)
+		},
+	}
+	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
+	providersCommand.AddCommand(listCommand)
+	return providersCommand
+}
+
+func newProviderCommand(settings *viper.Viper) *cobra.Command {
+	providerCommand := &cobra.Command{
+		Use:   "provider",
+		Short: "Enable or disable all models for a provider",
+		Args:  noArgs("unexpected arguments for provider"),
+	}
+	for _, option := range []struct {
+		action  string
+		enabled bool
+	}{{"enable", true}, {"disable", false}} {
+		action, enabled := option.action, option.enabled
+		providerCommand.AddCommand(&cobra.Command{
+			Use:   action + " <provider>",
+			Short: action + " every model for a provider",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(command *cobra.Command, args []string) error {
+				cfg, err := readCatalog(command, settings)
+				if err != nil {
+					return err
+				}
+				statePath, err := config.ProvidersPath()
+				if err != nil {
+					return err
+				}
+				return config.SetProviderEnabled(statePath, cfg, args[0], enabled)
+			},
+		})
+	}
+	return providerCommand
+}
+
+func readCatalog(command *cobra.Command, settings *viper.Viper) (config.Config, error) {
+	path, err := selectedConfigPath(command, settings)
+	if err != nil {
+		return config.Config{}, err
+	}
+	cfg, err := config.Read(path)
+	if err != nil {
+		return config.Config{}, err
+	}
+	if err := cfg.ValidateCatalog(); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
+}
+
+func readCommandCatalog(command *cobra.Command, settings *viper.Viper) (config.Config, error) {
+	cfg, err := readCatalog(command, settings)
+	if err != nil {
+		return config.Config{}, err
+	}
+	statePath, err := config.ProvidersPath()
+	if err != nil {
+		return config.Config{}, err
+	}
+	if err := config.ApplyProvidersFile(statePath, &cfg); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
+}
+
+func writeModelList(output io.Writer, cfg config.Config, all bool) error {
+	for _, provider := range cfg.Providers {
+		models := make([]config.ModelConfig, 0)
+		for _, model := range cfg.Models {
+			if model.Provider == provider.ID && (all || model.Available) {
+				models = append(models, model)
+			}
+		}
+		if len(models) == 0 {
+			continue
+		}
+		if _, err := fmt.Fprintln(output, provider.ID); err != nil {
+			return err
+		}
+		for _, model := range models {
+			status := ""
+			if all {
+				status = " (disabled)"
+				if model.Available {
+					status = " (enabled)"
+				}
+			}
+			if _, err := fmt.Fprintf(output, "  %s%s\n", model.ID, status); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func writeProviderList(output io.Writer, cfg config.Config, all bool) error {
+	for _, provider := range cfg.Providers {
+		enabled := false
+		for _, model := range cfg.Models {
+			if model.Provider == provider.ID && model.Available {
+				enabled = true
+				break
+			}
+		}
+		if !all && !enabled {
+			continue
+		}
+		status := ""
+		if all {
+			status = " (disabled)"
+			if enabled {
+				status = " (enabled)"
+			}
+		}
+		if _, err := fmt.Fprintf(output, "%s%s\n", provider.ID, status); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newConfigCommand() *cobra.Command {
@@ -348,7 +553,7 @@ func noArgs(message string) cobra.PositionalArgs {
 }
 
 func runGateway(ctx context.Context, path string, stderr io.Writer) (err error) {
-	cfg, err := config.Load(path, os.LookupEnv)
+	cfg, err := loadGatewayConfig(path)
 	if err != nil {
 		return err
 	}
@@ -379,6 +584,21 @@ func runGateway(ctx context.Context, path string, stderr io.Writer) (err error) 
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
 	return serve(ctx, server, listener, 5*time.Second)
+}
+
+func loadGatewayConfig(path string) (config.Config, error) {
+	cfg, err := config.Load(path, os.LookupEnv)
+	if err != nil {
+		return config.Config{}, err
+	}
+	statePath, err := config.ProvidersPath()
+	if err != nil {
+		return config.Config{}, err
+	}
+	if err := config.ApplyProvidersFile(statePath, &cfg); err != nil {
+		return config.Config{}, err
+	}
+	return cfg, nil
 }
 
 // serve waits for both shutdown and Serve to finish before the app is closed.

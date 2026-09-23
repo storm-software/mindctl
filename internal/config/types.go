@@ -175,10 +175,44 @@ func (m ModelConfig) CachedInputPrice() float64 {
 	return m.InputPrice
 }
 
+// ValidateCatalog checks provider and model identities without resolving
+// runtime secrets, so offline catalog commands cannot persist invalid state.
+func (cfg Config) ValidateCatalog() error {
+	var errs []error
+	providerIDs := make(map[string]struct{}, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		if provider.ID == "" {
+			errs = append(errs, errors.New("missing provider ID"))
+			continue
+		}
+		if _, exists := providerIDs[provider.ID]; exists {
+			errs = append(errs, fmt.Errorf("duplicate provider ID: %s", provider.ID))
+			continue
+		}
+		providerIDs[provider.ID] = struct{}{}
+	}
+
+	modelIDs := make(map[string]struct{}, len(cfg.Models))
+	for _, model := range cfg.Models {
+		if model.ID == "" {
+			errs = append(errs, errors.New("missing model ID"))
+		} else if _, exists := modelIDs[model.ID]; exists {
+			errs = append(errs, fmt.Errorf("duplicate model ID: %s", model.ID))
+		} else {
+			modelIDs[model.ID] = struct{}{}
+		}
+		if _, ok := providerIDs[model.Provider]; !ok {
+			errs = append(errs, fmt.Errorf("model %s references missing provider %s", model.ID, model.Provider))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // Validate checks configuration and referenced environment variables without
 // placing secret values in YAML. All independent faults are returned together.
 func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	var errs []error
+	errs = append(errs, cfg.ValidateCatalog())
 
 	requireEnv := func(label, name string) {
 		value, ok := getenv(name)
@@ -200,10 +234,8 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		errs = append(errs, errors.New("invalid classifier endpoint"))
 	}
 
-	providerIDs := make(map[string]struct{}, len(cfg.Providers))
 	chatGPTOAuthConfigured := false
 	for _, provider := range cfg.Providers {
-		providerIDs[provider.ID] = struct{}{}
 		switch provider.AuthMode() {
 		case ProviderAuthAPIKey:
 			requireEnv("provider "+provider.ID, provider.APIKeyEnv)
@@ -319,16 +351,7 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 	validateRouting()
 
-	modelIDs := make(map[string]struct{}, len(cfg.Models))
 	for _, model := range cfg.Models {
-		if _, exists := modelIDs[model.ID]; exists {
-			errs = append(errs, fmt.Errorf("duplicate model ID: %s", model.ID))
-		} else {
-			modelIDs[model.ID] = struct{}{}
-		}
-		if _, ok := providerIDs[model.Provider]; !ok {
-			errs = append(errs, fmt.Errorf("model %s references missing provider %s", model.ID, model.Provider))
-		}
 		if _, ok := tierRank(model.Tier); !ok {
 			errs = append(errs, fmt.Errorf("unknown tier for model %s: %s", model.ID, model.Tier))
 		}

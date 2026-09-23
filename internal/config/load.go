@@ -8,9 +8,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Load decodes one strict YAML configuration document and validates its secret
-// references through getenv.
-func Load(path string, getenv func(string) (string, bool)) (Config, error) {
+// Read decodes one strict YAML configuration document without resolving or
+// validating its referenced secrets. It is used by offline catalog commands.
+func Read(path string) (Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("open config: %w", err)
@@ -35,6 +35,16 @@ func Load(path string, getenv func(string) (string, bool)) (Config, error) {
 	}
 	if cfg.ClientAuth.MaxBodyBytes == 0 {
 		cfg.ClientAuth.MaxBodyBytes = DefaultMaxBodyBytes
+	}
+	return cfg, nil
+}
+
+// Load decodes one strict YAML configuration document and validates its secret
+// references through getenv.
+func Load(path string, getenv func(string) (string, bool)) (Config, error) {
+	cfg, err := Read(path)
+	if err != nil {
+		return Config{}, err
 	}
 	if err := cfg.Validate(getenv); err != nil {
 		return Config{}, err

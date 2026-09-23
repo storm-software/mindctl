@@ -72,6 +72,44 @@ unknown: true
 	}
 }
 
+func TestReadDecodesCatalogWithoutResolvingSecrets(t *testing.T) {
+	body, err := yaml.Marshal(validConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeConfig(t, string(body))
+
+	cfg, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(cfg.Models) != 1 || cfg.Models[0].ID != "gpt-test" {
+		t.Fatalf("models = %#v", cfg.Models)
+	}
+	if cfg.ClientAuth.MaxBodyBytes != DefaultMaxBodyBytes {
+		t.Fatalf("max body bytes = %d, want %d", cfg.ClientAuth.MaxBodyBytes, DefaultMaxBodyBytes)
+	}
+}
+
+func TestValidateCatalogRejectsBrokenIdentitiesWithoutResolvingSecrets(t *testing.T) {
+	cfg := Config{
+		Providers: []ProviderConfig{{ID: "duplicate"}, {ID: "duplicate"}},
+		Models: []ModelConfig{
+			{ID: "same", Provider: "duplicate"},
+			{ID: "same", Provider: "missing"},
+		},
+	}
+	err := cfg.ValidateCatalog()
+	if err == nil {
+		t.Fatal("ValidateCatalog succeeded")
+	}
+	for _, want := range []string{"duplicate provider ID", "duplicate model ID", "references missing provider"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ValidateCatalog error %q missing %q", err, want)
+		}
+	}
+}
+
 func TestLoadDefaultsSafeFallbackToT4(t *testing.T) {
 	path := writeConfig(t, `
 listen: ":8080"

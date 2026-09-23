@@ -161,6 +161,39 @@ Container deployments should continue to mount the configuration explicitly at
 `/etc/mindctl/config.yaml`, as shown above; the image command supplies that
 path through its configuration flag.
 
+### Model and provider availability
+
+Mindctl can keep the routable model allow-list separate from the gateway
+catalog. The gateway reads
+`${XDG_STATE_HOME:-$HOME/.local/state}/mindctl/providers.yaml` once during
+startup and caches the resulting availability in memory. When the file is
+absent, each model's `available` value in `config.yaml` remains authoritative.
+When the file exists, only the models listed in it are available:
+
+```yaml
+providers:
+  openai:
+    - gpt-5
+  deepseek:
+    - deepseek-flash
+```
+
+Use the catalog commands to inspect or update the file. The first update
+initializes it from the current `available` values, and changes take effect in
+the gateway after restart.
+
+```sh
+mindctl model list
+mindctl model list --all
+mindctl model enable openai.gpt-5
+mindctl model disable openai
+
+mindctl providers list
+mindctl providers list --all
+mindctl provider enable openai
+mindctl provider disable openai
+```
+
 ## Laya system 1 sidecar
 
 The Laya classifier is optional. To launch the local sidecar, set a shared

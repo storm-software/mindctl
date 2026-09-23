@@ -46,6 +46,27 @@ func mainConfig(t *testing.T) string {
 	return path
 }
 
+func commandCatalogConfig(t *testing.T) string {
+	t.Helper()
+	cfg := config.Config{
+		Providers: []config.ProviderConfig{{ID: "openai"}, {ID: "deepseek"}},
+		Models: []config.ModelConfig{
+			{ID: "gpt-alpha", Provider: "openai", Available: true},
+			{ID: "gpt-beta", Provider: "openai", Available: false},
+			{ID: "deepseek-chat", Provider: "deepseek", Available: true},
+		},
+	}
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestRunRejectsBadFlagsAndMissingSecrets(t *testing.T) {
 	path := mainConfig(t)
 	t.Setenv("MAIN_ENCRYPTION_KEY", "")
@@ -97,6 +118,158 @@ func TestRunPrefersExplicitConfigOverXDGConfig(t *testing.T) {
 	err := run(context.Background(), []string{"--config", explicit}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "invalid_explicit_config") || strings.Contains(err.Error(), "invalid_xdg_config") {
 		t.Fatalf("explicit config error = %v; want explicit config validation error rather than XDG config", err)
+	}
+}
+
+func TestLoadGatewayConfigCachesProvidersFileAvailability(t *testing.T) {
+	path := mainConfig(t)
+	cfg, err := config.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Models = append(cfg.Models, config.ModelConfig{ID: "disabled", Provider: "openai", Tier: "T4", Available: false, SuccessPrior: 1})
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	stateDir := filepath.Join(stateHome, "mindctl")
+	if err := os.Mkdir(stateDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(stateDir, "providers.yaml")
+	if err := os.WriteFile(statePath, []byte("providers:\n  openai:\n    - disabled\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := loadGatewayConfig(path)
+	if err != nil {
+		t.Fatalf("loadGatewayConfig: %v", err)
+	}
+	if loaded.Models[0].Available || !loaded.Models[1].Available {
+		t.Fatalf("availability = [%v %v], want [false true]", loaded.Models[0].Available, loaded.Models[1].Available)
+	}
+	if err := os.WriteFile(statePath, []byte("providers:\n  openai:\n    - model\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Models[0].Available || !loaded.Models[1].Available {
+		t.Fatal("loaded catalog changed after the providers file was rewritten")
+	}
+}
+
+func TestModelListGroupsEnabledModelsAndAllShowsStatuses(t *testing.T) {
+	path := commandCatalogConfig(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"--config", path, "model", "list"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("model list: %v", err)
+	}
+	if got, want := stdout.String(), "openai\n  gpt-alpha\ndeepseek\n  deepseek-chat\n"; got != want {
+		t.Fatalf("model list output = %q; want %q", got, want)
+	}
+
+	stdout.Reset()
+	if err := run(context.Background(), []string{"--config", path, "model", "list", "--all"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("model list --all: %v", err)
+	}
+	if got, want := stdout.String(), "openai\n  gpt-alpha (enabled)\n  gpt-beta (disabled)\ndeepseek\n  deepseek-chat (enabled)\n"; got != want {
+		t.Fatalf("model list --all output = %q; want %q", got, want)
+	}
+}
+
+func TestModelEnableAndDisablePersistExactOrProviderWideChanges(t *testing.T) {
+	path := commandCatalogConfig(t)
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+
+	if err := run(context.Background(), []string{"--config", path, "model", "enable", "openai.gpt-beta"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("model enable: %v", err)
+	}
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"--config", path, "model", "list", "--all"}, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "gpt-beta (enabled)") {
+		t.Fatalf("enabled model missing:\n%s", stdout.String())
+	}
+
+	if err := run(context.Background(), []string{"--config", path, "model", "disable", "openai"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("model disable provider: %v", err)
+	}
+	stdout.Reset()
+	if err := run(context.Background(), []string{"--config", path, "model", "list"}, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "deepseek\n  deepseek-chat\n"; got != want {
+		t.Fatalf("model list output = %q; want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(stateHome, "mindctl", "providers.yaml")); err != nil {
+		t.Fatalf("providers file: %v", err)
+	}
+}
+
+func TestProviderCommandsAliasProviderWideModelChanges(t *testing.T) {
+	path := commandCatalogConfig(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	if err := run(context.Background(), []string{"--config", path, "provider", "disable", "openai"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("provider disable: %v", err)
+	}
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"--config", path, "providers", "list", "--all"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("providers list --all: %v", err)
+	}
+	if got, want := stdout.String(), "openai (disabled)\ndeepseek (enabled)\n"; got != want {
+		t.Fatalf("providers list --all output = %q; want %q", got, want)
+	}
+
+	if err := run(context.Background(), []string{"--config", path, "provider", "enable", "openai"}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("provider enable: %v", err)
+	}
+	stdout.Reset()
+	if err := run(context.Background(), []string{"--config", path, "providers", "list"}, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "openai\ndeepseek\n"; got != want {
+		t.Fatalf("providers list output = %q; want %q", got, want)
+	}
+}
+
+func TestModelCommandsRejectUnknownTargets(t *testing.T) {
+	path := commandCatalogConfig(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	for _, target := range []string{"missing", "openai.missing"} {
+		err := run(context.Background(), []string{"--config", path, "model", "enable", target}, io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "unknown") {
+			t.Fatalf("target %q error = %v", target, err)
+		}
+	}
+}
+
+func TestModelCommandRejectsInvalidCatalogBeforeWritingState(t *testing.T) {
+	cfg := config.Config{Models: []config.ModelConfig{{ID: "orphan", Provider: "missing", Available: true}}}
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+
+	err = run(context.Background(), []string{"--config", path, "model", "enable", "missing.orphan"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "missing provider") {
+		t.Fatalf("model enable error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateHome, "mindctl", "providers.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("providers file exists after rejected command: %v", err)
 	}
 }
 
