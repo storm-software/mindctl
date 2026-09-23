@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .contract import (
@@ -92,12 +93,11 @@ def _answers(raw: dict[str, Any]) -> dict[str, ChoiceAnswer | ScoreAnswer | Noul
         if not isinstance(answer, dict):
             raise ValueError("invalid Laya answer")
         if question["type"] == "choice":
-            converted[name] = ChoiceAnswer(type="choice", **answer)
+            converted[name] = ChoiceAnswer(choice=answer["choice"], confidence=answer["confidence"], probabilities=answer["probabilities"])
         elif question["type"] == "score":
-            criteria = question["criteria"]
-            converted[name] = ScoreAnswer(type="score", legend={str(index): label for index, label in enumerate(criteria)}, **answer)
+            converted[name] = ScoreAnswer(score=answer["score"], confidence=answer["confidence"], probabilities=answer["probabilities"], legend=answer["legend"])
         else:
-            converted[name] = NoulAnswer(type="noul", **answer)
+            converted[name] = NoulAnswer(noul=answer["noul"])
     return converted
 
 
@@ -114,6 +114,10 @@ def create_app(settings: Settings | None = None, load_agent: AgentLoader | None 
 
     app = FastAPI(title="Mindctl Laya classifier", version="1", lifespan=lifespan)
     app.add_middleware(BodyLimitMiddleware)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_: Request, __: RequestValidationError) -> JSONResponse:
+        return JSONResponse({"detail": "invalid request"}, status_code=422)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

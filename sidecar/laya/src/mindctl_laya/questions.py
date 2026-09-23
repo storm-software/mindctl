@@ -68,3 +68,13 @@ QUESTIONS: Mapping[str, Mapping[str, Any]] = MappingProxyType(
         ),
     }
 )
+
+def native_questions() -> dict[str, dict[str, Any]]:
+    result = {}
+    for name, definition in QUESTIONS.items():
+        copied = dict(definition)
+        criteria = copied.get("criteria")
+        if isinstance(criteria, Mapping): copied["criteria"] = dict(criteria)
+        elif isinstance(criteria, tuple): copied["criteria"] = list(criteria)
+        result[name] = copied
+    return result

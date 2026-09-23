@@ -36,7 +36,15 @@ async def test_classify_requires_token_and_emits_all_six_answers(client):
 async def test_rejects_unknown_input_and_oversized_body(client):
     unknown = valid_request()
     unknown["unexpected"] = True
-    assert (await client.post("/v1/classify", headers=auth(), json=unknown)).status_code == 422
+    response = await client.post("/v1/classify", headers=auth(), json=unknown)
+    assert response.status_code == 422
+    assert "private prompt" not in response.text
+
+    unsupported_schema = valid_request()
+    unsupported_schema["schema_version"] = "private prompt unsupported schema"
+    response = await client.post("/v1/classify", headers=auth(), json=unsupported_schema)
+    assert response.status_code == 422
+    assert "private prompt" not in response.text
 
     body = valid_request()
     body["state"]["prompt"] = "x" * ((1 << 20) + 1)

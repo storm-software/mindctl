@@ -6,7 +6,7 @@ from typing import Any, Protocol
 from fastapi.concurrency import run_in_threadpool
 from huggingface_hub import snapshot_download
 
-from .questions import QUESTIONS
+from .questions import native_questions
 
 
 class Agent(Protocol):
@@ -29,7 +29,7 @@ class LayaService:
 
     async def _load(self) -> None:
         try:
-            loaded = self._load_agent()
+            loaded = await asyncio.to_thread(self._load_agent)
             self._agent = await loaded if inspect.isawaitable(loaded) else loaded
         except Exception:
             self._load_failed = True
@@ -50,7 +50,7 @@ class LayaService:
         if self._agent is None:
             raise RuntimeError("classifier unavailable")
         async with self._lock:
-            return await run_in_threadpool(self._agent.predict, state, QUESTIONS)
+            return await run_in_threadpool(self._agent.predict, state, native_questions())
 
 
 def default_agent_loader(revision: str, variant: str) -> Agent:
