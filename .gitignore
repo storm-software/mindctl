@@ -16,6 +16,9 @@ graphify-out
 powerlines.d.ts
 .powerlines
 
+.pytest_cache
+.superpowers
+
 # dependencies
 node_modules
 
