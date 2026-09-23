@@ -63,6 +63,7 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 	if clientID == "" {
 		return Turn{}, errors.New("conversation: client ID is required")
 	}
+
 	conversationID := randomID("conv_")
 	if request.PreviousResponseID != "" {
 		previous, err := s.Resume(ctx, clientID, request.PreviousResponseID)
@@ -71,6 +72,7 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 		}
 		conversationID = previous.ConversationID
 	}
+
 	responseID := randomID("resp_")
 	now := time.Now().UTC()
 	input := make([]inference.Item, len(request.Input))
@@ -80,6 +82,7 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 		// never become a continuation payload for any adapter.
 		input[index].ProviderData = nil
 	}
+
 	if err := s.store.CreateTurn(ctx, storage.NewTurn{
 		Conversation: storage.ConversationRecord{ID: conversationID, ClientID: clientID, CreatedAt: now},
 		Response:     storage.ResponseRecord{ID: responseID, ConversationID: conversationID, CreatedAt: now, Status: "pending"},
@@ -87,6 +90,7 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 	}); err != nil {
 		return Turn{}, err
 	}
+
 	return s.resume(ctx, clientID, responseID)
 }
 

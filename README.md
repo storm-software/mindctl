@@ -52,21 +52,11 @@
 - [Quick Features](#quick-features)
   - [Visual Studio Code Extension](#visual-studio-code-extension)
   - [Environment Configuration Help](#environment-configuration-help)
-- [Getting Started](#getting-started)
+- [Development](#development)
   - [Build](#build)
   - [Development Server](#development-server)
   - [ChatGPT subscription routing](#chatgpt-subscription-routing)
 - [Environment Configuration Help](#environment-configuration-help-1)
-  - [Plug-Ins](#plug-ins)
-  - [Generate an Application](#generate-an-application)
-  - [Generate a Library](#generate-a-library)
-  - [Code Scaffolding](#code-scaffolding)
-- [Testing](#testing)
-  - [Running Unit Tests](#running-unit-tests)
-  - [Running End-to-End Tests](#running-end-to-end-tests)
-  - [Understand your workspace](#understand-your-workspace)
-- [☁ Nx Cloud](#-nx-cloud)
-  - [Distributed Computation Caching \& Distributed Task Execution](#distributed-computation-caching--distributed-task-execution)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Support](#support)
@@ -78,6 +68,8 @@
 <br />
 
 # Install
+
+The following installation methods are available for setting up Mindctl:
 
 ## Native binary
 
@@ -118,7 +110,7 @@ the image. Confirm an anonymous `docker pull` succeeds for the release tag.
 ## From source
 
 ```sh
-devenv shell -- go run ./cmd/mindctl -config ./config.yaml
+go run ./cmd/mindctl -config ./config.yaml
 ```
 
 # Quick Features
@@ -137,7 +129,7 @@ If you run into any issues while trying to run any of the above steps, please
 reach out to Patrick Sullivan. See the [Support](#support) section for more
 information.
 
-# Getting Started
+# Development
 
 Once the code is pulled locally, open a command prompt and run `pnpm install` in
 the root repo directory (/mindctl).
@@ -202,120 +194,6 @@ subject to the selected ChatGPT account and subscription.
 If you run into any issues while trying to run any of the above steps, please
 reach out to Patrick Sullivan. See the [Support](#support) section for more
 information.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Plug-Ins
-
-Some of the plug-ins used by this repository are:
-
-- [@nx/next](https://nx.dev/packages/next)
-- [@nx/react](https://nx.dev/packages/react)
-- [@nx/lint](https://nx.dev/linter/overview)
-- [@nx/js](https://nx.dev/js/overview)
-- [@nx/node](https://nodejs.org)
-- [@nx/web](https://nx.dev/web/overview)
-- [@nx/storybook](https://nx.dev/storybook/overview-react)
-- [@nx/cypress](https://nx.dev/packages/cypress)
-- [@nx/jest](https://nx.dev/packages/jest)
-- And more...
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Generate an Application
-
-Run `nx g @storm-software/workspace:app my-app` to generate an application.
-
-> You can use any of the plugins above to generate applications as well.
-
-When using Nx, you can create multiple applications and libraries in the same
-workspace.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Generate a Library
-
-Run `nx g @storm-software/workspace:lib my-lib` to generate a library.
-
-> You can also use any of the plugins above to generate libraries as well.
-
-Libraries are shareable across libraries and applications. They can be imported
-from `@mindctl/my-lib`.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Code Scaffolding
-
-Run `nx g @nx/react:component my-component --project=mindctl` to generate a new
-component.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-# Testing
-
-Open System uses [Jest](https://jestjs.io/) for unit testing and
-[Cypress](https://www.cypress.io/) for end-to-end testing.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Running Unit Tests
-
-Run `pnpm test` to execute the unit tests via [Jest](https://jestjs.io).
-
-Run `pnpm affected:test` to execute the unit tests affected by a change.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Running End-to-End Tests
-
-Run `pnpm e2e` to execute the end-to-end tests via
-[Cypress](https://www.cypress.io).
-
-Run `pnpm affected:e2e` to execute the end-to-end tests affected by a change.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Understand your workspace
-
-Run `pnpm graph` to see a diagram of the dependencies of the Open System
-projects.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-# ☁ Nx Cloud
-
-Nx caches the output of any previously run command such as testing and building,
-so it can replay the cached results instead of rerunning it. Nx Cloud allows you
-to share the computation cache across everyone in your team and CI.
-
-<div align="center">
-<img src="https://pub-4661138852db4e5da99a6660fbf9b633.r2.dev/Nx Cloud - Dashboard.png" width="100%" alt="Nx Cloud - Dashboard" />
-</div>
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Distributed Computation Caching & Distributed Task Execution
-
-Nx Cloud pairs with Nx in order to enable you to build and test code more
-rapidly, by up to 10 times. Even teams that are new to Nx can connect to Nx
-Cloud and start saving time instantly.
-
-Teams using Nx gain the advantage of building full-stack applications with their
-preferred framework alongside Nx’s advanced code generation and project
-dependency graph, plus a unified experience for both frontend and backend
-developers.
-
-Visit [Nx Cloud](https://nx.app/) to learn more.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />

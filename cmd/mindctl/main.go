@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -12,9 +11,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/storm-software/mindctl/internal/app"
 	"github.com/storm-software/mindctl/internal/config"
 )
@@ -36,26 +38,72 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
-	if len(args) > 0 && args[0] == "version" {
-		if len(args) != 1 {
-			return errors.New("unexpected arguments for version")
+	command := newRootCommand(ctx, stdout, stderr)
+	command.SetArgs(normalizeLegacyConfigFlag(args))
+	return command.ExecuteContext(ctx)
+}
+
+func normalizeLegacyConfigFlag(args []string) []string {
+	normalized := make([]string, len(args))
+	for index, arg := range args {
+		switch {
+		case arg == "-config":
+			normalized[index] = "--config"
+		case strings.HasPrefix(arg, "-config="):
+			normalized[index] = "--" + arg[1:]
+		default:
+			normalized[index] = arg
 		}
-		_, err := fmt.Fprintf(stdout, "version=%s\ncommit=%s\ndate=%s\n", version, commit, date)
-		return err
 	}
-	flags := flag.NewFlagSet("mindctl", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	path := flags.String("config", "config.example.yaml", "gateway YAML configuration")
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+	return normalized
+}
+
+func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
+	settings := viper.New()
+	root := &cobra.Command{
+		Use:           "mindctl",
+		Short:         "Run the Mindctl gateway",
+		Args:          noArgs("unexpected positional arguments"),
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(*cobra.Command, []string) error {
+			path := settings.GetString("config")
+			settings.SetConfigFile(path)
+			if err := settings.ReadInConfig(); err != nil {
+				return fmt.Errorf("read config: %w", err)
+			}
+			return runGateway(ctx, settings.ConfigFileUsed(), stderr)
+		},
+	}
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.PersistentFlags().String("config", "config.example.yaml", "gateway YAML configuration")
+	if err := settings.BindPFlag("config", root.PersistentFlags().Lookup("config")); err != nil {
+		panic(fmt.Sprintf("bind config flag: %v", err))
+	}
+	root.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print build version information",
+		Args:  noArgs("unexpected arguments for version"),
+		RunE: func(command *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintf(command.OutOrStdout(), "version=%s\ncommit=%s\ndate=%s\n", version, commit, date)
+			return err
+		},
+	})
+	return root
+}
+
+func noArgs(message string) cobra.PositionalArgs {
+	return func(_ *cobra.Command, args []string) error {
+		if len(args) == 0 {
 			return nil
 		}
-		return errors.New("invalid command-line flags")
+		return errors.New(message)
 	}
-	if flags.NArg() != 0 {
-		return errors.New("unexpected positional arguments")
-	}
-	cfg, err := config.Load(*path, os.LookupEnv)
+}
+
+func runGateway(ctx context.Context, path string, stderr io.Writer) (err error) {
+	cfg, err := config.Load(path, os.LookupEnv)
 	if err != nil {
 		return err
 	}

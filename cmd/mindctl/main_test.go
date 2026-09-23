@@ -64,6 +64,21 @@ func TestRunRejectsBadFlagsAndMissingSecrets(t *testing.T) {
 	}
 }
 
+func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("run help: %v", err)
+	}
+	for _, want := range []string{"version", "--config"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("help wrote to stderr: %q", stderr.String())
+	}
+}
+
 func TestBinaryVersionUsesDevelopmentMetadataWithoutConfiguration(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "mindctl")
 	build := exec.Command("go", "build", "-o", binary, ".")
