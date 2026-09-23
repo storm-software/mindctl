@@ -123,7 +123,7 @@ func testResponsesHandler(output executor.Output, err ...error) http.Handler {
 }
 
 func testResponsesHandlerWith(runner ResponseExecutor) http.Handler {
-	return Authenticate(NewResponsesHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20, Models: []domain.Model{{ID: "claude-test", Tier: domain.T4}}}), staticTokens{{ID: "client_test", Value: "test-token"}})
+	return Authenticate(NewResponsesHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20, Models: []domain.Model{{ID: "claude-test", Tier: domain.T4}}}), "Authorization", staticTokens{{ID: "client_test", Value: "test-token"}})
 }
 
 func authenticatedRequest(body string) *http.Request {

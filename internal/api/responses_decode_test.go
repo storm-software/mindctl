@@ -9,6 +9,7 @@ import (
 
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 type staticTokens []Token
@@ -90,7 +91,7 @@ func TestDecodeRejectsJSONSchemaFormatWithoutObjectSchema(t *testing.T) {
 
 func TestAuthenticateUsesConstantTimeTokenMatch(t *testing.T) {
 	called := false
-	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), staticTokens{{ID: "client-a", Value: "client-a"}})
+	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "Authorization", staticTokens{{ID: "client-a", Value: "client-a"}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Set("Authorization", "Bearer client-a")
 	rr := httptest.NewRecorder()
@@ -103,7 +104,7 @@ func TestAuthenticateUsesConstantTimeTokenMatch(t *testing.T) {
 func TestAuthenticateRejectsMissingOrInvalidBearerTokens(t *testing.T) {
 	for _, header := range []string{"", "Basic client-a", "Bearer wrong"} {
 		called := false
-		h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), staticTokens{{ID: "client-a", Value: "client-a"}})
+		h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "Authorization", staticTokens{{ID: "client-a", Value: "client-a"}})
 		req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 		if header != "" {
 			req.Header.Set("Authorization", header)
@@ -113,6 +114,76 @@ func TestAuthenticateRejectsMissingOrInvalidBearerTokens(t *testing.T) {
 		if rr.Code != http.StatusUnauthorized || called {
 			t.Fatalf("header=%q status=%d called=%v", header, rr.Code, called)
 		}
+	}
+}
+
+func TestAuthenticateSupportsDedicatedRawTokenHeader(t *testing.T) {
+	gotClient := ""
+	h := Authenticate(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		gotClient, _ = ClientID(r.Context())
+	}), "X-Mindctl-Token", staticTokens{{ID: "client-a", Value: "gateway-secret"}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Header.Set("X-Mindctl-Token", "gateway-secret")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || gotClient != "client-a" {
+		t.Fatalf("status=%d client=%q", rr.Code, gotClient)
+	}
+}
+
+func TestAuthenticateRejectsDuplicateGatewayHeaders(t *testing.T) {
+	called := false
+	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "X-Mindctl-Token", staticTokens{{ID: "client-a", Value: "gateway-secret"}})
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Header.Add("X-Mindctl-Token", "gateway-secret")
+	req.Header.Add("X-Mindctl-Token", "gateway-secret")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized || called {
+		t.Fatalf("status=%d called=%v", rr.Code, called)
+	}
+}
+
+func TestCaptureChatGPTOAuthRequiresOneCompleteCredential(t *testing.T) {
+	for _, tc := range []struct {
+		name                                 string
+		authorization, account               string
+		extraAuthorization, extraAccount, ok bool
+	}{
+		{"valid", "bearer oauth.jwt", "account-1", false, false, true},
+		{"missing token", "", "account-1", false, false, false},
+		{"token whitespace", "Bearer oauth token", "account-1", false, false, false},
+		{"account whitespace", "Bearer oauth.jwt", " ", false, false, false},
+		{"duplicate token", "Bearer first", "account-1", true, false, false},
+		{"duplicate account", "Bearer oauth.jwt", "account-1", false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got upstreamauth.ChatGPTCredential
+			var present bool
+			h := CaptureChatGPTOAuth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got, present = upstreamauth.ChatGPT(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			if tc.authorization != "" {
+				req.Header.Add("Authorization", tc.authorization)
+			}
+			if tc.extraAuthorization {
+				req.Header.Add("Authorization", "Bearer second")
+			}
+			if tc.account != "" {
+				req.Header.Add("ChatGPT-Account-Id", tc.account)
+			}
+			if tc.extraAccount {
+				req.Header.Add("ChatGPT-Account-Id", "account-2")
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if present != tc.ok {
+				t.Fatalf("present=%v want=%v", present, tc.ok)
+			}
+			if tc.ok && (got.AccessToken != "oauth.jwt" || got.AccountID != "account-1") {
+				t.Fatalf("credential=%+v", got)
+			}
+		})
 	}
 }
 
