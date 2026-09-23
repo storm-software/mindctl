@@ -8,7 +8,9 @@
         "projectsRelationship": "fixed",
         "releaseTag": { "pattern": "v{version}" },
         "version": {
-          "currentVersionResolver": "disk",
+          "currentVersionResolver": "git-tag",
+          "fallbackCurrentVersionResolver": "disk",
+          "specifierSource": "conventional-commits",
           "versionActions": "./tools/release/go-version-actions.cjs"
         }
       }
