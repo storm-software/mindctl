@@ -8,7 +8,7 @@
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/apps/mindctl"],
       "options": {
-        "command": "mkdir -p dist/apps/mindctl && go build -trimpath -o dist/apps/mindctl/mindctl ./cmd/mindctl"
+        "command": "VERSION=$(tr -d '\\r\\n' < cmd/mindctl/VERSION) && COMMIT=$(git rev-parse --short=7 HEAD) && DATE=$(git show -s --format=%cI HEAD) && mkdir -p dist/apps/mindctl && go build -trimpath -ldflags=\"-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE\" -o dist/apps/mindctl/mindctl ./cmd/mindctl"
       }
     },
     "test": {

@@ -5,7 +5,12 @@
     "groups": {
       "router": {
         "projects": ["mindctl"],
-        "projectsRelationship": "fixed"
+        "projectsRelationship": "fixed",
+        "releaseTag": { "pattern": "v{version}" },
+        "version": {
+          "currentVersionResolver": "disk",
+          "versionActions": "./tools/release/go-version-actions.cjs"
+        }
       }
     }
   },
