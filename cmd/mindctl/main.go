@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -66,8 +67,20 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		Args:          noArgs("unexpected positional arguments"),
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(command *cobra.Command, _ []string) error {
 			path := settings.GetString("config")
+			if !command.Flags().Changed("config") {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("resolve home directory: %w", err)
+				}
+				candidate := filepath.Join(home, ".mindctl", "config.yaml")
+				if _, err := os.Stat(candidate); err == nil {
+					path = candidate
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return fmt.Errorf("inspect home config: %w", err)
+				}
+			}
 			settings.SetConfigFile(path)
 			if err := settings.ReadInConfig(); err != nil {
 				return fmt.Errorf("read config: %w", err)

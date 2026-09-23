@@ -64,6 +64,42 @@ func TestRunRejectsBadFlagsAndMissingSecrets(t *testing.T) {
 	}
 }
 
+func TestRunReadsHomeConfigWhenConfigFlagIsOmitted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, ".mindctl"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".mindctl", "config.yaml"), []byte("invalid_home_config: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := run(context.Background(), nil, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid_home_config") {
+		t.Fatalf("omitted config error = %v; want home config validation error", err)
+	}
+}
+
+func TestRunPrefersExplicitConfigOverHomeConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, ".mindctl"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".mindctl", "config.yaml"), []byte("invalid_home_config: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	explicit := filepath.Join(t.TempDir(), "explicit.yaml")
+	if err := os.WriteFile(explicit, []byte("invalid_explicit_config: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := run(context.Background(), []string{"--config", explicit}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid_explicit_config") || strings.Contains(err.Error(), "invalid_home_config") {
+		t.Fatalf("explicit config error = %v; want explicit config validation error", err)
+	}
+}
+
 func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {

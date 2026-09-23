@@ -48,15 +48,13 @@
 - [Install](#install)
   - [Native binary](#native-binary)
   - [Container](#container)
+  - [Go Install](#go-install)
   - [From source](#from-source)
-- [Quick Features](#quick-features)
-  - [Visual Studio Code Extension](#visual-studio-code-extension)
-  - [Environment Configuration Help](#environment-configuration-help)
+- [Configuration](#configuration)
 - [Development](#development)
   - [Build](#build)
   - [Development Server](#development-server)
   - [ChatGPT subscription routing](#chatgpt-subscription-routing)
-- [Environment Configuration Help](#environment-configuration-help-1)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Support](#support)
@@ -78,14 +76,11 @@ against `checksums.txt`, unpack it, and run:
 
 ```sh
 ./mindctl version
-./mindctl -config ./config.yaml
+./mindctl --config ./config.yaml
 ```
 
 On Linux, run `sha256sum --ignore-missing --check checksums.txt`. On macOS,
 compare `shasum -a 256 <archive>` to the matching `checksums.txt` entry.
-
-Copy [config.example.yaml](config.example.yaml) to `config.yaml`, set every
-referenced secret environment variable, and select a writable SQLite path.
 
 ## Container
 
@@ -107,32 +102,61 @@ The GHCR package is public after its first release: an organization owner must
 set the package visibility to **Public** in GitHub Packages before advertising
 the image. Confirm an anonymous `docker pull` succeeds for the release tag.
 
+## Go Install
+
+Install Mindctl using the Go toolchain:
+
+```sh
+go install github.com/storm-software/mindctl/cmd/mindctl@latest
+```
+
 ## From source
 
 ```sh
-go run ./cmd/mindctl -config ./config.yaml
+devenv shell -- go run ./cmd/mindctl --config ./config.yaml
 ```
 
-# Quick Features
+# Configuration
 
-This section contains a quick overview of the features and functionality of the repository.
+Mindctl reads one strict YAML document. Unknown fields and multiple YAML
+documents are rejected. Start from
+[`config.example.yaml`](config.example.yaml), set the environment variables it
+names, and choose a writable SQLite database path.
 
-## Visual Studio Code Extension
+When no `--config` argument is supplied, Mindctl resolves the configuration in
+this order:
 
-Acidic has it's own Visual Studio Code extension to support the language model
-in the IDE. The extension can be found in the
-[Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=storm-software.acidic).
+1. `~/.mindctl/config.yaml`, when that file exists.
+2. `config.example.yaml`, for source-checkout usage when no home config exists.
 
-## Environment Configuration Help
+An explicit `--config <path>` always takes precedence. The legacy
+`-config <path>` spelling is also accepted. Installed binaries do not include
+`config.example.yaml`, so create the home configuration before running one
+without `--config`:
 
-If you run into any issues while trying to run any of the above steps, please
-reach out to Patrick Sullivan. See the [Support](#support) section for more
-information.
+```sh
+mkdir -p ~/.mindctl
+cp config.example.yaml ~/.mindctl/config.yaml
+chmod 700 ~/.mindctl
+chmod 600 ~/.mindctl/config.yaml
+```
+
+The example configuration references environment variables rather than storing
+secret values. Export values for its gateway token, Jev API key, and encryption
+key before startup. Keep the configuration and SQLite database in locations
+the Mindctl process can read and write, respectively.
+
+Container deployments should continue to mount the configuration explicitly at
+`/etc/mindctl/config.yaml`, as shown above; the image command supplies that
+path through its configuration flag.
 
 # Development
 
-Once the code is pulled locally, open a command prompt and run `pnpm install` in
-the root repo directory (/mindctl).
+Enter the repository's development environment before running Go commands:
+
+```sh
+devenv shell -- go test ./...
+```
 
 More information can be found in the
 [Mindctl documentation](https://storm-software.github.io/mindctl/docs/getting-started/installation).
@@ -150,8 +174,9 @@ release archives in `dist/` without publishing them.
 
 ## Development Server
 
-Run `devenv shell -- go run ./cmd/mindctl -config ./config.yaml` to start the
-gateway.
+Run `devenv shell -- go run ./cmd/mindctl` to start the gateway with the home
+configuration when present, or pass `--config ./config.yaml` to use a project-
+local file explicitly.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
@@ -160,7 +185,8 @@ gateway.
 
 Mindctl can route Codex requests through the ChatGPT account already signed in
 to Codex. Configure Mindctl with `chatgpt_oauth_passthrough` as shown in
-[`config.example.yaml`](config.example.yaml), then add this custom provider to
+[`config.example.yaml`](config.example.yaml) or your active configuration file,
+then add this custom provider to
 the Codex `config.toml`:
 
 ```toml
@@ -185,15 +211,6 @@ request-scoped credential only to the configured ChatGPT Codex endpoint.
 
 Available models, workspace access, rate limits, and usage limits remain
 subject to the selected ChatGPT account and subscription.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-# Environment Configuration Help
-
-If you run into any issues while trying to run any of the above steps, please
-reach out to Patrick Sullivan. See the [Support](#support) section for more
-information.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
