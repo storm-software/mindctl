@@ -23,7 +23,7 @@ func scoreCandidate(model domain.Model, features domain.RequestFeatures, task do
 	score := CandidateScore{ModelID: model.ID, Provider: model.Provider, Latency: model.LatencyP95, EscalationCost: cfg.FailureEscalationCost}
 	prices := []float64{model.Pricing.InputPerMillion, model.Pricing.CachedInputPerMillion, model.Pricing.OutputPerMillion, model.Pricing.PerRequestUSD}
 
-    for _, price := range prices {
+	for _, price := range prices {
 		if !nonnegativeFinite(price) {
 			return score, fmt.Errorf("model price must be finite and nonnegative")
 		}
@@ -46,7 +46,7 @@ func scoreCandidate(model domain.Model, features domain.RequestFeatures, task do
 	score.LatencyPenalty = model.LatencyP95.Seconds() * cfg.LatencyPenaltyPerSecond
 	score.ExpectedTotalCost = score.DirectCost + score.FailureProbability*score.EscalationCost + score.LatencyPenalty
 
-    if !nonnegativeFinite(score.ExpectedTotalCost) {
+	if !nonnegativeFinite(score.ExpectedTotalCost) {
 		return score, fmt.Errorf("model cost estimate overflows")
 	}
 	return score, nil

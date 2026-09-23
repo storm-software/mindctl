@@ -44,7 +44,7 @@ Non-goals:
 Responses request
        |
 Mindctl Go gateway -- POST /v1/classify --> Laya sidecar
-       |                                       | 
+       |                                       |
        |                                       +-- pinned Laya typed-decisions model
        +-- deterministic policy, provider selection, storage
 ```
@@ -104,11 +104,39 @@ typed answers:
     "variant": "typed-decisions"
   },
   "answers": {
-    "minimum_tier": { "type": "choice", "choice": "T4", "confidence": 0.9, "probabilities": { "T0": 0.0, "T4": 0.9 } },
-    "task_type": { "type": "choice", "choice": "coding", "confidence": 0.8, "probabilities": { "coding": 0.8 } },
-    "reasoning_required": { "type": "score", "score": 3.2, "confidence": 0.7, "probabilities": { "3": 0.6 }, "legend": { "0": "None", "3": "Moderate" } },
-    "coding_required": { "type": "score", "score": 3.0, "confidence": 0.8, "probabilities": { "3": 0.8 }, "legend": { "0": "None", "3": "Bounded implementation" } },
-    "blast_radius": { "type": "score", "score": 1.0, "confidence": 0.9, "probabilities": { "1": 0.9 }, "legend": { "0": "Negligible", "1": "Local and reversible" } },
+    "minimum_tier": {
+      "type": "choice",
+      "choice": "T4",
+      "confidence": 0.9,
+      "probabilities": { "T0": 0.0, "T4": 0.9 }
+    },
+    "task_type": {
+      "type": "choice",
+      "choice": "coding",
+      "confidence": 0.8,
+      "probabilities": { "coding": 0.8 }
+    },
+    "reasoning_required": {
+      "type": "score",
+      "score": 3.2,
+      "confidence": 0.7,
+      "probabilities": { "3": 0.6 },
+      "legend": { "0": "None", "3": "Moderate" }
+    },
+    "coding_required": {
+      "type": "score",
+      "score": 3.0,
+      "confidence": 0.8,
+      "probabilities": { "3": 0.8 },
+      "legend": { "0": "None", "3": "Bounded implementation" }
+    },
+    "blast_radius": {
+      "type": "score",
+      "score": 1.0,
+      "confidence": 0.9,
+      "probabilities": { "1": 0.9 },
+      "legend": { "0": "Negligible", "1": "Local and reversible" }
+    },
     "underspecified": { "type": "noul", "noul": 0.1 }
   }
 }
