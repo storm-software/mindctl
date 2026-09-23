@@ -211,6 +211,9 @@ catalogs:
     '@nx/devkit':
       specifier: ^22.7.12
       version: 22.7.12
+    '@nx/docker':
+      specifier: 22.7.5
+      version: 22.7.5
     '@nx/eslint-plugin':
       specifier: 22.7.5
       version: 22.7.5
@@ -345,6 +348,9 @@ importers:
       '@nx/devkit':
         specifier: 'catalog:'
         version: 22.7.12(nx@22.7.5(debug@4.4.3))
+      '@nx/docker':
+        specifier: 'catalog:'
+        version: 22.7.5(nx@22.7.5(debug@4.4.3))
       '@nx/eslint-plugin':
         specifier: 'catalog:'
         version: 22.7.5(@babel/traverse@7.29.8)(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(debug@4.4.3)(eslint-config-prettier@10.1.8(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))
@@ -2470,6 +2476,9 @@ packages:
     resolution: {integrity: sha512-uMGbMJpCi+y7eHBEWqygA8JITNgzFZdzVmcKX17EXnFreu14aWZ1kyo6Qh9pKIcbJigO3F46w6ANlYp6wgCovQ==}
     peerDependencies:
       nx: '>= 22 <= 24 || ^23.0.0-0'
+
+  '@nx/docker@22.7.5':
+    resolution: {integrity: sha512-IuizX/ACvAjoTIued7eHFDaknSL6WVfDTMtzxiqaY+iDpdOwCVTC1ZXQZSMba/xEsh4owk4qnSRmJ2eWSWburw==}
 
   '@nx/eslint-plugin@22.7.5':
     resolution: {integrity: sha512-C9mLUAZjcAKvkAifLNxNBWzvX9RFc/fg+GbO0d50596Lw3Yoz5tRCm4mgpUbVI3mkMIQumjoe8hu9bFx85bXnw==}
@@ -14460,6 +14469,14 @@ snapshots:
       tslib: 2.8.1
       yargs-parser: 21.1.1
 
+  '@nx/docker@22.7.5(nx@22.7.5(debug@4.4.3))':
+    dependencies:
+      '@nx/devkit': 22.7.5(nx@22.7.5(debug@4.4.3))
+      enquirer: 2.3.6
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - nx
+
   '@nx/eslint-plugin@22.7.5(@babel/traverse@7.29.8)(@typescript-eslint/parser@8.70.1(eslint@10.11.0(jiti@2.7.0))(typescript@6.0.3))(debug@4.4.3)(eslint-config-prettier@10.1.8(eslint@10.11.0(jiti@2.7.0)))(eslint@10.11.0(jiti@2.7.0))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))':
     dependencies:
       '@nx/devkit': 22.7.5(nx@22.7.5(debug@4.4.3))
@@ -25606,7 +25623,7 @@ snapshots:
     dependencies:
       '@istanbuljs/schema': 0.1.6
       glob: 10.5.0
-      minimatch: 10.2.5
+      minimatch: 10.2.6
 
   text-decoder@1.2.7:
     dependencies:

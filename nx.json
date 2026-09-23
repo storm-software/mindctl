@@ -3,9 +3,9 @@
   "extends": "@storm-software/workspace-tools/config/recommended.json",
   "release": {
     "groups": {
-      "packages": {
-        "projects": ["packages/*"],
-        "projectsRelationship": "independent"
+      "router": {
+        "projects": ["mindctl"],
+        "projectsRelationship": "fixed"
       }
     }
   },
@@ -19,6 +19,7 @@
         "verboseOutput": false
       }
     },
+    "@nx/docker",
     "@storm-software/workspace-tools/plugins/typescript",
     "@storm-software/workspace-tools/plugins/typescript/untyped",
     "@storm-software/workspace-tools/plugins/typescript/tsdown",

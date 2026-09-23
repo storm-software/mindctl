@@ -62,6 +62,7 @@
   "devDependencies": {
     "@ls-lint/ls-lint": "catalog:",
     "@nx/devkit": "catalog:",
+    "@nx/docker": "catalog:",
     "@nx/eslint-plugin": "catalog:",
     "@nx/js": "catalog:",
     "@nx/plugin": "catalog:",

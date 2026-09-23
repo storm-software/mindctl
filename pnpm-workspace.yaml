@@ -5,6 +5,7 @@ packages:
 catalog:
   "@ls-lint/ls-lint": ^2.3.1
   "@nx/devkit": ^22.7.12
+  "@nx/docker": 22.7.5
   "@nx/eslint-plugin": 22.7.5
   "@nx/js": 22.7.5
   "@nx/plugin": 22.7.5
