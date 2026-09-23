@@ -6,7 +6,7 @@
 
 ### Features
 
-- **mindctl:** Added support for `~/.mindctl/config.yaml` files ([5ea63fd](https://github.com/storm-software/mindctl/commit/5ea63fd))
+- **mindctl:** Added support for XDG user configuration files ([5ea63fd](https://github.com/storm-software/mindctl/commit/5ea63fd))
 
 ## [0.1.2](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.2) (09/23/2026)
 

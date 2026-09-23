@@ -71,15 +71,14 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		RunE: func(command *cobra.Command, _ []string) error {
 			path := settings.GetString("config")
 			if !command.Flags().Changed("config") {
-				home, err := os.UserHomeDir()
+				candidate, err := userConfigPath()
 				if err != nil {
-					return fmt.Errorf("resolve home directory: %w", err)
+					return err
 				}
-				candidate := filepath.Join(home, ".mindctl", "config.yaml")
 				if _, err := os.Stat(candidate); err == nil {
 					path = candidate
 				} else if !errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("inspect home config: %w", err)
+					return fmt.Errorf("inspect user config: %w", err)
 				}
 			}
 			settings.SetConfigFile(path)
@@ -111,16 +110,16 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 func newConfigCommand() *cobra.Command {
 	configCommand := &cobra.Command{
 		Use:   "config",
-		Short: "Read and update the home configuration",
+		Short: "Read and update the user configuration",
 		Args:  noArgs("unexpected arguments for config"),
 	}
 	configCommand.AddCommand(
 		&cobra.Command{
 			Use:   "list",
-			Short: "Display the home configuration",
+			Short: "Display the user configuration",
 			Args:  noArgs("unexpected arguments for config list"),
 			RunE: func(command *cobra.Command, _ []string) error {
-				document, err := readHomeConfig()
+				document, err := readUserConfig()
 				if err != nil {
 					return err
 				}
@@ -134,10 +133,10 @@ func newConfigCommand() *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "get <group>.<name>",
-			Short: "Display one home configuration value",
+			Short: "Display one user configuration value",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(command *cobra.Command, args []string) error {
-				document, err := readHomeConfig()
+				document, err := readUserConfig()
 				if err != nil {
 					return err
 				}
@@ -155,10 +154,10 @@ func newConfigCommand() *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "set <group>.<name> <value>",
-			Short: "Set one home configuration value",
+			Short: "Set one user configuration value",
 			Args:  cobra.ExactArgs(2),
 			RunE: func(_ *cobra.Command, args []string) error {
-				path, err := homeConfigPath()
+				path, err := userConfigPath()
 				if err != nil {
 					return err
 				}
@@ -180,16 +179,16 @@ func newConfigCommand() *cobra.Command {
 	return configCommand
 }
 
-func homeConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+func userConfigPath() (string, error) {
+	configHome, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve home directory: %w", err)
+		return "", fmt.Errorf("resolve user config directory: %w", err)
 	}
-	return filepath.Join(home, ".mindctl", "config.yaml"), nil
+	return filepath.Join(configHome, "mindctl", "config.yaml"), nil
 }
 
-func readHomeConfig() (*yaml.Node, error) {
-	path, err := homeConfigPath()
+func readUserConfig() (*yaml.Node, error) {
+	path, err := userConfigPath()
 	if err != nil {
 		return nil, err
 	}

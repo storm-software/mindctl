@@ -135,19 +135,21 @@ names, and choose a writable SQLite database path.
 When no `--config` argument is supplied, Mindctl resolves the configuration in
 this order:
 
-1. `~/.mindctl/config.yaml`, when that file exists.
-2. `config.example.yaml`, for source-checkout usage when no home config exists.
+1. `${XDG_CONFIG_HOME}/mindctl/config.yaml`, when that file exists. When
+   `XDG_CONFIG_HOME` is unset, Mindctl uses `~/.config/mindctl/config.yaml`.
+2. `config.example.yaml`, for source-checkout usage when no user config exists.
 
 An explicit `--config <path>` always takes precedence. The legacy
 `-config <path>` spelling is also accepted. Installed binaries do not include
-`config.example.yaml`, so create the home configuration before running one
+`config.example.yaml`, so create the user configuration before running one
 without `--config`:
 
 ```sh
-mkdir -p ~/.mindctl
-cp config.example.yaml ~/.mindctl/config.yaml
-chmod 700 ~/.mindctl
-chmod 600 ~/.mindctl/config.yaml
+mindctl_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mindctl"
+mkdir -p "$mindctl_config_dir"
+cp config.example.yaml "$mindctl_config_dir/config.yaml"
+chmod 700 "$mindctl_config_dir"
+chmod 600 "$mindctl_config_dir/config.yaml"
 ```
 
 The example configuration references environment variables rather than storing
