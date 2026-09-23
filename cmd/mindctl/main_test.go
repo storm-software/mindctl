@@ -51,7 +51,7 @@ func TestRunRejectsBadFlagsAndMissingSecrets(t *testing.T) {
 	t.Setenv("MAIN_ENCRYPTION_KEY", "")
 	for _, args := range [][]string{{"-unknown"}, {"unexpected"}, {"-config", path}} {
 		var stderr bytes.Buffer
-		err := run(context.Background(), args, &stderr)
+		err := run(context.Background(), args, io.Discard, &stderr)
 		if err == nil {
 			t.Fatalf("run(%v) succeeded", args)
 		}
@@ -61,6 +61,63 @@ func TestRunRejectsBadFlagsAndMissingSecrets(t *testing.T) {
 		if strings.Contains(err.Error()+stderr.String(), "private-") {
 			t.Fatal("startup exposed a secret")
 		}
+	}
+}
+
+func TestBinaryVersionUsesDevelopmentMetadataWithoutConfiguration(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindctl")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, output)
+	}
+	cmd := exec.Command(binary, "version")
+	cmd.Dir = t.TempDir()
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if got, want := string(output), "version=dev\ncommit=none\ndate=unknown\n"; got != want {
+		t.Fatalf("version output=%q want=%q", got, want)
+	}
+}
+
+func TestBinaryVersionRejectsAdditionalArguments(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindctl")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, output)
+	}
+	output, err := exec.Command(binary, "version", "extra").CombinedOutput()
+	if err == nil {
+		t.Fatal("version with an argument succeeded")
+	}
+	if got, want := string(output), "mindctl: unexpected arguments for version\n"; got != want {
+		t.Fatalf("stderr=%q want=%q", got, want)
+	}
+}
+
+func TestBinaryVersionUsesLinkerInjectedMetadata(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "mindctl")
+	build := exec.Command(
+		"go",
+		"build",
+		"-ldflags",
+		"-X main.version=1.2.3 -X main.commit=deadbeef -X main.date=2026-09-22T12:00:00Z",
+		"-o",
+		binary,
+		".",
+	)
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, output)
+	}
+	cmd := exec.Command(binary, "version")
+	cmd.Dir = t.TempDir()
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if got, want := string(output), "version=1.2.3\ncommit=deadbeef\ndate=2026-09-22T12:00:00Z\n"; got != want {
+		t.Fatalf("version output=%q want=%q", got, want)
 	}
 }
 

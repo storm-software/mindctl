@@ -19,9 +19,15 @@ import (
 	"github.com/storm-software/mindctl/internal/config"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	err := run(ctx, os.Args[1:], os.Stderr)
+	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "mindctl:", err)
@@ -29,7 +35,14 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
+	if len(args) > 0 && args[0] == "version" {
+		if len(args) != 1 {
+			return errors.New("unexpected arguments for version")
+		}
+		_, err := fmt.Fprintf(stdout, "version=%s\ncommit=%s\ndate=%s\n", version, commit, date)
+		return err
+	}
 	flags := flag.NewFlagSet("mindctl", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	path := flags.String("config", "config.example.yaml", "gateway YAML configuration")
