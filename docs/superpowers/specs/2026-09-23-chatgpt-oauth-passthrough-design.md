@@ -41,7 +41,10 @@ an API key.
 
 `client_auth.header` selects the HTTP header containing Mindctl's configured
 gateway token. It defaults to `Authorization`, preserving existing
-configuration. The value must be a valid HTTP field name.
+configuration. The value must be a valid HTTP field name. The default
+`Authorization` form remains `Bearer <gateway-token>`; a dedicated header such
+as `X-Mindctl-Token` carries the raw token value so it can be populated by
+Codex's environment-backed header configuration.
 
 `providers[].auth` selects the provider credential mode:
 
