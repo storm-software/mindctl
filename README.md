@@ -45,6 +45,10 @@
 
 ## Table of Contents
 
+- [Install](#install)
+  - [Native binary](#native-binary)
+  - [Container](#container)
+  - [From source](#from-source)
 - [Quick Features](#quick-features)
   - [Visual Studio Code Extension](#visual-studio-code-extension)
   - [Environment Configuration Help](#environment-configuration-help)
@@ -71,6 +75,43 @@
 <!-- END doctoc -->
 
 <br />
+
+# Install
+
+## Native binary
+
+Download the archive for your platform from the GitHub Release, verify it
+against `checksums.txt`, unpack it, and run:
+
+```sh
+./mindctl version
+./mindctl -config ./config.yaml
+```
+
+On Linux, run `sha256sum --check checksums.txt`. On macOS, compare
+`shasum -a 256 <archive>` to the matching `checksums.txt` entry.
+
+## Container
+
+Pull a versioned image and mount a runtime configuration file:
+
+```sh
+docker pull ghcr.io/storm-software/mindctl:0.0.1
+docker run --rm -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/mindctl/config.yaml:ro" \
+  --env-file .env \
+  ghcr.io/storm-software/mindctl:0.0.1
+```
+
+The image runs as a non-root user and contains no usable configuration,
+credentials, encryption keys, or database. Configure a writable SQLite path in
+`config.yaml` when persistence is enabled.
+
+## From source
+
+```sh
+devenv shell -- go run ./cmd/mindctl -config ./config.yaml
+```
 
 # Quick Features
 
