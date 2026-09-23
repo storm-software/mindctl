@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,6 +106,60 @@ func TestNewUsesTheDefaultResponseBodyLimit(t *testing.T) {
 	a.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
+	var providerCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/systemone":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/responses":
+			providerCalls.Add(1)
+			if r.Header.Get("Authorization") != "Bearer oauth.jwt" || r.Header.Get("ChatGPT-Account-Id") != "account-1" {
+				t.Fatalf("headers=%v", r.Header)
+			}
+			_, _ = w.Write([]byte(`{"id":"upstream","status":"completed","model":"first","output":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Jev.BaseURL = server.URL
+	cfg.Providers[0].BaseURL = server.URL
+	cfg.Providers[0].Auth = string(config.ProviderAuthChatGPTOAuthPassthrough)
+	cfg.Providers[0].APIKeyEnv = ""
+	delete(env, "TEST_PROVIDER_KEY")
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	request := func(accountID string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","input":"hello"}`))
+		req.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+		req.Header.Set("Authorization", "Bearer oauth.jwt")
+		if accountID != "" {
+			req.Header.Set("ChatGPT-Account-Id", accountID)
+		}
+		return req
+	}
+
+	rr := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, request("account-1"))
+	if rr.Code != http.StatusOK || providerCalls.Load() != 1 {
+		t.Fatalf("status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, request(""))
+	if rr.Code == http.StatusOK || providerCalls.Load() != 1 {
+		t.Fatalf("missing account status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
 	}
 }
 

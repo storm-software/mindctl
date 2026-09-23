@@ -114,10 +114,17 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		fallback = "T4"
 	}
 	a.safeFallbackTier, _ = domain.ParseTier(fallback)
-	for _, provider := range cfg.Providers {
-		value, exists := getenv(provider.APIKeyEnv)
-		a.providerCredentials[provider.ID] = exists && value != ""
-		a.providerAvailability[provider.ID] = validEndpoint(provider.BaseURL)
+	oauthProviders := make(map[string]bool)
+	for _, providerConfig := range cfg.Providers {
+		switch providerConfig.AuthMode() {
+		case config.ProviderAuthAPIKey:
+			value, exists := getenv(providerConfig.APIKeyEnv)
+			a.providerCredentials[providerConfig.ID] = exists && value != ""
+		case config.ProviderAuthChatGPTOAuthPassthrough:
+			a.providerCredentials[providerConfig.ID] = true
+			oauthProviders[providerConfig.ID] = true
+		}
+		a.providerAvailability[providerConfig.ID] = validEndpoint(providerConfig.BaseURL)
 	}
 	for index, model := range cfg.Models {
 		tier, _ := domain.ParseTier(model.Tier)
@@ -174,13 +181,14 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	}
 	responses := api.NewResponsesHandler(a.executor, api.ResponsesConfig{
 		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
-		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
+		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability, ChatGPTOAuthProviders: oauthProviders,
 	})
+	responses = api.CaptureChatGPTOAuth(responses)
 	mux := http.NewServeMux()
 	operations := api.Operations(a.ready)
 	mux.Handle("/healthz", operations)
 	mux.Handle("/readyz", operations)
-	mux.Handle("/v1/responses", api.Authenticate(responses, appTokens{{ID: "configured-client", Value: clientToken}}))
+	mux.Handle("/v1/responses", api.Authenticate(responses, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}))
 	a.handler = mux
 	return a, nil
 }
@@ -192,13 +200,19 @@ func (tokens appTokens) Tokens() []api.Token { return tokens }
 func configuredProviders(configs []config.ProviderConfig, getenv func(string) (string, bool), httpClient *http.Client) (map[string]provider.Provider, error) {
 	entries := make(map[string]provider.Provider, len(configs))
 	for _, cfg := range configs {
-		key, _ := getenv(cfg.APIKeyEnv)
 		switch cfg.ID {
 		case "openai":
-			entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
+			if cfg.AuthMode() == config.ProviderAuthChatGPTOAuthPassthrough {
+				entries[cfg.ID] = openai.NewChatGPTOAuthClient(cfg.BaseURL, httpClient)
+			} else {
+				key, _ := getenv(cfg.APIKeyEnv)
+				entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
+			}
 		case "anthropic":
+			key, _ := getenv(cfg.APIKeyEnv)
 			entries[cfg.ID] = anthropic.NewClient(cfg.BaseURL, key, httpClient)
 		case "gemini":
+			key, _ := getenv(cfg.APIKeyEnv)
 			entries[cfg.ID] = gemini.NewClient(cfg.BaseURL, key, httpClient)
 		default:
 			return nil, errors.New("unsupported configured provider")
