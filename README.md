@@ -1,8 +1,8 @@
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://public.storm-cdn.com/storm-software/media/banner-1280x640-dark.gif">
-  <source media="(prefers-color-scheme: light)" srcset="https://public.storm-cdn.com/storm-software/media/banner-1280x640-light.gif">
-<img src="https://public.storm-cdn.com/storm-software/media/banner-1280x640-dark.gif" width="100%" alt="Storm Software" />
+  <source media="(prefers-color-scheme: dark)" srcset="https://public.storm-cdn.com/mindctl/media/banner-1280x427-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="https://public.storm-cdn.com/mindctl/media/banner-1280x427-light.gif">
+<img src="https://public.storm-cdn.com/mindctl/media/banner-1280x427-dark.gif" width="100%" alt="Mindctl" />
 </picture>
 </div>
 <br />
@@ -18,21 +18,14 @@
 </div>
 <br />
 
-Storm Software's **Mindctl** monorepo containing TypeScript utility packages
-with shared functionality common to many Storm Software applications
+**Mindctl** is an AI model router that uses built-in logic and the [Jev system one model](https://typesafe.ai/blog/introducing-system-one-models-and-jev) to intelligently route requests to the appropriate model based on the input data.
 
 <br />
-
-**Mindctl** is built using <a href="https://nx.dev/" target="_blank">Nx</a>, a
-set of extensible dev tools for monorepos, which helps you develop like Google,
-Facebook, and Microsoft. Building on top of Nx, the Open System provides a set
-of tools and patterns that help you scale your monorepo to many teams while
-keeping the codebase maintainable.
 
 <h3 align="center">💻 Visit <a href="https://stormsoftware.com" target="_blank">stormsoftware.com</a> to stay up to date with this developer</h3>
 <br />
 
-[![github](https://img.shields.io/github/package-json/v/storm-software/mindctl?style=for-the-badge&color=1fb2a6)](https://github.com/storm-software/mindctl)&nbsp;[![Nx](https://img.shields.io/badge/Nx-17.0.2-lightgrey?style=for-the-badge&logo=nx&logoWidth=20&&color=1fb2a6)](http://nx.dev/)&nbsp;[![NextJs](https://img.shields.io/badge/Next.js-14.0.2-lightgrey?style=for-the-badge&logo=nextdotjs&logoWidth=20&color=1fb2a6)](https://nextjs.org/)&nbsp;[![Commitizen friendly](https://img.shields.io/badge/commitizen-friendly-brightgreen.svg?style=for-the-badge&logo=commitlint&color=1fb2a6)](http://commitizen.github.io/cz-cli/)&nbsp;![semantic-release](https://img.shields.io/badge/%20%20%F0%9F%93%A6%F0%9F%9A%80-semantic--release-e10079.svg?style=for-the-badge&color=1fb2a6)&nbsp;![documented with docusaurus](https://img.shields.io/badge/documented_with-docusaurus-success.svg?style=for-the-badge&logo=readthedocs&color=1fb2a6)&nbsp;![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/storm-software/mindctl/cr.yml?style=for-the-badge&logo=github-actions&color=1fb2a6)
+[![Commitizen friendly](https://img.shields.io/badge/commitizen-friendly-brightgreen.svg?style=for-the-badge&logo=commitlint&color=1fb2a6)](http://commitizen.github.io/cz-cli/)&nbsp;![semantic-release](https://img.shields.io/badge/%20%20%F0%9F%93%A6%F0%9F%9A%80-semantic--release-e10079.svg?style=for-the-badge&color=1fb2a6)&nbsp;![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/storm-software/mindctl/cr.yml?style=for-the-badge&logo=github-actions&color=1fb2a6)
 
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->

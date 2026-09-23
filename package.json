@@ -2,7 +2,7 @@
   "name": "@mindctl/monorepo",
   "version": "0.0.1",
   "type": "module",
-  "description": "⚡ A monorepo containing TypeScript utility packages with shared functionality common to many Storm Software applications.",
+  "description": "An AI model router that uses built-in logic and the [Jev system one model](https://typesafe.ai/blog/introducing-system-one-models-and-jev) to intelligently route requests to the appropriate model based on the input data.",
   "repository": {
     "type": "github",
     "url": "https://github.com/storm-software/mindctl.git"
