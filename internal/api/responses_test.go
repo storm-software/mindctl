@@ -114,6 +114,42 @@ func TestResponsesHandlerRejectsWrongMethodBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		authorization, account string
+		want                   bool
+	}{
+		{"complete", "Bearer oauth.jwt", "account-1", true},
+		{"missing account", "Bearer oauth.jwt", "", false},
+		{"missing token", "", "account-1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runner := &stubExecutor{output: executor.Output{Result: inference.Result{Status: "completed"}}}
+			responses := NewResponsesHandler(runner, ResponsesConfig{
+				MaxBodyBytes:          1 << 20,
+				Models:                []domain.Model{{ID: "gpt-test", Provider: "openai", Tier: domain.T4}},
+				ProviderCredentials:   map[string]bool{"openai": true, "anthropic": true},
+				ChatGPTOAuthProviders: map[string]bool{"openai": true},
+			})
+			h := Authenticate(CaptureChatGPTOAuth(responses), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}})
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","input":"hello"}`))
+			req.Header.Set("X-Mindctl-Token", "gateway")
+			if tc.authorization != "" {
+				req.Header.Set("Authorization", tc.authorization)
+			}
+			if tc.account != "" {
+				req.Header.Set("ChatGPT-Account-Id", tc.account)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if runner.input.ProviderCredentials["openai"] != tc.want || !runner.input.ProviderCredentials["anthropic"] {
+				t.Fatalf("credentials=%v", runner.input.ProviderCredentials)
+			}
+		})
+	}
+}
+
 func testResponsesHandler(output executor.Output, err ...error) http.Handler {
 	runner := &stubExecutor{output: output}
 	if len(err) != 0 {
@@ -136,6 +172,7 @@ type stubExecutor struct {
 	output executor.Output
 	err    error
 	calls  int
+	input  executor.Input
 }
 
 type visibleThenFailExecutor struct{}
@@ -158,12 +195,14 @@ func (visibleThenFailExecutor) Stream(ctx context.Context, _ executor.Input, wri
 	return err
 }
 
-func (s *stubExecutor) Execute(context.Context, executor.Input) (executor.Output, error) {
+func (s *stubExecutor) Execute(_ context.Context, input executor.Input) (executor.Output, error) {
 	s.calls++
+	s.input = input
 	return s.output, s.err
 }
 
-func (s *stubExecutor) Stream(context.Context, executor.Input, executor.EventWriter) error {
+func (s *stubExecutor) Stream(_ context.Context, input executor.Input, _ executor.EventWriter) error {
 	s.calls++
+	s.input = input
 	return s.err
 }

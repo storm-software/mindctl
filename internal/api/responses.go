@@ -10,6 +10,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/executor"
 	"github.com/storm-software/mindctl/internal/inference"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 // ResponseExecutor is the narrow execution boundary used by the HTTP handler.
@@ -26,6 +27,7 @@ type ResponsesConfig struct {
 	MinTier, MaxTier                          domain.Tier
 	SafeFallbackTier                          domain.Tier
 	ProviderCredentials, ProviderAvailability map[string]bool
+	ChatGPTOAuthProviders                     map[string]bool
 }
 
 // NewResponsesHandler exposes the supported OpenAI Responses subset. Caller
@@ -59,7 +61,7 @@ func (h *responsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	input, err := h.input(clientID, request, controls)
+	input, err := h.input(r.Context(), clientID, request, controls)
 	if err != nil {
 		WriteError(w, err)
 		return
@@ -79,7 +81,7 @@ func (h *responsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeResponse(w, output)
 }
 
-func (h *responsesHandler) input(clientID string, request inference.Request, controls Controls) (executor.Input, error) {
+func (h *responsesHandler) input(ctx context.Context, clientID string, request inference.Request, controls Controls) (executor.Input, error) {
 	minTier, maxTier := tierBounds(h.config, controls)
 	if minTier != nil && maxTier != nil && minTier.Rank() > maxTier.Rank() {
 		return executor.Input{}, inference.Invalid("tier", "minimum tier exceeds maximum tier")
@@ -88,8 +90,19 @@ func (h *responsesHandler) input(clientID string, request inference.Request, con
 		ClientID: clientID, Request: request, Models: append([]domain.Model(nil), h.config.Models...),
 		MinTier: minTier, MaxTier: maxTier, SafeFallbackTier: h.config.SafeFallbackTier,
 		AllowEscalation:     controls.AllowEscalation,
-		ProviderCredentials: cloneBools(h.config.ProviderCredentials), ProviderAvailability: cloneBools(h.config.ProviderAvailability),
+		ProviderCredentials: providerCredentials(ctx, h.config), ProviderAvailability: cloneBools(h.config.ProviderAvailability),
 	}, nil
+}
+
+func providerCredentials(ctx context.Context, cfg ResponsesConfig) map[string]bool {
+	credentials := cloneBools(cfg.ProviderCredentials)
+	_, hasChatGPT := upstreamauth.ChatGPT(ctx)
+	for providerID, enabled := range cfg.ChatGPTOAuthProviders {
+		if enabled {
+			credentials[providerID] = hasChatGPT
+		}
+	}
+	return credentials
 }
 
 func tierBounds(cfg ResponsesConfig, controls Controls) (*domain.Tier, *domain.Tier) {
@@ -117,6 +130,7 @@ func cloneResponsesConfig(cfg ResponsesConfig) ResponsesConfig {
 	cfg.Models = append([]domain.Model(nil), cfg.Models...)
 	cfg.ProviderCredentials = cloneBools(cfg.ProviderCredentials)
 	cfg.ProviderAvailability = cloneBools(cfg.ProviderAvailability)
+	cfg.ChatGPTOAuthProviders = cloneBools(cfg.ChatGPTOAuthProviders)
 	return cfg
 }
 
