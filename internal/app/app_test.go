@@ -117,7 +117,7 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 		case "/v1/systemone":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case "/responses":
-			providerCalls.Add(1)
+			call := providerCalls.Add(1)
 			if r.Header.Get("Authorization") != "Bearer oauth.jwt" || r.Header.Get("ChatGPT-Account-Id") != "account-1" {
 				t.Fatalf("headers=%v", r.Header)
 			}
@@ -131,20 +131,60 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 			metadata, _ := body["client_metadata"].(map[string]any)
 			textControls, _ := body["text"].(map[string]any)
 			tools, _ := body["tools"].([]any)
-			if len(tools) != 2 {
-				t.Fatalf("body=%v", body)
-			}
-			customTool, _ := tools[1].(map[string]any)
-			customFormat, _ := customTool["format"].(map[string]any)
+			input, _ := body["input"].([]any)
 			if body["model"] != "first" || body["tool_choice"] != "auto" || body["parallel_tool_calls"] != true ||
 				body["store"] != false || body["stream"] != true || reasoning["effort"] != "high" || reasoning["summary"] != "auto" ||
 				len(include) != 1 || include[0] != "reasoning.encrypted_content" || body["prompt_cache_key"] != "cache-key" ||
 				body["service_tier"] != "priority" || streamOptions["reasoning_summary_delivery"] != "sequential_cutoff" ||
-				metadata["thread_id"] != "thread-1" || textControls["verbosity"] != "high" ||
-				customTool["type"] != "custom" || customTool["name"] != "apply_patch" || customFormat["type"] != "grammar" {
+				metadata["thread_id"] != "thread-1" || textControls["verbosity"] != "high" {
 				t.Fatalf("body=%v", body)
 			}
+			if call <= 2 {
+				if len(tools) != 2 {
+					t.Fatalf("body=%v", body)
+				}
+				customTool, _ := tools[1].(map[string]any)
+				customFormat, _ := customTool["format"].(map[string]any)
+				if customTool["type"] != "custom" || customTool["name"] != "apply_patch" || customFormat["type"] != "grammar" {
+					t.Fatalf("body=%v", body)
+				}
+			}
+			if call == 1 && len(input) != 2 {
+				t.Fatalf("initial input=%v", input)
+			}
+			if call == 2 {
+				if len(input) != 4 {
+					t.Fatalf("continuation input=%v", input)
+				}
+				customCall, _ := input[2].(map[string]any)
+				customOutput, _ := input[3].(map[string]any)
+				if customCall["type"] != "custom_tool_call" || customCall["input"] != "*** Begin Patch" ||
+					customOutput["type"] != "custom_tool_call_output" || customOutput["output"] != "Done!" {
+					t.Fatalf("continuation input=%v", input)
+				}
+			}
+			if call == 3 {
+				if len(tools) != 0 || len(input) != 3 {
+					t.Fatalf("responses-lite body=%v", body)
+				}
+				additional, _ := input[0].(map[string]any)
+				additionalTools, _ := additional["tools"].([]any)
+				if len(additionalTools) != 1 {
+					t.Fatalf("responses-lite input=%v", input)
+				}
+				namespace, _ := additionalTools[0].(map[string]any)
+				namespaceTools, _ := namespace["tools"].([]any)
+				developer, _ := input[1].(map[string]any)
+				if additional["id"] != "at_tools" || additional["type"] != "additional_tools" || additional["role"] != "developer" ||
+					namespace["type"] != "namespace" || namespace["name"] != "functions" ||
+					len(namespaceTools) != 2 || developer["id"] != "msg_dev" || developer["role"] != "developer" {
+					t.Fatalf("responses-lite input=%v", input)
+				}
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
+			if call == 1 {
+				_, _ = w.Write([]byte("event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"ctc_1\",\"type\":\"custom_tool_call\",\"call_id\":\"call_patch\",\"name\":\"apply_patch\",\"input\":\"*** Begin Patch\"}}\n\n"))
+			}
 			_, _ = w.Write([]byte("event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"model\":\"first\",\"output\":[]}}\n\n"))
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -165,8 +205,7 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = a.Close() })
 
-	request := func(accountID string) *http.Request {
-		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+	initialBody := `{
   "model":"mindctl-auto",
   "instructions":"be concise",
   "input":[
@@ -188,7 +227,40 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
   "prompt_cache_key":"cache-key",
   "text":{"verbosity":"high"},
   "client_metadata":{"thread_id":"thread-1"}
-}`))
+}`
+	continuationBody := strings.Replace(initialBody,
+		`{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}`,
+		`{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},
+    {"type":"custom_tool_call","call_id":"call_patch","name":"apply_patch","input":"*** Begin Patch"},
+    {"type":"custom_tool_call_output","call_id":"call_patch","output":"Done!"}`,
+		1,
+	)
+	liteBody := `{
+  "model":"mindctl-auto",
+  "input":[
+    {"id":"at_tools","type":"additional_tools","role":"developer","tools":[
+      {"type":"namespace","name":"functions","description":"","tools":[
+        {"type":"function","name":"lookup","description":"find","parameters":{"type":"object"},"strict":true},
+        {"type":"custom","name":"apply_patch","description":"apply a patch","format":{"type":"grammar","syntax":"lark","definition":"start: PATCH"}}
+      ]}
+    ]},
+    {"id":"msg_dev","type":"message","role":"developer","content":[{"type":"input_text","text":"follow repository instructions"}]},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+  ],
+  "tool_choice":"auto",
+  "parallel_tool_calls":true,
+  "reasoning":{"effort":"high","summary":"auto","context":"all_turns"},
+  "store":false,
+  "stream":true,
+  "stream_options":{"reasoning_summary_delivery":"sequential_cutoff"},
+  "include":["reasoning.encrypted_content"],
+  "service_tier":"priority",
+  "prompt_cache_key":"cache-key",
+  "text":{"verbosity":"high"},
+  "client_metadata":{"thread_id":"thread-1"}
+}`
+	request := func(accountID, body string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
 		req.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
 		req.Header.Set("Authorization", "Bearer oauth.jwt")
 		if accountID != "" {
@@ -198,14 +270,29 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	a.Handler().ServeHTTP(rr, request("account-1"))
+	a.Handler().ServeHTTP(rr, request("account-1", initialBody))
 	if rr.Code != http.StatusOK || providerCalls.Load() != 1 {
 		t.Fatalf("status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
 	}
+	if !strings.Contains(rr.Body.String(), `"type":"custom_tool_call"`) || !strings.Contains(rr.Body.String(), `"input":"*** Begin Patch"`) {
+		t.Fatalf("custom tool event body=%s", rr.Body.String())
+	}
 
 	rr = httptest.NewRecorder()
-	a.Handler().ServeHTTP(rr, request(""))
-	if rr.Code == http.StatusOK || providerCalls.Load() != 1 {
+	a.Handler().ServeHTTP(rr, request("account-1", continuationBody))
+	if rr.Code != http.StatusOK || providerCalls.Load() != 2 {
+		t.Fatalf("continuation status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, request("account-1", liteBody))
+	if rr.Code != http.StatusOK || providerCalls.Load() != 3 {
+		t.Fatalf("responses-lite status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, request("", initialBody))
+	if rr.Code == http.StatusOK || providerCalls.Load() != 3 {
 		t.Fatalf("missing account status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
 	}
 }

@@ -284,6 +284,46 @@ func streamPayload(event inference.Event, metadata executor.StreamMetadata) any 
 			CallID     string `json:"call_id,omitempty"`
 			Arguments  string `json:"arguments,omitempty"`
 		}{Type: event.Type, ResponseID: event.ResponseID, ItemID: event.ItemID, CallID: event.CallID, Arguments: event.ArgumentsDelta}
+	case "response.custom_tool_call_input.delta":
+		return struct {
+			Type        string `json:"type"`
+			ResponseID  string `json:"response_id,omitempty"`
+			ItemID      string `json:"item_id,omitempty"`
+			OutputIndex int    `json:"output_index"`
+			Delta       string `json:"delta"`
+		}{Type: event.Type, ResponseID: event.ResponseID, ItemID: event.ItemID, OutputIndex: event.OutputIndex, Delta: event.Delta}
+	case "response.custom_tool_call_input.done":
+		return struct {
+			Type        string `json:"type"`
+			ResponseID  string `json:"response_id,omitempty"`
+			ItemID      string `json:"item_id,omitempty"`
+			OutputIndex int    `json:"output_index"`
+			Input       string `json:"input"`
+		}{Type: event.Type, ResponseID: event.ResponseID, ItemID: event.ItemID, OutputIndex: event.OutputIndex, Input: event.Delta}
+	case "response.output_item.added", "response.output_item.done":
+		return struct {
+			Type        string `json:"type"`
+			ResponseID  string `json:"response_id,omitempty"`
+			OutputIndex int    `json:"output_index"`
+			Item        struct {
+				ID        string `json:"id,omitempty"`
+				Type      string `json:"type"`
+				CallID    string `json:"call_id,omitempty"`
+				Name      string `json:"name,omitempty"`
+				Namespace string `json:"namespace,omitempty"`
+				Input     string `json:"input,omitempty"`
+			} `json:"item"`
+		}{
+			Type: event.Type, ResponseID: event.ResponseID, OutputIndex: event.OutputIndex,
+			Item: struct {
+				ID        string `json:"id,omitempty"`
+				Type      string `json:"type"`
+				CallID    string `json:"call_id,omitempty"`
+				Name      string `json:"name,omitempty"`
+				Namespace string `json:"namespace,omitempty"`
+				Input     string `json:"input,omitempty"`
+			}{ID: event.ItemID, Type: event.ItemType, CallID: event.CallID, Name: event.Name, Namespace: event.Namespace, Input: event.Input},
+		}
 	default:
 		return struct {
 			Type     string       `json:"type"`

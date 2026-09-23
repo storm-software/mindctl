@@ -55,17 +55,8 @@ func ValidateRequest(req Request) error {
 		}
 	}
 	for i, tool := range req.Tools {
-		switch tool.Type {
-		case "function":
-			if strings.TrimSpace(tool.Name) == "" {
-				return Invalid(fmt.Sprintf("tools[%d]", i), "must be a named function")
-			}
-		case "custom":
-			if strings.TrimSpace(tool.Name) == "" || tool.Format == nil || strings.TrimSpace(tool.Format.Type) == "" || strings.TrimSpace(tool.Format.Definition) == "" {
-				return Invalid(fmt.Sprintf("tools[%d]", i), "must be a named custom tool with a format")
-			}
-		default:
-			return Invalid(fmt.Sprintf("tools[%d]", i), "has unsupported type")
+		if err := validateTool(tool); err != nil {
+			return Invalid(fmt.Sprintf("tools[%d]", i), err.Error())
 		}
 	}
 	if format := req.TextFormat; format != nil {
@@ -105,8 +96,50 @@ func validateItem(item Item) error {
 		if item.CallID == "" || len(item.Output) == 0 {
 			return errors.New("function output requires call_id and output")
 		}
+	case "custom_tool_call":
+		if item.CallID == "" || item.Name == "" {
+			return errors.New("custom tool call requires call_id and name")
+		}
+	case "custom_tool_call_output":
+		if item.CallID == "" || len(item.Output) == 0 {
+			return errors.New("custom tool output requires call_id and output")
+		}
+	case "additional_tools":
+		if item.Role != "developer" || len(item.Tools) == 0 {
+			return errors.New("additional tools require developer role and at least one tool")
+		}
+		for _, tool := range item.Tools {
+			if err := validateTool(tool); err != nil {
+				return fmt.Errorf("additional tool: %w", err)
+			}
+		}
 	default:
 		return fmt.Errorf("unsupported item type %q", item.Type)
+	}
+	return nil
+}
+
+func validateTool(tool Tool) error {
+	switch tool.Type {
+	case "function":
+		if strings.TrimSpace(tool.Name) == "" {
+			return errors.New("must be a named function")
+		}
+	case "custom":
+		if strings.TrimSpace(tool.Name) == "" || tool.Format == nil || strings.TrimSpace(tool.Format.Type) == "" || strings.TrimSpace(tool.Format.Definition) == "" {
+			return errors.New("must be a named custom tool with a format")
+		}
+	case "namespace":
+		if strings.TrimSpace(tool.Name) == "" || len(tool.Tools) == 0 {
+			return errors.New("must be a named namespace with tools")
+		}
+		for _, nested := range tool.Tools {
+			if err := validateTool(nested); err != nil {
+				return fmt.Errorf("namespace tool: %w", err)
+			}
+		}
+	default:
+		return errors.New("has unsupported type")
 	}
 	return nil
 }

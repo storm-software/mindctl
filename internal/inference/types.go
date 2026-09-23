@@ -41,10 +41,11 @@ type AccessPrograms struct {
 // Item is a portable text, image, function-call, or function-result item.
 // ProviderData remains opaque to the gateway at this layer.
 type Item struct {
-	Type, Role, Text, CallID, Name string
-	ImageURL                       json.RawMessage
-	Arguments, Output              json.RawMessage
-	ProviderData                   json.RawMessage
+	ID, Type, Role, Text, CallID, Name, Namespace, Input string
+	ImageURL                                             json.RawMessage
+	Arguments, Output                                    json.RawMessage
+	Tools                                                []Tool
+	ProviderData                                         json.RawMessage
 }
 
 // Tool describes a custom function tool.
@@ -53,6 +54,7 @@ type Tool struct {
 	Parameters              json.RawMessage
 	Format                  *ToolFormat
 	DeferLoading            *bool
+	Tools                   []Tool
 	Strict                  bool
 }
 

@@ -52,6 +52,7 @@ type responseTool struct {
 	Parameters   json.RawMessage     `json:"parameters,omitempty"`
 	Format       *responseToolFormat `json:"format,omitempty"`
 	DeferLoading *bool               `json:"defer_loading,omitempty"`
+	Tools        []responseTool      `json:"tools,omitempty"`
 	Strict       bool                `json:"strict,omitempty"`
 }
 
@@ -75,13 +76,17 @@ type responseTextFormat struct {
 }
 
 type responseInputItem struct {
+	ID        string            `json:"id,omitempty"`
 	Type      string            `json:"type"`
 	Role      string            `json:"role,omitempty"`
 	Content   []responseContent `json:"content,omitempty"`
 	CallID    string            `json:"call_id,omitempty"`
 	Name      string            `json:"name,omitempty"`
+	Namespace string            `json:"namespace,omitempty"`
+	Input     string            `json:"input,omitempty"`
 	Arguments json.RawMessage   `json:"arguments,omitempty"`
 	Output    json.RawMessage   `json:"output,omitempty"`
+	Tools     []responseTool    `json:"tools,omitempty"`
 }
 
 type responseContent struct {
@@ -104,6 +109,8 @@ type responseOutput struct {
 	Role      string            `json:"role"`
 	CallID    string            `json:"call_id"`
 	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Input     string            `json:"input"`
 	Arguments json.RawMessage   `json:"arguments"`
 	Content   []responseContent `json:"content"`
 }
@@ -156,14 +163,7 @@ func toResponsesRequest(model domain.Model, request inference.Request, stream bo
 		result.Input = append(result.Input, encoded)
 	}
 	for _, tool := range request.Tools {
-		encoded := responseTool{
-			Type: tool.Type, Name: tool.Name, Description: tool.Description,
-			Parameters: tool.Parameters, DeferLoading: cloneBoolPointer(tool.DeferLoading), Strict: tool.Strict,
-		}
-		if tool.Format != nil {
-			encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
-		}
-		result.Tools = append(result.Tools, encoded)
+		result.Tools = append(result.Tools, encodeTool(tool))
 	}
 	if request.TextVerbosity != "" || request.TextFormat != nil {
 		result.Text = &responseText{Verbosity: request.TextVerbosity}
@@ -201,12 +201,36 @@ func toResponseInput(item inference.Item) responseInputItem {
 		if item.Role == "assistant" {
 			contentType = "output_text"
 		}
-		return responseInputItem{Type: item.Type, Role: item.Role, Content: []responseContent{{Type: contentType, Text: item.Text}}}
+		return responseInputItem{ID: item.ID, Type: item.Type, Role: item.Role, Content: []responseContent{{Type: contentType, Text: item.Text}}}
 	case "input_image":
-		return responseInputItem{Type: "message", Role: item.Role, Content: []responseContent{{Type: "input_image", ImageURL: item.ImageURL}}}
+		return responseInputItem{ID: item.ID, Type: "message", Role: item.Role, Content: []responseContent{{Type: "input_image", ImageURL: item.ImageURL}}}
+	case "additional_tools":
+		encoded := responseInputItem{ID: item.ID, Type: item.Type, Role: item.Role}
+		for _, tool := range item.Tools {
+			encoded.Tools = append(encoded.Tools, encodeTool(tool))
+		}
+		return encoded
+	case "custom_tool_call":
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: item.Input}
+	case "custom_tool_call_output":
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Output: item.Output}
 	default:
-		return responseInputItem{Type: item.Type, CallID: item.CallID, Name: item.Name, Arguments: item.Arguments, Output: item.Output}
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments, Output: item.Output}
 	}
+}
+
+func encodeTool(tool inference.Tool) responseTool {
+	encoded := responseTool{
+		Type: tool.Type, Name: tool.Name, Description: tool.Description,
+		Parameters: tool.Parameters, DeferLoading: cloneBoolPointer(tool.DeferLoading), Strict: tool.Strict,
+	}
+	if tool.Format != nil {
+		encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
+	}
+	for _, nested := range tool.Tools {
+		encoded.Tools = append(encoded.Tools, encodeTool(nested))
+	}
+	return encoded
 }
 
 func validateCapabilities(model domain.Model, request inference.Request) error {
@@ -220,14 +244,14 @@ func validateCapabilities(model domain.Model, request inference.Request) error {
 			if !model.Capabilities.Images {
 				return unsupported("images")
 			}
-		case "function_call", "function_call_output":
+		case "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "additional_tools":
 			if !model.Capabilities.Functions {
 				return unsupported("functions")
 			}
 		}
 	}
 	for _, tool := range request.Tools {
-		if tool.Type != "function" && tool.Type != "custom" {
+		if tool.Type != "function" && tool.Type != "custom" && tool.Type != "namespace" {
 			return unsupported(tool.Type)
 		}
 		if !model.Capabilities.Functions {
@@ -256,6 +280,8 @@ func fromResponsesResponse(response responsesResponse, model domain.Model, reque
 			}
 		case "function_call":
 			result.Output = append(result.Output, inference.Item{Type: output.Type, CallID: output.CallID, Name: output.Name, Arguments: append(json.RawMessage(nil), output.Arguments...)})
+		case "custom_tool_call":
+			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, CallID: output.CallID, Name: output.Name, Namespace: output.Namespace, Input: output.Input})
 		}
 	}
 	return result
@@ -281,22 +307,27 @@ func parseUsage(raw json.RawMessage) inference.Usage {
 
 func streamEvent(kind string, data []byte) (inference.Event, error) {
 	var frame struct {
-		ResponseID string `json:"response_id"`
-		ItemID     string `json:"item_id"`
-		CallID     string `json:"call_id"`
-		Name       string `json:"name"`
-		Delta      string `json:"delta"`
-		Arguments  string `json:"arguments"`
-		Text       string `json:"text"`
-		Response   *struct {
+		ResponseID  string `json:"response_id"`
+		ItemID      string `json:"item_id"`
+		OutputIndex int    `json:"output_index"`
+		CallID      string `json:"call_id"`
+		Name        string `json:"name"`
+		Delta       string `json:"delta"`
+		Input       string `json:"input"`
+		Arguments   string `json:"arguments"`
+		Text        string `json:"text"`
+		Response    *struct {
 			ID     string          `json:"id"`
 			Status string          `json:"status"`
 			Usage  json.RawMessage `json:"usage"`
 		} `json:"response"`
 		Item *struct {
-			ID     string `json:"id"`
-			CallID string `json:"call_id"`
-			Name   string `json:"name"`
+			ID        string `json:"id"`
+			Type      string `json:"type"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+			Input     string `json:"input"`
 		} `json:"item"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -314,7 +345,12 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 	if frame.Name == "" && frame.Item != nil {
 		frame.Name = frame.Item.Name
 	}
-	event := inference.Event{Type: kind, ResponseID: frame.ResponseID, ItemID: frame.ItemID, CallID: frame.CallID, Name: frame.Name, Data: append(json.RawMessage(nil), data...)}
+	event := inference.Event{Type: kind, ResponseID: frame.ResponseID, ItemID: frame.ItemID, CallID: frame.CallID, Name: frame.Name, OutputIndex: frame.OutputIndex, Data: append(json.RawMessage(nil), data...)}
+	if frame.Item != nil {
+		event.ItemType = frame.Item.Type
+		event.Namespace = frame.Item.Namespace
+		event.Input = frame.Item.Input
+	}
 	if frame.Response != nil {
 		event.Status = frame.Response.Status
 		event.Usage = parseUsage(frame.Response.Usage)
@@ -329,6 +365,11 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 		event.Delta = frame.Delta
 		if event.Delta == "" {
 			event.Delta = frame.Text
+		}
+	case strings.Contains(kind, "custom_tool_call_input"):
+		event.Delta = frame.Delta
+		if event.Delta == "" {
+			event.Delta = frame.Input
 		}
 	}
 	return event, nil

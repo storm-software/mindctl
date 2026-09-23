@@ -315,7 +315,7 @@ func nextTier(tier domain.Tier) domain.Tier {
 }
 
 func drainStream(ctx context.Context, stream provider.Stream, responseID, model string, writer EventWriter) (inference.Result, inference.Event, bool, error) {
-	accumulator := streamAccumulator{model: model, text: make(map[string]int), functions: make(map[string]int)}
+	accumulator := streamAccumulator{model: model, text: make(map[string]int), functions: make(map[string]int), customTools: make(map[string]int)}
 	var completion inference.Event
 	emitted := false
 	for {
@@ -398,6 +398,7 @@ type streamAccumulator struct {
 	terminal                         bool
 	items                            []inference.Item
 	text, functions                  map[string]int
+	customTools                      map[string]int
 }
 
 func (a *streamAccumulator) observe(event inference.Event) {
@@ -422,7 +423,29 @@ func (a *streamAccumulator) observe(event inference.Event) {
 		a.appendFunctionArguments(event, false)
 	case "response.function_call_arguments.done":
 		a.appendFunctionArguments(event, true)
+	case "response.output_item.done":
+		if event.ItemType == "custom_tool_call" {
+			a.appendCustomToolCall(event)
+		}
 	}
+}
+
+func (a *streamAccumulator) appendCustomToolCall(event inference.Event) {
+	key := event.CallID
+	if key == "" {
+		key = event.ItemID
+	}
+	if key == "" {
+		return
+	}
+	if _, exists := a.customTools[key]; exists {
+		return
+	}
+	a.customTools[key] = len(a.items)
+	a.items = append(a.items, inference.Item{
+		ID: event.ItemID, Type: "custom_tool_call", CallID: event.CallID,
+		Name: event.Name, Namespace: event.Namespace, Input: event.Input,
+	})
 }
 
 func (a *streamAccumulator) appendText(event inference.Event, onlyIfAbsent bool) {

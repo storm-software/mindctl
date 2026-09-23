@@ -101,6 +101,7 @@ type wireTool struct {
 	Parameters   json.RawMessage `json:"parameters"`
 	Format       *wireToolFormat `json:"format"`
 	DeferLoading *bool           `json:"defer_loading"`
+	Tools        []wireTool      `json:"tools"`
 	Strict       bool            `json:"strict"`
 }
 
@@ -111,15 +112,19 @@ type wireToolFormat struct {
 }
 
 type wireInputItem struct {
+	ID        string          `json:"id"`
 	Type      string          `json:"type"`
 	Role      string          `json:"role"`
 	Text      string          `json:"text"`
 	CallID    string          `json:"call_id"`
 	Name      string          `json:"name"`
+	Namespace string          `json:"namespace"`
+	Input     string          `json:"input"`
 	Content   json.RawMessage `json:"content"`
 	ImageURL  json.RawMessage `json:"image_url"`
 	Arguments json.RawMessage `json:"arguments"`
 	Output    json.RawMessage `json:"output"`
+	Tools     []wireTool      `json:"tools"`
 }
 
 type wireContentPart struct {
@@ -156,14 +161,7 @@ func (wire responseRequest) request() (inference.Request, error) {
 		request.AccessPrograms = &inference.AccessPrograms{Cyber: wire.AccessPrograms.Cyber}
 	}
 	for _, tool := range wire.Tools {
-		decoded := inference.Tool{
-			Type: tool.Type, Name: tool.Name, Description: tool.Description,
-			Parameters: append(json.RawMessage(nil), tool.Parameters...), DeferLoading: cloneBool(tool.DeferLoading), Strict: tool.Strict,
-		}
-		if tool.Format != nil {
-			decoded.Format = &inference.ToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
-		}
-		request.Tools = append(request.Tools, decoded)
+		request.Tools = append(request.Tools, decodeWireTool(tool))
 	}
 	if wire.Text != nil && wire.Text.Format != nil {
 		format := wire.Text.Format
@@ -226,9 +224,19 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 	case "message":
 		return decodeMessage(wire)
 	case "function_call":
-		return []inference.Item{{Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Arguments: wire.Arguments}}, nil
+		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Namespace: wire.Namespace, Arguments: wire.Arguments}}, nil
 	case "function_call_output":
-		return []inference.Item{{Type: wire.Type, CallID: wire.CallID, Output: wire.Output}}, nil
+		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Output: wire.Output}}, nil
+	case "custom_tool_call":
+		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Namespace: wire.Namespace, Input: wire.Input}}, nil
+	case "custom_tool_call_output":
+		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Output: wire.Output}}, nil
+	case "additional_tools":
+		item := inference.Item{ID: wire.ID, Type: wire.Type, Role: wire.Role}
+		for _, tool := range wire.Tools {
+			item.Tools = append(item.Tools, decodeWireTool(tool))
+		}
+		return []inference.Item{item}, nil
 	default:
 		return nil, fmt.Errorf("unsupported item type %q", wire.Type)
 	}
@@ -237,7 +245,7 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 func decodeMessage(wire wireInputItem) ([]inference.Item, error) {
 	var text string
 	if err := decodeStrict(wire.Content, &text); err == nil {
-		return []inference.Item{{Type: "message", Role: wire.Role, Text: text}}, nil
+		return []inference.Item{{ID: wire.ID, Type: "message", Role: wire.Role, Text: text}}, nil
 	}
 	var parts []json.RawMessage
 	if err := decodeStrict(wire.Content, &parts); err != nil {
@@ -251,7 +259,7 @@ func decodeMessage(wire wireInputItem) ([]inference.Item, error) {
 		}
 		switch part.Type {
 		case "input_text", "output_text":
-			items = append(items, inference.Item{Type: "message", Role: wire.Role, Text: part.Text})
+			items = append(items, inference.Item{ID: wire.ID, Type: "message", Role: wire.Role, Text: part.Text})
 		case "input_image":
 			items = append(items, inference.Item{Type: "input_image", Role: wire.Role, ImageURL: part.ImageURL})
 		default:
@@ -259,6 +267,20 @@ func decodeMessage(wire wireInputItem) ([]inference.Item, error) {
 		}
 	}
 	return items, nil
+}
+
+func decodeWireTool(tool wireTool) inference.Tool {
+	decoded := inference.Tool{
+		Type: tool.Type, Name: tool.Name, Description: tool.Description,
+		Parameters: append(json.RawMessage(nil), tool.Parameters...), DeferLoading: cloneBool(tool.DeferLoading), Strict: tool.Strict,
+	}
+	if tool.Format != nil {
+		decoded.Format = &inference.ToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
+	}
+	for _, nested := range tool.Tools {
+		decoded.Tools = append(decoded.Tools, decodeWireTool(nested))
+	}
+	return decoded
 }
 
 func decodeControls(r *http.Request) (Controls, error) {
