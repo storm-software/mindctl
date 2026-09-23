@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.3](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.3) (09/23/2026)
+
+### Features
+
+- **mindctl:** Added support for `~/.mindctl/config.yaml` files ([5ea63fd](https://github.com/storm-software/mindctl/commit/5ea63fd))
+
 ## [0.1.2](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.2) (09/23/2026)
 
 ### Features
