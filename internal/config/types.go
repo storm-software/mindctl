@@ -61,6 +61,16 @@ type JevConfig struct {
 	MaxRetries int           `yaml:"max_retries"`
 }
 
+// ClassifierConfig configures the provider-neutral classifier endpoint using a
+// referenced bearer token. Application wiring is responsible for resolving the
+// token from TokenEnv exactly once during startup.
+type ClassifierConfig struct {
+	Endpoint   string        `yaml:"endpoint"`
+	TokenEnv   string        `yaml:"token_env"`
+	Timeout    time.Duration `yaml:"timeout"`
+	MaxRetries int           `yaml:"max_retries"`
+}
+
 // SQLiteConfig controls local durable storage. Zero retention means unlimited
 // and starts no retention maintenance. For finite retention, a zero maintenance
 // interval uses the application's bounded default; nonzero intervals are Go
