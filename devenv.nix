@@ -1,6 +1,8 @@
-{ ... }:
+{ pkgs, ... }:
 {
   name = "storm-software/mindctl";
+
+  packages = [pkgs.goreleaser];
 
   dotenv.enable = true;
   dotenv.filename = [
