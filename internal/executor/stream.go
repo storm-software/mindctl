@@ -472,20 +472,35 @@ func (a *streamAccumulator) appendText(event inference.Event, onlyIfAbsent bool)
 }
 
 func (a *streamAccumulator) appendFunctionArguments(event inference.Event, onlyIfAbsent bool) {
-	key := event.CallID
-	if key == "" {
-		key = event.ItemID
+	index, ok := 0, false
+	if event.ItemID != "" {
+		index, ok = a.functions[event.ItemID]
 	}
-	if key == "" {
+	if !ok && event.CallID != "" {
+		index, ok = a.functions[event.CallID]
+	}
+	if event.ItemID == "" && event.CallID == "" {
 		return
 	}
-	index, ok := a.functions[key]
 	if !ok {
 		index = len(a.items)
-		a.functions[key] = index
-		a.items = append(a.items, inference.Item{Type: "function_call", CallID: event.CallID, Name: event.Name})
+		a.items = append(a.items, inference.Item{Type: "function_call"})
 	}
-	if onlyIfAbsent && ok {
+	if event.ItemID != "" {
+		a.functions[event.ItemID] = index
+		a.items[index].ID = event.ItemID
+	}
+	if event.CallID != "" {
+		a.functions[event.CallID] = index
+		a.items[index].CallID = event.CallID
+	}
+	if event.Name != "" {
+		a.items[index].Name = event.Name
+	}
+	if event.Namespace != "" {
+		a.items[index].Namespace = event.Namespace
+	}
+	if onlyIfAbsent && len(a.items[index].Arguments) != 0 {
 		return
 	}
 	a.items[index].Arguments = append(a.items[index].Arguments, event.ArgumentsDelta...)

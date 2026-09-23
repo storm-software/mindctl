@@ -162,10 +162,13 @@ type responseBody struct {
 }
 
 type responseOutput struct {
+	ID        string            `json:"id,omitempty"`
 	Type      string            `json:"type,omitempty"`
 	Role      string            `json:"role,omitempty"`
 	CallID    string            `json:"call_id,omitempty"`
 	Name      string            `json:"name,omitempty"`
+	Namespace string            `json:"namespace,omitempty"`
+	Input     string            `json:"input,omitempty"`
 	Arguments json.RawMessage   `json:"arguments,omitempty"`
 	Content   []responseContent `json:"content,omitempty"`
 }
@@ -193,6 +196,8 @@ func responseFromResult(result inference.Result) responseBody {
 			body.Output = append(body.Output, responseOutput{Type: "message", Role: item.Role, Content: []responseContent{{Type: "output_text", Text: item.Text}}})
 		case "function_call":
 			body.Output = append(body.Output, responseOutput{Type: "function_call", CallID: item.CallID, Name: item.Name, Arguments: item.Arguments})
+		case "custom_tool_call":
+			body.Output = append(body.Output, responseOutput{ID: item.ID, Type: "custom_tool_call", CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: item.Input})
 		}
 	}
 	if result.Usage.Known {

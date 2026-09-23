@@ -34,6 +34,30 @@ func TestResponsesHandlerReturnsActualModelAndRoutingHeaders(t *testing.T) {
 	}
 }
 
+func TestResponsesHandlerReturnsNonStreamingCustomToolCall(t *testing.T) {
+	handler := testResponsesHandler(executor.Output{Result: inference.Result{
+		ID: "resp_gateway", Model: "gpt-test", Status: "completed",
+		Output: []inference.Item{{ID: "ctc_1", Type: "custom_tool_call", CallID: "call_patch", Name: "apply_patch", Input: "*** Begin Patch"}},
+	}})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, authenticatedRequest(`{"model":"mindctl-auto","input":"hello"}`))
+	var body struct {
+		Output []struct {
+			ID     string `json:"id"`
+			Type   string `json:"type"`
+			CallID string `json:"call_id"`
+			Name   string `json:"name"`
+			Input  string `json:"input"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || len(body.Output) != 1 || body.Output[0].ID != "ctc_1" || body.Output[0].Type != "custom_tool_call" || body.Output[0].CallID != "call_patch" || body.Output[0].Name != "apply_patch" || body.Output[0].Input != "*** Begin Patch" {
+		t.Fatalf("status=%d output=%+v body=%s", rr.Code, body.Output, rr.Body.String())
+	}
+}
+
 func TestResponsesHandlerMapsSafeGatewayErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string

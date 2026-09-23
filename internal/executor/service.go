@@ -199,6 +199,9 @@ func normalizedFeatures(supplied domain.RequestFeatures, request inference.Reque
 			item.Type == "custom_tool_call" || item.Type == "custom_tool_call_output" || item.Type == "additional_tools" {
 			features.NeedsFunctions = true
 		}
+		if item.Type == "custom_tool_call" || item.Type == "custom_tool_call_output" || item.Type == "additional_tools" {
+			features.NeedsNativeTools = true
+		}
 	}
 	if request.Instructions != "" {
 		tokens += estimatedTokens(request.Instructions)
@@ -213,6 +216,12 @@ func normalizedFeatures(supplied domain.RequestFeatures, request inference.Reque
 		features.MaxOutputTokens = request.MaxOutputTokens
 	}
 	features.NeedsFunctions = features.NeedsFunctions || len(request.Tools) > 0
+	for _, tool := range request.Tools {
+		if tool.Type != "function" {
+			features.NeedsNativeTools = true
+			break
+		}
+	}
 	features.NeedsJSONSchema = features.NeedsJSONSchema || request.TextFormat != nil
 	for _, item := range items {
 		if item.Text != "" {

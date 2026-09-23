@@ -45,19 +45,35 @@ func TestAutoRouteExcludesProviderWithoutHostedTool(t *testing.T) {
 	}
 }
 
-func TestAutoRouteExcludesTextOnlyModelForResponsesLiteTools(t *testing.T) {
-	deps := fakeDeps()
-	deps.Models = []domain.Model{
-		fakeModel("text-only", "openai", domain.T4, 1),
-		fakeModel("tool-capable", "anthropic", domain.T4, 2),
+func TestAutoRouteExcludesNonOpenAIModelForNativeCodexTools(t *testing.T) {
+	tests := map[string]func(*inference.Request){
+		"responses lite": func(request *inference.Request) {
+			request.Input = append([]inference.Item{{Type: "additional_tools", Role: "developer", Tools: []inference.Tool{{Type: "function", Name: "lookup"}}}}, request.Input...)
+		},
+		"custom continuation": func(request *inference.Request) {
+			request.Input = append(request.Input, inference.Item{Type: "custom_tool_call", CallID: "call_patch", Name: "apply_patch", Input: "patch"})
+		},
+		"custom definition": func(request *inference.Request) {
+			request.Tools = []inference.Tool{{Type: "custom", Name: "apply_patch", Format: &inference.ToolFormat{Type: "grammar", Definition: "start: PATCH"}}}
+		},
 	}
-	deps.Models[1].Capabilities.Functions = true
-	input := newAutomaticInput()
-	input.Request.Input = append([]inference.Item{{Type: "additional_tools", Role: "developer", Tools: []inference.Tool{{Type: "function", Name: "lookup"}}}}, input.Request.Input...)
+	for name, modify := range tests {
+		t.Run(name, func(t *testing.T) {
+			deps := fakeDeps()
+			deps.Models = []domain.Model{
+				fakeModel("anthropic-functions", "anthropic", domain.T4, 1),
+				fakeModel("openai-native", "openai", domain.T4, 2),
+			}
+			deps.Models[0].Capabilities.Functions = true
+			deps.Models[1].Capabilities.Functions = true
+			input := newAutomaticInput()
+			modify(&input.Request)
 
-	got, err := deps.Executor.Execute(context.Background(), deps.input(input))
-	if err != nil || got.Decision.ModelID != "tool-capable" || deps.OpenAI.Calls != 0 || deps.Anthropic.Calls != 1 {
-		t.Fatalf("got=%+v openai_calls=%d anthropic_calls=%d err=%v", got, deps.OpenAI.Calls, deps.Anthropic.Calls, err)
+			got, err := deps.Executor.Execute(context.Background(), deps.input(input))
+			if err != nil || got.Decision.ModelID != "openai-native" || deps.OpenAI.Calls != 1 || deps.Anthropic.Calls != 0 {
+				t.Fatalf("got=%+v openai_calls=%d anthropic_calls=%d err=%v", got, deps.OpenAI.Calls, deps.Anthropic.Calls, err)
+			}
+		})
 	}
 }
 

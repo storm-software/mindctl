@@ -98,6 +98,9 @@ func EligibleModels(input EligibilityInput) ([]domain.Model, []Rejection) {
 		if input.Features.NeedsFunctions && !model.Capabilities.Functions {
 			add(RejectTools, "model lacks custom function support")
 		}
+		if input.Features.NeedsNativeTools && model.Provider != "openai" {
+			add(RejectTools, "model provider lacks native Responses tool support")
+		}
 		if input.Features.NeedsJSONSchema && !model.Capabilities.JSONSchema {
 			add(RejectTools, "model lacks JSON Schema support")
 		}

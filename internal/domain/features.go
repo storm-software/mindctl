@@ -12,6 +12,7 @@ type RequestFeatures struct {
 	CachedInputTokens                      int64
 	NeedsText, NeedsImages, NeedsFunctions bool
 	NeedsJSONSchema, NeedsHostedTools      bool
+	NeedsNativeTools                       bool
 	HostedToolTypes                        []string
 }
 

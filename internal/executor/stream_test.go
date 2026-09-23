@@ -164,6 +164,29 @@ func TestStreamPersistsDoneTextWhenNoDeltaPrecedesIt(t *testing.T) {
 	}
 }
 
+func TestStreamMergesFunctionArgumentDeltasWithCompletedItem(t *testing.T) {
+	stream := &scriptedStream{events: []inference.Event{
+		{Type: "response.output_item.added", ItemID: "item_1", ItemType: "function_call"},
+		{Type: "response.function_call_arguments.delta", ItemID: "item_1", ArgumentsDelta: `{"q":`},
+		{Type: "response.function_call_arguments.delta", ItemID: "item_1", ArgumentsDelta: `"x"}`},
+		{Type: "response.output_item.done", ItemID: "item_1", ItemType: "function_call", CallID: "call_1", Name: "lookup", ArgumentsDelta: `{"q":"x"}`},
+		{Type: "response.completed", Status: "completed", ProviderRequestID: "openai-request"},
+	}, err: io.EOF}
+	deps := newStreamDependencies(stream)
+	deps.models = deps.models[:1]
+
+	if err := deps.executor.Stream(context.Background(), deps.input(), deps.writer); err != nil {
+		t.Fatal(err)
+	}
+	output := deps.conversations.committed.Output
+	if len(output) != 1 || output[0].Type != "function_call" || output[0].CallID != "call_1" || output[0].Name != "lookup" || string(output[0].Arguments) != `{"q":"x"}` {
+		t.Fatalf("committed output=%+v", output)
+	}
+	if err := inference.ValidateRequest(inference.Request{Model: "mindctl-auto", Input: output}); err != nil {
+		t.Fatalf("persisted output cannot be replayed: %v", err)
+	}
+}
+
 type streamDependencies struct {
 	executor      *Service
 	provider      *scriptedProvider
