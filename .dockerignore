@@ -1,0 +1,10 @@
+.git
+.github
+.nx
+dist
+node_modules
+tmp
+*.db
+.env
+.env.*
+config.example.yaml
