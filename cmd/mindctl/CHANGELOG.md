@@ -2,6 +2,16 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.6](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.6) (09/23/2026)
+
+### Bug Fixes
+
+- **mindctl:** Rename `provider list` command for consistency ([8d2343b](https://github.com/storm-software/mindctl/commit/8d2343b))
+
+### Features
+
+- **mindctl:** Added support for the `model` and `provider` commands ([4746396](https://github.com/storm-software/mindctl/commit/4746396))
+
 ## [0.1.4](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.4) (09/23/2026)
 
 ### Bug Fixes
