@@ -3,6 +3,7 @@ listen: ":8080"
 
 client_auth:
   token_env: MINDCTL_GATEWAY_TOKEN
+  header: X-Mindctl-Token
   max_body_bytes: 16777216
 
 jev:
@@ -46,11 +47,17 @@ routing:
   underspecification_floors: []
 
 providers:
-  # Supported provider IDs are openai, anthropic, and gemini. API keys are
-  # resolved only from the named environment variables at server startup.
+  # Supported provider IDs are openai, anthropic, and gemini. Authentication
+  # modes are exclusive. ChatGPT OAuth passthrough needs no OPENAI_API_KEY;
+  # Codex supplies its caller-managed credential on each request.
   - id: openai
-    base_url: https://api.openai.com
-    api_key_env: OPENAI_API_KEY
+    base_url: https://chatgpt.com/backend-api/codex
+    auth: chatgpt_oauth_passthrough
+  # API-key alternative (auth defaults to api_key when omitted):
+  # - id: openai
+  #   base_url: https://api.openai.com
+  #   auth: api_key
+  #   api_key_env: OPENAI_API_KEY
 
 models:
   - id: gpt-5

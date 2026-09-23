@@ -55,6 +55,7 @@
 - [Getting Started](#getting-started)
   - [Build](#build)
   - [Development Server](#development-server)
+  - [ChatGPT subscription routing](#chatgpt-subscription-routing)
 - [Environment Configuration Help](#environment-configuration-help-1)
   - [Plug-Ins](#plug-ins)
   - [Generate an Application](#generate-an-application)
@@ -159,6 +160,35 @@ release archives in `dist/` without publishing them.
 
 Run `devenv shell -- go run ./cmd/mindctl -config ./config.yaml` to start the
 gateway.
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
+
+## ChatGPT subscription routing
+
+Mindctl can route Codex requests through the ChatGPT account already signed in
+to Codex. Configure Mindctl with `chatgpt_oauth_passthrough` as shown in
+[`config.example.yaml`](config.example.yaml), then add this custom provider to
+the Codex `config.toml`:
+
+```toml
+model_provider = "mindctl"
+
+[model_providers.mindctl]
+name = "Mindctl"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+requires_openai_auth = true
+env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
+```
+
+Sign in to Codex with ChatGPT and export `MINDCTL_GATEWAY_TOKEN` with the same
+gateway token supplied to Mindctl. Do not set `OPENAI_API_KEY` for this
+provider. Codex owns OAuth login and token refresh; Mindctl forwards the
+request-scoped credential only to the configured ChatGPT Codex endpoint.
+
+Available models, workspace access, rate limits, and usage limits remain
+subject to the selected ChatGPT account and subscription.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
