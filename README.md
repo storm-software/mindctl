@@ -18,7 +18,7 @@
 </div>
 <br />
 
-**Mindctl** is an AI model router that uses built-in logic and the [Jev system one model](https://typesafe.ai/blog/introducing-system-one-models-and-jev) to intelligently route requests to the appropriate model based on the input data.
+**Mindctl** is a LLM router that uses built-in logic and the [Jev system one model](https://typesafe.ai/blog/introducing-system-one-models-and-jev) to intelligently route requests to the appropriate model based on the input data.
 
 <br />
 
@@ -88,8 +88,11 @@ against `checksums.txt`, unpack it, and run:
 ./mindctl -config ./config.yaml
 ```
 
-On Linux, run `sha256sum --check checksums.txt`. On macOS, compare
-`shasum -a 256 <archive>` to the matching `checksums.txt` entry.
+On Linux, run `sha256sum --ignore-missing --check checksums.txt`. On macOS,
+compare `shasum -a 256 <archive>` to the matching `checksums.txt` entry.
+
+Copy [config.example.yaml](config.example.yaml) to `config.yaml`, set every
+referenced secret environment variable, and select a writable SQLite path.
 
 ## Container
 
@@ -104,8 +107,12 @@ docker run --rm -p 8080:8080 \
 ```
 
 The image runs as a non-root user and contains no usable configuration,
-credentials, encryption keys, or database. Configure a writable SQLite path in
-`config.yaml` when persistence is enabled.
+credentials, encryption keys, or database. Mount a writable data volume and
+configure its SQLite path in `config.yaml`.
+
+The GHCR package is public after its first release: an organization owner must
+set the package visibility to **Public** in GitHub Packages before advertising
+the image. Confirm an anonymous `docker pull` succeeds for the release tag.
 
 ## From source
 
@@ -142,16 +149,16 @@ More information can be found in the
 
 ## Build
 
-Run `pnpm build` to build the project. The build artifacts will be stored in the
-`dist/` directory. Use the `--prod` flag for a production build.
+Run `devenv shell -- goreleaser release --snapshot --clean` to build local
+release archives in `dist/` without publishing them.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
 
 ## Development Server
 
-Run `pnpm serve` for a dev server. Navigate to <http://localhost:4200/>. The app
-will automatically reload if you change any of the source files.
+Run `devenv shell -- go run ./cmd/mindctl -config ./config.yaml` to start the
+gateway.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
