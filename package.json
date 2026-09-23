@@ -91,6 +91,7 @@
     "nx": "catalog:",
     "prettier": "catalog:",
     "rimraf": "catalog:",
+    "tsdown": "catalog:",
     "typescript": "^6.0.3",
     "verdaccio": "catalog:",
     "vite": "catalog:",
