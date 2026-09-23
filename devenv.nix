@@ -2,7 +2,7 @@
 {
   name = "storm-software/mindctl";
 
-  packages = [pkgs.goreleaser];
+  packages = [pkgs.goreleaser pkgs.python312 pkgs.uv];
 
   dotenv.enable = true;
   dotenv.filename = [
