@@ -128,7 +128,7 @@ func (tx *transaction) insertRequest(record storage.RequestRecord) error {
 		}
 	}
 	if record.Judgment != nil {
-		if _, err := tx.conn.ExecContext(tx.ctx, "INSERT INTO jev_judgments (request_id, judgment_json) VALUES (?, ?)", record.ID, string(judgment)); err != nil {
+		if _, err := tx.conn.ExecContext(tx.ctx, "INSERT INTO classifier_judgments (request_id, judgment_json) VALUES (?, ?)", record.ID, string(judgment)); err != nil {
 			return failure("insert judgment", err)
 		}
 	}
@@ -172,7 +172,7 @@ func (db *DB) GetRequest(ctx context.Context, id string) (storage.RequestRecord,
 			return err
 		}
 		var judgment string
-		err = conn.QueryRowContext(ctx, "SELECT judgment_json FROM jev_judgments WHERE request_id = ?", id).Scan(&judgment)
+		err = conn.QueryRowContext(ctx, "SELECT judgment_json FROM classifier_judgments WHERE request_id = ?", id).Scan(&judgment)
 		if err == nil {
 			record.Judgment = new(domain.ClassifierJudgment)
 			if err := json.Unmarshal([]byte(judgment), record.Judgment); err != nil {

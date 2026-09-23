@@ -19,6 +19,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/router"
 	"github.com/storm-software/mindctl/internal/storage"
+	"github.com/storm-software/mindctl/migrations"
 )
 
 func testKeyring(t *testing.T) *contentcrypto.Keyring {
@@ -55,7 +56,7 @@ func sampleRecord() storage.RequestRecord {
 			},
 			Rejections: []router.Rejection{{ModelID: "small", Code: router.RejectTier, Codes: []router.RejectionCode{router.RejectTier, router.RejectContext}, Reasons: []string{"below floor", "context too small"}}},
 		},
-		Judgment: &domain.ClassifierJudgment{MinimumTier: domain.T3, TierConfidence: .9, TierProbabilities: map[domain.Tier]float64{domain.T3: .9, domain.T4: .1}, TaskType: domain.TaskCoding, TaskTypeConfidence: .8, TaskTypeProbabilities: map[domain.TaskType]float64{domain.TaskCoding: .8, domain.TaskReasoning: .2}, CodingScore: 3, ReasoningScore: 2, BlastRadius: 1, Underspecified: .1, Classifier: "jev", ResolvedModel: "jev-pinned", Latency: time.Millisecond},
+		Judgment: &domain.ClassifierJudgment{MinimumTier: domain.T3, TierConfidence: .9, TierProbabilities: map[domain.Tier]float64{domain.T3: .9, domain.T4: .1}, TaskType: domain.TaskCoding, TaskTypeConfidence: .8, TaskTypeProbabilities: map[domain.TaskType]float64{domain.TaskCoding: .8, domain.TaskReasoning: .2}, CodingScore: 3, ReasoningScore: 2, BlastRadius: 1, Underspecified: .1, Classifier: "laya", ResolvedModel: "convaiinnovations/laya/typed-decisions", ModelRevision: "5e7b2b1", Latency: time.Millisecond},
 		Replay: storage.ReplaySnapshot{
 			Input: router.DecisionInput{
 				Features: domain.RequestFeatures{InputTokens: 100, CachedInputTokens: 20, MaxOutputTokens: 50, NeedsText: true, HostedToolTypes: []string{"search"}},
@@ -112,7 +113,46 @@ func TestRepositoryPersistsDecisionWithoutPlaintext(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, record) {
 		t.Fatalf("reopen lost data: %v", err)
 	}
-	assertCount(t, reopened.SQL(), "schema_migrations", 2)
+	assertCount(t, reopened.SQL(), "schema_migrations", 3)
+}
+
+func TestMigratesJevJudgmentsWithoutDataLoss(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-migration.db")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"001_core.sql", "002_conversations.sql"} {
+		body, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := legacy.Exec(string(body)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := legacy.Exec("INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := legacy.Exec("INSERT INTO requests (id, created_at) VALUES ('request-1', 0)"); err != nil {
+		t.Fatal(err)
+	}
+	const historical = `{"MinimumTier":4,"ResolvedModel":"jev-history"}`
+	if _, err := legacy.Exec("INSERT INTO jev_judgments (request_id, judgment_json) VALUES ('request-1', ?)", historical); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db := openTestDB(t, path)
+	var got string
+	if err := db.SQL().QueryRow("SELECT judgment_json FROM classifier_judgments WHERE request_id = ?", "request-1").Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != historical {
+		t.Fatalf("historical JSON changed: %s", got)
+	}
 }
 
 func TestRepositoryRoundTripsClassifierScoreConfidences(t *testing.T) {
@@ -122,6 +162,7 @@ func TestRepositoryRoundTripsClassifierScoreConfidences(t *testing.T) {
 	record.Judgment.ReasoningConfidence = .61
 	record.Judgment.CodingConfidence = .72
 	record.Judgment.BlastRadiusConfidence = .83
+	record.Judgment.ModelRevision = "5e7b2b1"
 	insertRecord(t, db, record)
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -131,7 +172,7 @@ func TestRepositoryRoundTripsClassifierScoreConfidences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Judgment == nil || got.Judgment.ReasoningConfidence != .61 || got.Judgment.CodingConfidence != .72 || got.Judgment.BlastRadiusConfidence != .83 {
+	if got.Judgment == nil || got.Judgment.Classifier != "laya" || got.Judgment.ModelRevision != "5e7b2b1" || got.Judgment.ReasoningConfidence != .61 || got.Judgment.CodingConfidence != .72 || got.Judgment.BlastRadiusConfidence != .83 {
 		t.Fatalf("score confidences were not preserved: %+v", got.Judgment)
 	}
 }
@@ -308,7 +349,7 @@ func TestWithTxRollsBackAllDecisionRows(t *testing.T) {
 			if failure == "callback" && (!errors.Is(err, abort) || strings.Contains(err.Error(), "private callback")) {
 				t.Fatal("callback error was leaked or lost its identity")
 			}
-			for _, table := range []string{"requests", "routing_decisions", "candidate_scores", "jev_judgments", "content_blobs"} {
+			for _, table := range []string{"requests", "routing_decisions", "candidate_scores", "classifier_judgments", "content_blobs"} {
 				assertCount(t, db.SQL(), table, 0)
 			}
 			if failure == "commit" {
@@ -334,12 +375,12 @@ func TestMigrationsAreOrderedTransactionalAndIdempotent(t *testing.T) {
 		}
 	}
 	assertCount(t, db.SQL(), "second_migration", 1)
-	assertCount(t, db.SQL(), "schema_migrations", 4)
+	assertCount(t, db.SQL(), "schema_migrations", 5)
 	bad := fstest.MapFS{"004_bad.sql": {Data: []byte("CREATE TABLE incomplete (value INTEGER); INVALID SQL")}}
 	if err := migrate(context.Background(), db.SQL(), bad); err == nil {
 		t.Fatal("bad migration accepted")
 	}
-	assertCount(t, db.SQL(), "schema_migrations", 4)
+	assertCount(t, db.SQL(), "schema_migrations", 5)
 	var count int
 	if err := db.SQL().QueryRow("SELECT count(*) FROM sqlite_master WHERE name = 'incomplete'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("failed migration left DDL: count=%d err=%v", count, err)
@@ -385,7 +426,7 @@ func TestDeleteExpiredContentPreservesTelemetryAndBoundary(t *testing.T) {
 		t.Fatalf("expired content deleted=%d err=%v", n, err)
 	}
 	assertCount(t, db.SQL(), "content_blobs", 10)
-	for _, table := range []string{"requests", "routing_decisions", "jev_judgments"} {
+	for _, table := range []string{"requests", "routing_decisions", "classifier_judgments"} {
 		assertCount(t, db.SQL(), table, 3)
 	}
 	assertCount(t, db.SQL(), "candidate_scores", 6)

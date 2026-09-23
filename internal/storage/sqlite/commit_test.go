@@ -40,7 +40,7 @@ func TestWithTxCancellationAtCommitReturnsDurableOutcome(t *testing.T) {
 	if err != nil {
 		t.Errorf("WithTx reported failure after SQLite committed: %v", err)
 	}
-	for _, table := range []string{"requests", "routing_decisions", "jev_judgments"} {
+	for _, table := range []string{"requests", "routing_decisions", "classifier_judgments"} {
 		assertCount(t, db.SQL(), table, 1)
 	}
 	assertCount(t, db.SQL(), "candidate_scores", 2)
