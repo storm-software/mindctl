@@ -157,6 +157,63 @@ func TestValidateRejectsNegativeMaximumBodyBytes(t *testing.T) {
 	}
 }
 
+func TestProviderAuthenticationDefaultsRemainCompatible(t *testing.T) {
+	cfg := validConfig()
+	if cfg.ClientAuth.HeaderName() != "Authorization" || cfg.Providers[0].AuthMode() != ProviderAuthAPIKey {
+		t.Fatalf("header=%q auth=%q", cfg.ClientAuth.HeaderName(), cfg.Providers[0].AuthMode())
+	}
+	if err := cfg.Validate(testEnv); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateAcceptsChatGPTOAuthWithoutAPIKey(t *testing.T) {
+	cfg := validConfig()
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+	cfg.Providers[0].BaseURL = "https://chatgpt.com/backend-api/codex"
+	cfg.Providers[0].APIKeyEnv = ""
+	if err := cfg.Validate(testEnv); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsInvalidAuthenticationCombinations(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"unknown mode", func(c *Config) { c.Providers[0].Auth = "unknown" }, "unknown provider authentication mode"},
+		{"oauth with api key", func(c *Config) {
+			c.ClientAuth.Header = "X-Mindctl-Token"
+			c.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+		}, "must not configure api_key_env"},
+		{"oauth on anthropic", func(c *Config) {
+			c.ClientAuth.Header = "X-Mindctl-Token"
+			c.Providers[0] = ProviderConfig{ID: "anthropic", Auth: string(ProviderAuthChatGPTOAuthPassthrough)}
+		}, "only supported for openai"},
+		{"authorization conflict", func(c *Config) {
+			c.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+			c.Providers[0].APIKeyEnv = ""
+		}, "conflicts with ChatGPT OAuth"},
+		{"account conflict", func(c *Config) {
+			c.ClientAuth.Header = "chatgpt-account-id"
+			c.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+			c.Providers[0].APIKeyEnv = ""
+		}, "conflicts with ChatGPT OAuth"},
+		{"invalid header", func(c *Config) { c.ClientAuth.Header = "Bad Header" }, "invalid client authentication header"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(&cfg)
+			if err := cfg.Validate(testEnv); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error=%v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsInvalidConfiguredPolicyValues(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

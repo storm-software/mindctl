@@ -5,12 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-const DefaultMaxBodyBytes int64 = 16 << 20
+const (
+	DefaultMaxBodyBytes     int64 = 16 << 20
+	DefaultClientAuthHeader       = "Authorization"
+)
+
+// ProviderAuthMode selects exactly one source of upstream credentials.
+type ProviderAuthMode string
+
+const (
+	ProviderAuthAPIKey                  ProviderAuthMode = "api_key"
+	ProviderAuthChatGPTOAuthPassthrough ProviderAuthMode = "chatgpt_oauth_passthrough"
+)
 
 // Config is the complete gateway configuration loaded from YAML.
 type Config struct {
@@ -27,7 +39,17 @@ type Config struct {
 // ClientAuthConfig configures gateway authentication using a referenced secret.
 type ClientAuthConfig struct {
 	TokenEnv     string `yaml:"token_env"`
+	Header       string `yaml:"header"`
 	MaxBodyBytes int64  `yaml:"max_body_bytes"`
+}
+
+// HeaderName returns the configured gateway credential header while retaining
+// Authorization as the backward-compatible default.
+func (c ClientAuthConfig) HeaderName() string {
+	if c.Header == "" {
+		return DefaultClientAuthHeader
+	}
+	return c.Header
 }
 
 // JevConfig configures the Jev classifier using a referenced secret.
@@ -88,7 +110,17 @@ type SignalFloorConfig struct {
 type ProviderConfig struct {
 	ID        string `yaml:"id"`
 	BaseURL   string `yaml:"base_url"`
+	Auth      string `yaml:"auth"`
 	APIKeyEnv string `yaml:"api_key_env"`
+}
+
+// AuthMode returns the configured upstream authentication mode while retaining
+// API keys as the backward-compatible default.
+func (p ProviderConfig) AuthMode() ProviderAuthMode {
+	if p.Auth == "" {
+		return ProviderAuthAPIKey
+	}
+	return ProviderAuthMode(p.Auth)
 }
 
 // ModelConfig describes one configured provider model. InputPrice and
@@ -154,15 +186,36 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 
 	requireEnv("client authentication", cfg.ClientAuth.TokenEnv)
+	clientAuthHeader := cfg.ClientAuth.HeaderName()
+	if !validHeaderFieldName(clientAuthHeader) {
+		errs = append(errs, errors.New("invalid client authentication header"))
+	}
 	if cfg.ClientAuth.MaxBodyBytes < 0 {
 		errs = append(errs, errors.New("maximum body bytes must not be negative"))
 	}
 	requireEnv("Jev", cfg.Jev.APIKeyEnv)
 
 	providerIDs := make(map[string]struct{}, len(cfg.Providers))
+	chatGPTOAuthConfigured := false
 	for _, provider := range cfg.Providers {
 		providerIDs[provider.ID] = struct{}{}
-		requireEnv("provider "+provider.ID, provider.APIKeyEnv)
+		switch provider.AuthMode() {
+		case ProviderAuthAPIKey:
+			requireEnv("provider "+provider.ID, provider.APIKeyEnv)
+		case ProviderAuthChatGPTOAuthPassthrough:
+			chatGPTOAuthConfigured = true
+			if provider.ID != "openai" {
+				errs = append(errs, fmt.Errorf("ChatGPT OAuth passthrough is only supported for openai provider: %s", provider.ID))
+			}
+			if provider.APIKeyEnv != "" {
+				errs = append(errs, fmt.Errorf("provider %s must not configure api_key_env with ChatGPT OAuth passthrough", provider.ID))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("unknown provider authentication mode for %s: %s", provider.ID, provider.Auth))
+		}
+	}
+	if chatGPTOAuthConfigured && (strings.EqualFold(clientAuthHeader, "Authorization") || strings.EqualFold(clientAuthHeader, "ChatGPT-Account-Id")) {
+		errs = append(errs, fmt.Errorf("client authentication header %s conflicts with ChatGPT OAuth", clientAuthHeader))
 	}
 
 	for keyID, envName := range cfg.Encryption.Keys {
@@ -319,6 +372,21 @@ func nonnegativeFinite(value float64) bool {
 
 func probability(value float64) bool {
 	return nonnegativeFinite(value) && value <= 1
+}
+
+func validHeaderFieldName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index := range len(name) {
+		character := name[index]
+		if ('a' <= character && character <= 'z') || ('A' <= character && character <= 'Z') ||
+			('0' <= character && character <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(character)) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func tierRank(tier string) (int, bool) {
