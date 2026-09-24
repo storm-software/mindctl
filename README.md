@@ -74,6 +74,21 @@
 
 The following installation methods are available for setting up Mindctl:
 
+## npm
+
+Install the native CLI through npm:
+
+```sh
+npm install --global mindctl
+mindctl version
+
+npx mindctl version
+```
+
+The npm package includes the supported Linux, macOS, and Windows native
+binaries. Gateway mode still requires a runtime configuration file and the
+required environment variables.
+
 ## Native binary
 
 Download the archive for your platform from the GitHub Release, verify it
