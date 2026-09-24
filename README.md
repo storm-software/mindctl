@@ -203,7 +203,14 @@ When the file exists, only the models listed in it are available:
 ```yaml
 providers:
   openai:
-    - gpt-5
+    - gpt-6-astra
+    - gpt-6-sol
+    - gpt-6-luna
+    - gpt-5.6-sol
+    - gpt-5.6-terra
+    - gpt-5.6-luna
+    - gpt-5.3-codex
+    - gpt-5.3-codex-spark
   deepseek:
     - deepseek-flash
 ```
@@ -215,7 +222,7 @@ the gateway after restart.
 ```sh
 mindctl model list
 mindctl model list --all
-mindctl model enable openai.gpt-5
+mindctl model enable openai.gpt-6-astra
 mindctl model disable openai
 
 mindctl provider list
@@ -320,7 +327,11 @@ provider. Codex owns OAuth login and token refresh; Mindctl forwards the
 request-scoped credential only to the configured ChatGPT Codex endpoint.
 
 Available models, workspace access, rate limits, and usage limits remain
-subject to the selected ChatGPT account and subscription.
+subject to the selected ChatGPT account and subscription. The shipped
+ChatGPT Pro catalog includes `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`,
+`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.3-codex`, and the
+Pro-only research preview `gpt-5.3-codex-spark`. GPT-6 model access is
+currently rolling out and may not yet appear for every Pro account.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />

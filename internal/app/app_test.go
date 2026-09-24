@@ -177,9 +177,9 @@ func TestConfiguredProvidersUsesMetaResponsesEndpoint(t *testing.T) {
 	defer server.Close()
 
 	providers, err := configuredProviders([]config.ProviderConfig{{
-		ID: "meta", BaseURL: server.URL, APIKeyEnv: "META_API_KEY",
+		ID: "meta", BaseURL: server.URL, APIKeyEnv: "MUSE_API_KEY",
 	}}, func(name string) (string, bool) {
-		return "meta-token", name == "META_API_KEY"
+		return "meta-token", name == "MUSE_API_KEY"
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

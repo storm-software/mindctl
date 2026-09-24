@@ -58,67 +58,214 @@ providers:
   #   base_url: https://api.openai.com
   #   auth: api_key
   #   api_key_env: OPENAI_API_KEY
-  # DeepSeek's OpenAI-compatible Responses API. Uncomment this provider and
-  # its models below to route through DeepSeek using a separately managed key.
-  # - id: deepseek
-  #   base_url: https://api.deepseek.com
-  #   auth: api_key
-  #   api_key_env: DEEPSEEK_API_TOKEN
-  # Meta Model API exposes an OpenAI-compatible Responses API. Add only models
-  # enabled for your Meta project to the catalog below.
-  # - id: meta
-  #   base_url: https://api.meta.ai/v1
-  #   auth: api_key
-  #   api_key_env: META_API_KEY
+  # DeepSeek's OpenAI-compatible API. V4 Flash and Pro provide both Thinking
+  # and Non-Thinking modes; set DEEPSEEK_API_TOKEN before starting Mindctl.
+  - id: deepseek
+    base_url: https://api.deepseek.com
+    auth: api_key
+    api_key_env: DEEPSEEK_API_TOKEN
+  # Meta Model API exposes an OpenAI-compatible Responses API.
+  - id: meta
+    base_url: https://api.meta.ai/v1
+    auth: api_key
+    api_key_env: MUSE_API_KEY
 
 models:
-  - id: gpt-5
+  # ChatGPT Pro default catalog. GPT-6 availability may still be rolling out
+  # for an individual ChatGPT account. The portable capabilities below cover
+  # documented Responses support Mindctl can forward: image input, custom
+  # tools, structured output, and web search (not hosted shell or computer
+  # use, which Mindctl does not yet encode). Prices are USD per million tokens
+  # for comparable API usage; ChatGPT subscription usage follows its own limits.
+  - id: gpt-6-astra
     provider: openai
-    tier: T4
-    capabilities: [chat, tools]
+    tier: T6
+    capabilities: [chat, tools, images, json_schema, web_search]
     context_window: 128000
     # Positive output reservations require this configured capacity.
     max_output_tokens: 16384
     available: true
     # input_price and output_price are USD per million tokens.
-    input_price: 0
-    cached_input_price_usd_per_million: 0
-    output_price: 0
+    input_price: 10
+    cached_input_price_usd_per_million: 1
+    output_price: 50
     per_request_price_usd: 0
     # Zero means no P95 latency prior is configured.
     latency_p95: 0s
     success_prior: 1
     task_success_priors: {}
 
-  # DeepSeek currently publishes peak and off-peak prices. These conservative
-  # peak USD-per-million-token figures avoid underestimating route cost; cache
-  # hit input is stored separately. Uncomment with the deepseek provider above.
-  # - id: deepseek-flash
-  #   provider: deepseek
-  #   tier: T3
-  #   capabilities: [chat, tools, images, json_schema]
-  #   context_window: 1000000
-  #   max_output_tokens: 384000
-  #   available: true
-  #   input_price: 0.30
-  #   cached_input_price_usd_per_million: 0.006
-  #   output_price: 1.20
-  #   per_request_price_usd: 0
-  #   latency_p95: 0s
-  #   success_prior: 1
-  #   task_success_priors: {}
+  - id: gpt-6-sol
+    provider: openai
+    tier: T5
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 2
+    cached_input_price_usd_per_million: 0.2
+    output_price: 10
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
 
-  # - id: deepseek-v4-pro
-  #   provider: deepseek
-  #   tier: T5
-  #   capabilities: [chat, tools, json_schema]
-  #   context_window: 1000000
-  #   max_output_tokens: 384000
-  #   available: true
-  #   input_price: 1.32
-  #   cached_input_price_usd_per_million: 0.044
-  #   output_price: 3.96
-  #   per_request_price_usd: 0
-  #   latency_p95: 0s
-  #   success_prior: 1
-  #   task_success_priors: {}
+  - id: gpt-6-luna
+    provider: openai
+    tier: T3
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 0.1
+    cached_input_price_usd_per_million: 0.01
+    output_price: 0.5
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gpt-5.6-sol
+    provider: openai
+    tier: T5
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 4
+    cached_input_price_usd_per_million: 0.4
+    output_price: 20
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gpt-5.6-terra
+    provider: openai
+    tier: T4
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 2
+    cached_input_price_usd_per_million: 0.2
+    output_price: 12
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gpt-5.6-luna
+    provider: openai
+    tier: T2
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 0.2
+    cached_input_price_usd_per_million: 0.02
+    output_price: 1.2
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gpt-5.3-codex
+    provider: openai
+    tier: T4
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 3.5
+    cached_input_price_usd_per_million: 0.35
+    output_price: 28
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors:
+      coding: 1
+
+  # Pro-only research preview. It has no normal API price, so all price
+  # values remain zero while Codex subscription limits govern its usage.
+  - id: gpt-5.3-codex-spark
+    provider: openai
+    tier: T4
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 128000
+    max_output_tokens: 16384
+    available: true
+    input_price: 0
+    cached_input_price_usd_per_million: 0
+    output_price: 0
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors:
+      coding: 1
+
+  # Muse Spark models support the configured portable multimodal and agentic
+  # capabilities. Prices are USD per million tokens.
+  - id: muse-spark-1.3
+    provider: meta
+    tier: T4
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1048576
+    max_output_tokens: 131072
+    available: true
+    input_price: 1.25
+    cached_input_price_usd_per_million: 0.15
+    output_price: 4.25
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: muse-spark-1.3-contributor
+    provider: meta
+    tier: T4
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1048576
+    max_output_tokens: 131072
+    available: true
+    input_price: 0.10
+    cached_input_price_usd_per_million: 0.002
+    output_price: 0.20
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  # DeepSeek V4 Preview has a 1M-token context window and 384K-token maximum
+  # output. Prices are the published USD-per-million-token API rates; cached
+  # input is billed independently of cache-miss input. DeepSeek retired the
+  # deepseek-chat and deepseek-reasoner aliases on 2026-07-24.
+  - id: deepseek-v4-flash
+    provider: deepseek
+    tier: T3
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1000000
+    max_output_tokens: 384000
+    available: true
+    input_price: 0.14
+    cached_input_price_usd_per_million: 0.028
+    output_price: 0.28
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: deepseek-v4-pro
+    provider: deepseek
+    tier: T5
+    capabilities: [chat, tools, json_schema]
+    context_window: 1000000
+    max_output_tokens: 384000
+    available: true
+    input_price: 1.74
+    cached_input_price_usd_per_million: 0.145
+    output_price: 3.48
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}

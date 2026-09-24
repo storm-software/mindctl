@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,132 @@ func TestShippedExampleReachesSecretValidation(t *testing.T) {
 	_, err := Load("../../config.example.yaml", func(string) (string, bool) { return "", false })
 	if err == nil || !strings.Contains(err.Error(), "MINDCTL_GATEWAY_TOKEN") {
 		t.Fatalf("shipped example did not reach runtime secret validation: %v", err)
+	}
+}
+
+func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
+	cfg, err := Read("../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("Read shipped example: %v", err)
+	}
+
+	wantPrices := map[string]struct {
+		input, cachedInput, output float64
+		capabilities               []string
+	}{
+		"gpt-6-astra":         {input: 10, cachedInput: 1, output: 50, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-6-sol":           {input: 2, cachedInput: .2, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-6-luna":          {input: .1, cachedInput: .01, output: .5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-5.6-terra":       {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-5.6-luna":        {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-5.3-codex":       {input: 3.5, cachedInput: .35, output: 28, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-5.3-codex-spark": {input: 0, cachedInput: 0, output: 0, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+	}
+	wantModelCount := len(wantPrices)
+	matchedModels := 0
+	for _, model := range cfg.Models {
+		want, ok := wantPrices[model.ID]
+		if !ok {
+			continue
+		}
+		matchedModels++
+		delete(wantPrices, model.ID)
+		if model.Provider != "openai" || !model.Available {
+			t.Errorf("model %s provider/available = %q/%t, want openai/true", model.ID, model.Provider, model.Available)
+		}
+		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
+			t.Errorf("model %s prices = input %g cached %g output %g, want input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice, want.input, want.cachedInput, want.output)
+		}
+		if !slices.Equal(model.Capabilities, want.capabilities) {
+			t.Errorf("model %s capabilities = %v, want %v", model.ID, model.Capabilities, want.capabilities)
+		}
+	}
+	if matchedModels != wantModelCount {
+		t.Fatalf("shipped OpenAI model count = %d, want %d", matchedModels, wantModelCount)
+	}
+	for modelID := range wantPrices {
+		t.Errorf("missing shipped model %q", modelID)
+	}
+}
+
+func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
+	cfg, err := Read("../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("Read shipped example: %v", err)
+	}
+
+	wantPrices := map[string]struct {
+		input, cachedInput, output float64
+	}{
+		"muse-spark-1.3":             {input: 1.25, cachedInput: .15, output: 4.25},
+		"muse-spark-1.3-contributor": {input: .1, cachedInput: .002, output: .2},
+	}
+	for _, model := range cfg.Models {
+		want, ok := wantPrices[model.ID]
+		if !ok {
+			continue
+		}
+		delete(wantPrices, model.ID)
+		if model.Provider != "meta" || !model.Available {
+			t.Errorf("model %s provider/available = %q/%t, want meta/true", model.ID, model.Provider, model.Available)
+		}
+		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
+			t.Errorf("model %s prices = input %g cached %g output %g, want input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice, want.input, want.cachedInput, want.output)
+		}
+	}
+	for modelID := range wantPrices {
+		t.Errorf("missing shipped Meta model %q", modelID)
+	}
+}
+
+func TestShippedExampleIncludesEnabledDeepSeekV4ModelCatalog(t *testing.T) {
+	cfg, err := Read("../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("Read shipped example: %v", err)
+	}
+
+	providers := make(map[string]ProviderConfig, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		providers[provider.ID] = provider
+	}
+	deepSeek, ok := providers["deepseek"]
+	if !ok {
+		t.Fatal("shipped example does not enable the DeepSeek provider")
+	}
+	if deepSeek.BaseURL != "https://api.deepseek.com" || deepSeek.AuthMode() != ProviderAuthAPIKey || deepSeek.APIKeyEnv != "DEEPSEEK_API_TOKEN" {
+		t.Errorf("DeepSeek provider = %#v, want api-key provider at https://api.deepseek.com using DEEPSEEK_API_TOKEN", deepSeek)
+	}
+
+	wantModels := map[string]struct {
+		tier                       string
+		input, cachedInput, output float64
+		capabilities               []string
+	}{
+		"deepseek-v4-flash": {tier: "T3", input: .14, cachedInput: .028, output: .28, capabilities: []string{"chat", "tools", "images", "json_schema"}},
+		"deepseek-v4-pro":   {tier: "T5", input: 1.74, cachedInput: .145, output: 3.48, capabilities: []string{"chat", "tools", "json_schema"}},
+	}
+	for _, model := range cfg.Models {
+		want, ok := wantModels[model.ID]
+		if !ok {
+			continue
+		}
+		delete(wantModels, model.ID)
+		if model.Provider != "deepseek" || model.Tier != want.tier || !model.Available {
+			t.Errorf("model %s provider/tier/available = %q/%q/%t, want deepseek/%s/true", model.ID, model.Provider, model.Tier, model.Available, want.tier)
+		}
+		if model.ContextWindow != 1_000_000 || model.MaxOutputTokens != 384_000 {
+			t.Errorf("model %s context/output = %d/%d, want 1000000/384000", model.ID, model.ContextWindow, model.MaxOutputTokens)
+		}
+		if !slices.Equal(model.Capabilities, want.capabilities) {
+			t.Errorf("model %s capabilities = %v, want %v", model.ID, model.Capabilities, want.capabilities)
+		}
+		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
+			t.Errorf("model %s prices = input %g cached %g output %g, want input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice, want.input, want.cachedInput, want.output)
+		}
+	}
+	for modelID := range wantModels {
+		t.Errorf("missing shipped DeepSeek model %q", modelID)
 	}
 }
 
