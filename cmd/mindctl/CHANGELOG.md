@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.11](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.11) (09/24/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue triggering CLI release ([29aff7c](https://github.com/storm-software/mindctl/commit/29aff7c))
+
 ## [0.1.10](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.10) (09/24/2026)
 
 ### Bug Fixes
