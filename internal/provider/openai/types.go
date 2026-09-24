@@ -48,13 +48,13 @@ type responseAccessPrograms struct {
 type responseTool struct {
 	Type              string              `json:"type"`
 	Name              string              `json:"name,omitempty"`
-	Description       string              `json:"description,omitempty"`
+	Description       *string             `json:"description,omitempty"`
 	Parameters        json.RawMessage     `json:"parameters,omitempty"`
 	Format            *responseToolFormat `json:"format,omitempty"`
 	DeferLoading      *bool               `json:"defer_loading,omitempty"`
 	ExternalWebAccess *bool               `json:"external_web_access,omitempty"`
 	Tools             []responseTool      `json:"tools,omitempty"`
-	Strict            bool                `json:"strict,omitempty"`
+	Strict            *bool               `json:"strict,omitempty"`
 }
 
 type responseToolFormat struct {
@@ -201,7 +201,14 @@ func toResponseInput(item inference.Item) responseInputItem {
 		if len(item.Content) != 0 {
 			content := make([]responseContent, 0, len(item.Content))
 			for _, part := range item.Content {
-				content = append(content, responseContent{Type: part.Type, Text: part.Text, ImageURL: append(json.RawMessage(nil), part.ImageURL...)})
+				encoded := responseContent{Type: part.Type}
+				switch part.Type {
+				case "input_text", "output_text":
+					encoded.Text = part.Text
+				case "input_image":
+					encoded.ImageURL = append(json.RawMessage(nil), part.ImageURL...)
+				}
+				content = append(content, encoded)
 			}
 			return responseInputItem{ID: item.ID, Type: item.Type, Role: item.Role, Content: content}
 		}
@@ -228,18 +235,29 @@ func toResponseInput(item inference.Item) responseInputItem {
 }
 
 func encodeTool(tool inference.Tool) responseTool {
-	encoded := responseTool{
-		Type: tool.Type, Name: tool.Name, Description: tool.Description,
-		Parameters: tool.Parameters, DeferLoading: cloneBoolPointer(tool.DeferLoading), ExternalWebAccess: cloneBoolPointer(tool.ExternalWebAccess), Strict: tool.Strict,
-	}
-	if tool.Format != nil {
-		encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
-	}
-	for _, nested := range tool.Tools {
-		encoded.Tools = append(encoded.Tools, encodeTool(nested))
+	encoded := responseTool{Type: tool.Type, Name: tool.Name}
+	switch tool.Type {
+	case "function":
+		encoded.Description = stringPointer(tool.Description)
+		encoded.Parameters = tool.Parameters
+		encoded.Strict = boolPointer(tool.Strict)
+	case "custom":
+		encoded.Description = stringPointer(tool.Description)
+		if tool.Format != nil {
+			encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
+		}
+	case "namespace":
+		encoded.Description = stringPointer(tool.Description)
+		for _, nested := range tool.Tools {
+			encoded.Tools = append(encoded.Tools, encodeTool(nested))
+		}
+	case "web_search":
+		encoded.ExternalWebAccess = cloneBoolPointer(tool.ExternalWebAccess)
 	}
 	return encoded
 }
+
+func stringPointer(value string) *string { return &value }
 
 func validateCapabilities(model domain.Model, request inference.Request) error {
 	for _, item := range request.Input {

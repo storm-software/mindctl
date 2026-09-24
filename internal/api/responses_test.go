@@ -34,6 +34,13 @@ func TestResponsesHandlerReturnsActualModelAndRoutingHeaders(t *testing.T) {
 	}
 }
 
+func TestResponsesUsageIncludesTotalTokens(t *testing.T) {
+	usage := usageBody(inference.Usage{InputTokens: 7, OutputTokens: 5, CachedInputTokens: 2, Known: true})
+	if usage == nil || usage.InputTokens != 7 || usage.OutputTokens != 5 || usage.TotalTokens != 12 || usage.InputTokensDetails.CachedTokens != 2 {
+		t.Fatalf("usage=%+v", usage)
+	}
+}
+
 func TestResponsesHandlerReturnsNonStreamingCustomToolCall(t *testing.T) {
 	handler := testResponsesHandler(executor.Output{Result: inference.Result{
 		ID: "resp_gateway", Model: "gpt-test", Status: "completed",

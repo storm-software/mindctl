@@ -194,12 +194,58 @@ func TestOpenAIPreservesMultipartMessageContent(t *testing.T) {
 	input := toResponseInput(inference.Item{
 		ID: "msg_1", Type: "message", Role: "user", Text: "combined",
 		Content: []inference.ContentPart{
-			{Type: "input_text", Text: "first"},
+			{Type: "input_text", Text: "first", ImageURL: json.RawMessage("null")},
 			{Type: "input_text", Text: "second"},
 		},
 	})
 	if input.ID != "msg_1" || len(input.Content) != 2 || input.Content[0].Text != "first" || input.Content[1].Text != "second" {
 		t.Fatalf("input=%+v", input)
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	content := wire["content"].([]any)
+	if _, present := content[0].(map[string]any)["image_url"]; present {
+		t.Fatalf("content=%v", content[0])
+	}
+}
+
+func TestOpenAIPreservesEmptyDescriptionForNestedCodexTools(t *testing.T) {
+	request := inference.Request{
+		Model: "gateway-model",
+		Input: []inference.Item{{
+			ID: "tools_1", Type: "additional_tools", Role: "developer",
+			Tools: []inference.Tool{{
+				Type: "namespace", Name: "functions", Description: "", Parameters: json.RawMessage("null"),
+				Tools: []inference.Tool{{Type: "function", Name: "read"}},
+			}},
+		}},
+	}
+	body, err := toResponsesRequest(openAIModel(), request, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	input := wire["input"].([]any)
+	tools := input[0].(map[string]any)["tools"].([]any)
+	namespace := tools[0].(map[string]any)
+	if description, present := namespace["description"]; !present || description != "" {
+		t.Fatalf("tool=%v", tools[0])
+	}
+	if _, present := namespace["parameters"]; present {
+		t.Fatalf("tool=%v", tools[0])
 	}
 }
 

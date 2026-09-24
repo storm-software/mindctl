@@ -181,6 +181,7 @@ type responseContent struct {
 type responseUsage struct {
 	InputTokens        int64               `json:"input_tokens"`
 	OutputTokens       int64               `json:"output_tokens"`
+	TotalTokens        int64               `json:"total_tokens"`
 	InputTokensDetails responseUsageDetail `json:"input_tokens_details"`
 }
 
@@ -201,7 +202,7 @@ func responseFromResult(result inference.Result) responseBody {
 		}
 	}
 	if result.Usage.Known {
-		body.Usage = &responseUsage{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens, InputTokensDetails: responseUsageDetail{CachedTokens: result.Usage.CachedInputTokens}}
+		body.Usage = &responseUsage{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens, TotalTokens: result.Usage.InputTokens + result.Usage.OutputTokens, InputTokensDetails: responseUsageDetail{CachedTokens: result.Usage.CachedInputTokens}}
 	}
 	return body
 }
@@ -344,7 +345,7 @@ func usageBody(usage inference.Usage) *responseUsage {
 	if !usage.Known {
 		return nil
 	}
-	return &responseUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, InputTokensDetails: responseUsageDetail{CachedTokens: usage.CachedInputTokens}}
+	return &responseUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.InputTokens + usage.OutputTokens, InputTokensDetails: responseUsageDetail{CachedTokens: usage.CachedInputTokens}}
 }
 
 func setRoutingHeaders(w http.ResponseWriter, metadata executor.StreamMetadata) {
