@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -68,6 +69,7 @@ func normalizeLegacyConfigFlag(args []string) []string {
 
 func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Command {
 	settings := viper.New()
+	var debug bool
 	root := &cobra.Command{
 		Use:           "mindctl",
 		Short:         "Run the Mindctl gateway",
@@ -83,12 +85,19 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 			if err := settings.ReadInConfig(); err != nil {
 				return fmt.Errorf("read config: %w", err)
 			}
-			return runGateway(ctx, settings.ConfigFileUsed(), stderr)
+			return runGateway(
+				ctx,
+				settings.ConfigFileUsed(),
+				stderr,
+				command.Flags().Changed("debug"),
+				debug,
+			)
 		},
 	}
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.PersistentFlags().String("config", "config.example.yaml", "gateway YAML configuration")
+	root.PersistentFlags().BoolVar(&debug, "debug", false, "write detailed router traces to the user cache directory")
 	if err := settings.BindPFlag("config", root.PersistentFlags().Lookup("config")); err != nil {
 		panic(fmt.Sprintf("bind config flag: %v", err))
 	}
@@ -749,8 +758,12 @@ func noArgs(message string) cobra.PositionalArgs {
 	}
 }
 
-func runGateway(ctx context.Context, path string, stderr io.Writer) (err error) {
+func runGateway(ctx context.Context, path string, stderr io.Writer, debugChanged, debugFlag bool) (err error) {
 	cfg, err := loadGatewayConfig(path)
+	if err != nil {
+		return err
+	}
+	cfg.Debug, err = resolveDebug(cfg.Debug, debugChanged, debugFlag, os.LookupEnv)
 	if err != nil {
 		return err
 	}
@@ -781,6 +794,26 @@ func runGateway(ctx context.Context, path string, stderr io.Writer) (err error) 
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
 	return serve(ctx, server, listener, 5*time.Second)
+}
+
+func resolveDebug(
+	configured bool,
+	flagChanged bool,
+	flagValue bool,
+	getenv func(string) (string, bool),
+) (bool, error) {
+	if flagChanged {
+		return flagValue, nil
+	}
+	value, exists := getenv("MINDCTL_DEBUG")
+	if !exists {
+		return configured, nil
+	}
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("parse MINDCTL_DEBUG: %w", err)
+	}
+	return enabled, nil
 }
 
 func loadGatewayConfig(path string) (config.Config, error) {

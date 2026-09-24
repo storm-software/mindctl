@@ -52,8 +52,10 @@
   - [Go Install](#go-install)
   - [From source](#from-source)
 - [Configuration](#configuration)
+  - [Debug router traces](#debug-router-traces)
   - [Model and provider availability](#model-and-provider-availability)
   - [Laya system 1 sidecar](#laya-system-1-sidecar)
+- [Command Line Interface](#command-line-interface)
 - [Development](#development)
   - [Build](#build)
   - [Development Server](#development-server)
@@ -162,7 +164,19 @@ Container deployments should continue to mount the configuration explicitly at
 `/etc/mindctl/config.yaml`, as shown above; the image command supplies that
 path through its configuration flag.
 
-### Model and provider availability
+## Debug router traces
+
+Set top-level `debug: true`, export `MINDCTL_DEBUG=true`, or start the gateway
+with `--debug` to write detailed JSONL traces to
+`${XDG_CACHE_HOME:-$HOME/.cache}/mindctl/logs`. An explicit
+`--debug=true|false` overrides `MINDCTL_DEBUG`, which overrides the YAML value.
+Each gateway process creates a private trace file containing request IDs,
+derived feature counts, classifier signals, policy candidates and rejections,
+selected routes, provider attempts, and stream retries. Trace files exclude
+prompt and response content, credentials, request headers, and raw provider
+errors.
+
+## Model and provider availability
 
 Mindctl can keep the routable model allow-list separate from the gateway
 catalog. The gateway reads
@@ -226,6 +240,10 @@ an absolute HTTPS endpoint instead. It must implement the documented
 `mindctl.classifier.v1` bearer-authenticated `/v1/classify` contract; Mindctl
 continues to make deterministic routing decisions and falls back safely when
 the endpoint is unavailable.
+
+# Command Line Interface
+
+The Mindctl command line interface provides several commands to manage the application, its configuration, models, and providers. A complete list of available commands can be found in the [CLI documentation](docs/cli/mindctl.md).
 
 # Development
 

@@ -127,6 +127,39 @@ func TestRunPrefersExplicitConfigOverXDGConfig(t *testing.T) {
 	}
 }
 
+func TestResolveDebugUsesFlagThenEnvironmentThenConfig(t *testing.T) {
+	tests := []struct {
+		name                  string
+		config, changed, flag bool
+		environment           string
+		environmentExists     bool
+		want                  bool
+	}{
+		{name: "config", config: true, want: true},
+		{name: "environment enables", environment: "true", environmentExists: true, want: true},
+		{name: "environment disables config", config: true, environment: "false", environmentExists: true, want: false},
+		{name: "flag enables", changed: true, flag: true, environment: "false", environmentExists: true, want: true},
+		{name: "flag disables", config: true, changed: true, flag: false, environment: "true", environmentExists: true, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := resolveDebug(test.config, test.changed, test.flag, func(string) (string, bool) {
+				return test.environment, test.environmentExists
+			})
+			if err != nil || got != test.want {
+				t.Fatalf("resolveDebug() = %v, %v; want %v, nil", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveDebugRejectsInvalidEnvironmentValue(t *testing.T) {
+	_, err := resolveDebug(false, false, false, func(string) (string, bool) { return "sometimes", true })
+	if err == nil || !strings.Contains(err.Error(), "MINDCTL_DEBUG") {
+		t.Fatalf("resolveDebug error = %v", err)
+	}
+}
+
 func TestLoadGatewayConfigCachesProvidersFileAvailability(t *testing.T) {
 	path := mainConfig(t)
 	cfg, err := config.Read(path)
@@ -497,7 +530,7 @@ func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
 	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
-	for _, want := range []string{"version", "--config"} {
+	for _, want := range []string{"version", "--config", "--debug"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
 		}

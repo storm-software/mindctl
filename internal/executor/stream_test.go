@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/storm-software/mindctl/internal/contentcrypto"
@@ -22,6 +24,44 @@ func TestStreamRetriesBeforeFirstVisibleEvent(t *testing.T) {
 	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
 	if err != nil || deps.writer.text() != "ok" || deps.provider.calls != 2 || deps.conversations.failCalls != 1 {
 		t.Fatalf("text=%q calls=%d failed=%d err=%v", deps.writer.text(), deps.provider.calls, deps.conversations.failCalls, err)
+	}
+}
+
+func TestStreamWritesRetryAndCompletionDebugTrace(t *testing.T) {
+	deps := newStreamDependencies(failingStream(), successfulStream("RESPONSE-SECRET-a31f"))
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	deps.executor = NewWithLogger(
+		&fakeClassifier{Judgment: domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: 1}},
+		router.NewPolicy(router.PolicyConfig{}),
+		provider.NewRegistry(map[string]provider.Provider{"openai": deps.provider}),
+		deps.conversations,
+		logger,
+	)
+	input := deps.input()
+	input.Request.Input[0].Text = "PROMPT-SECRET-7b92"
+
+	if err := deps.executor.Stream(context.Background(), input, deps.writer); err != nil {
+		t.Fatal(err)
+	}
+	trace := logs.String()
+	for _, want := range []string{
+		`"msg":"route.started"`,
+		`"stream":true`,
+		`"msg":"route.stream.candidates"`,
+		`"msg":"route.attempt.failed"`,
+		`"msg":"route.stream.retry"`,
+		`"msg":"route.attempt.completed"`,
+		`"attempt_number":2`,
+	} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("debug trace missing %s:\n%s", want, trace)
+		}
+	}
+	for _, secret := range []string{"PROMPT-SECRET-7b92", "RESPONSE-SECRET-a31f"} {
+		if strings.Contains(trace, secret) {
+			t.Errorf("debug trace leaked %q:\n%s", secret, trace)
+		}
 	}
 }
 

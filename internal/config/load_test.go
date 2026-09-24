@@ -91,6 +91,23 @@ func TestReadDecodesCatalogWithoutResolvingSecrets(t *testing.T) {
 	}
 }
 
+func TestReadDecodesDebugSetting(t *testing.T) {
+	cfg := validConfig()
+	cfg.Debug = true
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Read(writeConfig(t, string(body)))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !loaded.Debug {
+		t.Fatal("debug setting was not decoded")
+	}
+}
+
 func TestValidateCatalogRejectsBrokenIdentitiesWithoutResolvingSecrets(t *testing.T) {
 	cfg := Config{
 		Providers: []ProviderConfig{{ID: "duplicate"}, {ID: "duplicate"}},

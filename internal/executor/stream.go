@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -50,6 +51,11 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		return err
 	}
 	decisions := s.streamCandidates(in, decision)
+	s.trace("route.stream.candidates",
+		"response_id", turn.ResponseID,
+		"count", len(decisions),
+		"candidates", slog.AnyValue(decisions),
+	)
 	explicitAlternativesExpanded := false
 	scheduled := make(map[string]struct{}, len(decisions))
 	for _, candidate := range decisions {
@@ -73,6 +79,15 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		if err != nil {
 			return err
 		}
+		s.trace("route.attempt.started",
+			"response_id", turn.ResponseID,
+			"attempt_id", attempt.ID,
+			"attempt_number", index+1,
+			"provider", candidate.Provider,
+			"model", candidate.ModelID,
+			"tier", candidate.Tier.String(),
+			"stream", true,
+		)
 		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
 			return s.failStreamAttempt(ctx, attempt, "", err)
 		}
@@ -104,15 +119,39 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 					if writeErr := writer.WriteEvent(ctx, completion); writeErr != nil {
 						return writeErr
 					}
+					s.trace("route.attempt.completed",
+						"response_id", turn.ResponseID,
+						"attempt_id", attempt.ID,
+						"attempt_number", index+1,
+						"provider_request_id", result.ProviderRequestID,
+						"status", result.Status,
+						"input_tokens", result.Usage.InputTokens,
+						"cached_input_tokens", result.Usage.CachedInputTokens,
+						"output_tokens", result.Usage.OutputTokens,
+						"stream", true,
+					)
 					return nil
 				}
 			}
 		}
 
 		lastErr = err
-		if failErr := s.failStreamAttempt(ctx, attempt, result.ProviderRequestID, err); failErr != nil {
+		observedProviderRequestID := result.ProviderRequestID
+		if observedProviderRequestID == "" {
+			observedProviderRequestID = providerRequestID(err)
+		}
+		if failErr := s.failStreamAttempt(ctx, attempt, observedProviderRequestID, err); failErr != nil {
 			lastErr = errors.Join(lastErr, failErr)
 		}
+		s.trace("route.attempt.failed",
+			"response_id", turn.ResponseID,
+			"attempt_id", attempt.ID,
+			"attempt_number", index+1,
+			"provider_request_id", observedProviderRequestID,
+			"error_kind", errorKind(err),
+			"visible_output", emitted,
+			"stream", true,
+		)
 		if emitted {
 			persistCtx, cancel := persistenceContext(ctx)
 			floorErr := s.conversations.RaiseFloor(persistCtx, turn, nextTier(candidate.Tier))
@@ -142,12 +181,22 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 				decisions = append(decisions, candidate)
 			}
 			if index < len(decisions)-1 {
+				s.trace("route.stream.retry",
+					"response_id", turn.ResponseID,
+					"completed_attempts", index+1,
+					"remaining_candidates", len(decisions)-index-1,
+				)
 				continue
 			}
 		}
 		if !retryableStreamError(err) || index == len(decisions)-1 {
 			return lastErr
 		}
+		s.trace("route.stream.retry",
+			"response_id", turn.ResponseID,
+			"completed_attempts", index+1,
+			"remaining_candidates", len(decisions)-index-1,
+		)
 	}
 	if lastErr == nil {
 		lastErr = errors.New("executor: no stream candidate")
@@ -160,7 +209,15 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 	if err != nil {
 		return conversation.Turn{}, router.Decision{}, err
 	}
+	s.trace("route.started",
+		"client_id", in.ClientID,
+		"response_id", turn.ResponseID,
+		"conversation_id", turn.ConversationID,
+		"requested_model", in.Request.Model,
+		"stream", true,
+	)
 	features := normalizedFeatures(in.Features, in.Request, turn)
+	s.traceFeatures(turn.ResponseID, features)
 	decisionInput := router.DecisionInput{
 		Features: features, Models: in.Models, MinTier: in.MinTier, MaxTier: in.MaxTier,
 		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: providerAvailability(in.Models, in.ProviderAvailability, s.providers),
@@ -169,22 +226,27 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 		decisionInput.ModelID, decisionInput.Floor = in.Request.Model, turn.Floor
 		decision, err := s.policy.Decide(decisionInput)
 		if err != nil {
+			s.traceDecision(turn.ResponseID, decision, false)
 			return conversation.Turn{}, router.Decision{}, explicitError(in.Request.Model, decision, err)
 		}
+		s.traceDecision(turn.ResponseID, decision, true)
 		return turn, decision, nil
 	}
 	if pin := turnPin(turn); pin != nil {
 		decisionInput.Pin, decisionInput.Floor = pin, pin.Floor
 		decision, err := s.policy.Decide(decisionInput)
 		if err == nil && decision.ModelID == pin.ModelID && decision.Provider == pin.Provider {
+			s.traceDecision(turn.ResponseID, decision, true)
 			return turn, decision, nil
 		}
 	}
 	judgment, classifyErr := s.classify(ctx, in.Request, turn, features, in.Models)
 	if classifyErr == nil {
+		s.traceClassifier(turn.ResponseID, judgment)
 		decisionInput.Judgment, decisionInput.TaskType = &judgment, judgment.TaskType
 		decisionInput.Floor = router.FloorFromJudgment(&judgment, decisionInput.Pin, fallbackTier(in.SafeFallbackTier))
 	} else {
+		s.trace("route.classifier.fallback", "response_id", turn.ResponseID, "error_kind", errorKind(classifyErr))
 		decisionInput.Floor = router.FloorFromJudgment(nil, decisionInput.Pin, fallbackTier(in.SafeFallbackTier))
 	}
 	if turn.Floor.Valid() && turn.Floor > decisionInput.Floor {
@@ -192,8 +254,10 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 	}
 	decision, err := s.policy.Decide(decisionInput)
 	if err != nil {
+		s.traceDecision(turn.ResponseID, decision, false)
 		return conversation.Turn{}, router.Decision{}, err
 	}
+	s.traceDecision(turn.ResponseID, decision, true)
 	return turn, decision, nil
 }
 

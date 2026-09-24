@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/conversation"
+	"github.com/storm-software/mindctl/internal/debugtrace"
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/executor"
 	"github.com/storm-software/mindctl/internal/provider"
@@ -43,6 +45,7 @@ type App struct {
 	handler              http.Handler
 	closeOnce            sync.Once
 	closeErr             error
+	debugTrace           *debugtrace.Trace
 }
 
 // New validates secret references again so callers need not use config.Load.
@@ -168,10 +171,28 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	if err != nil {
 		return nil, errors.New("initialize SQLite storage failed")
 	}
+	if cfg.Debug {
+		a.debugTrace, err = debugtrace.Open()
+		if err != nil {
+			a.httpClient.CloseIdleConnections()
+			_ = a.store.Close()
+			return nil, err
+		}
+	}
 	a.maintenance = newRetentionMaintenance(cfg.SQLite.Retention, cfg.SQLite.RetentionMaintenanceInterval, a.store.DeleteExpiredContent, maintenanceOptions)
 	classifierToken, _ := getenv(cfg.Classifier.TokenEnv)
 	a.classifier = laya.NewClient(cfg.Classifier, classifierToken, a.httpClient)
-	a.executor = executor.New(a.classifier, a.policy, provider.NewRegistry(providers), conversation.New(a.store))
+	var debugLogger *slog.Logger
+	if a.debugTrace != nil {
+		debugLogger = a.debugTrace.Logger()
+	}
+	a.executor = executor.NewWithLogger(
+		a.classifier,
+		a.policy,
+		provider.NewRegistry(providers),
+		conversation.New(a.store),
+		debugLogger,
+	)
 	clientToken, _ := getenv(cfg.ClientAuth.TokenEnv)
 	maxBodyBytes := cfg.ClientAuth.MaxBodyBytes
 	if maxBodyBytes == 0 {
@@ -275,6 +296,9 @@ func (a *App) Close() error {
 		}
 		a.httpClient.CloseIdleConnections()
 		a.closeErr = a.store.Close()
+		if a.debugTrace != nil {
+			a.closeErr = errors.Join(a.closeErr, a.debugTrace.Close())
+		}
 	})
 	return a.closeErr
 }

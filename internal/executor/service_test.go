@@ -1,8 +1,11 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/storm-software/mindctl/internal/classifier"
@@ -26,6 +29,47 @@ func TestExecuteUsesClassifierForUncertainAutomaticRequest(t *testing.T) {
 	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
 	if err != nil || deps.Classifier.Calls != 1 || got.Decision.Tier < domain.T4 {
 		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestExecuteWritesDetailedContentSafeDebugTrace(t *testing.T) {
+	deps := fakeDeps()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	deps.Executor = NewWithLogger(
+		deps.Classifier,
+		router.NewPolicy(router.PolicyConfig{}),
+		provider.NewRegistry(map[string]provider.Provider{"openai": deps.OpenAI, "anthropic": deps.Anthropic}),
+		deps.Conversations,
+		logger,
+	)
+	input := newAutomaticInput()
+	input.Request.Input[0].Text = "PROMPT-SECRET-7b92"
+	deps.OpenAI.Result.Output = []inference.Item{{Type: "message", Text: "RESPONSE-SECRET-a31f"}}
+
+	if _, err := deps.Executor.Execute(context.Background(), deps.input(input)); err != nil {
+		t.Fatal(err)
+	}
+	trace := logs.String()
+	for _, want := range []string{
+		`"msg":"route.started"`,
+		`"msg":"route.features"`,
+		`"msg":"route.classifier.completed"`,
+		`"msg":"route.decision"`,
+		`"msg":"route.attempt.started"`,
+		`"msg":"route.attempt.completed"`,
+		`"response_id":"resp_test"`,
+		`"model":"gpt-test"`,
+		`"candidates"`,
+	} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("debug trace missing %s:\n%s", want, trace)
+		}
+	}
+	for _, secret := range []string{"PROMPT-SECRET-7b92", "RESPONSE-SECRET-a31f"} {
+		if strings.Contains(trace, secret) {
+			t.Errorf("debug trace leaked %q:\n%s", secret, trace)
+		}
 	}
 }
 

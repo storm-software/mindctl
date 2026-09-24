@@ -27,6 +27,7 @@ const (
 
 // Config is the complete gateway configuration loaded from YAML.
 type Config struct {
+	Debug      bool             `yaml:"debug"`
 	Listen     string           `yaml:"listen"`
 	ClientAuth ClientAuthConfig `yaml:"client_auth"`
 	Classifier ClassifierConfig `yaml:"classifier"`

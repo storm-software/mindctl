@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -87,6 +88,31 @@ func TestNewInitializesStorageKeyringAndStableHandler(t *testing.T) {
 	envelope, err = a.keyring.Encrypt([]byte("active proof"))
 	if err != nil || envelope.KeyID != "active" {
 		t.Fatalf("active encryption: %v", err)
+	}
+}
+
+func TestNewCreatesDebugTraceInUserCacheWhenEnabled(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	cfg, env := fixture(t)
+	cfg.Debug = true
+
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.debugTrace == nil {
+		t.Fatal("debug trace was not initialized")
+	}
+	path := a.debugTrace.Path()
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if filepath.Dir(path) != filepath.Join(cacheHome, "mindctl", "logs") {
+		t.Fatalf("trace path = %q", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("trace file: %v", err)
 	}
 }
 

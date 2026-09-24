@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -41,11 +42,31 @@ type Service struct {
 	policy        *router.Policy
 	providers     *provider.Registry
 	conversations conversation.Service
+	logger        *slog.Logger
 }
 
 // New composes the dependencies needed for one routed execution path.
-func New(classifier classifier.Classifier, policy *router.Policy, providers *provider.Registry, conversations conversation.Service) *Service {
-	return &Service{classifier: classifier, policy: policy, providers: providers, conversations: conversations}
+func New(
+	classifier classifier.Classifier,
+	policy *router.Policy,
+	providers *provider.Registry,
+	conversations conversation.Service,
+) *Service {
+	return NewWithLogger(classifier, policy, providers, conversations, nil)
+}
+
+// NewWithLogger composes the execution path with optional content-safe debug tracing.
+func NewWithLogger(
+	classifier classifier.Classifier,
+	policy *router.Policy,
+	providers *provider.Registry,
+	conversations conversation.Service,
+	logger *slog.Logger,
+) *Service {
+	return &Service{
+		classifier: classifier, policy: policy, providers: providers,
+		conversations: conversations, logger: logger,
+	}
 }
 
 // Output is returned only after the encrypted result and conversation pin have
@@ -73,7 +94,15 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 	if err != nil {
 		return Output{}, err
 	}
+	s.trace("route.started",
+		"client_id", in.ClientID,
+		"response_id", turn.ResponseID,
+		"conversation_id", turn.ConversationID,
+		"requested_model", in.Request.Model,
+		"stream", false,
+	)
 	features := normalizedFeatures(in.Features, in.Request, turn)
+	s.traceFeatures(turn.ResponseID, features)
 	availability := providerAvailability(in.Models, in.ProviderAvailability, s.providers)
 	decisionInput := router.DecisionInput{
 		Features: features, Models: in.Models, MinTier: in.MinTier, MaxTier: in.MaxTier,
@@ -89,6 +118,7 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 		decisionInput.Floor = turn.Floor
 		decision, err = s.policy.Decide(decisionInput)
 		if err != nil {
+			s.traceDecision(turn.ResponseID, decision, false)
 			return Output{}, explicitError(in.Request.Model, decision, err)
 		}
 	} else {
@@ -100,23 +130,28 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 			// need a classifier call.
 			decision, err = s.policy.Decide(decisionInput)
 			if err == nil && decision.ModelID == pin.ModelID && decision.Provider == pin.Provider {
+				s.traceDecision(turn.ResponseID, decision, true)
 				return s.executeDecision(ctx, in, turn, decision)
 			}
 		}
 
 		judgment, classifyErr := s.classify(ctx, in.Request, turn, features, in.Models)
 		if classifyErr == nil {
+			s.traceClassifier(turn.ResponseID, judgment)
 			decisionInput.Judgment = &judgment
 			decisionInput.Floor = router.FloorFromJudgment(&judgment, decisionInput.Pin, fallbackTier(in.SafeFallbackTier))
 			decisionInput.TaskType = judgment.TaskType
 		} else {
+			s.trace("route.classifier.fallback", "response_id", turn.ResponseID, "error_kind", errorKind(classifyErr))
 			decisionInput.Floor = router.FloorFromJudgment(nil, decisionInput.Pin, fallbackTier(in.SafeFallbackTier))
 		}
 		decision, err = s.policy.Decide(decisionInput)
 		if err != nil {
+			s.traceDecision(turn.ResponseID, decision, false)
 			return Output{}, err
 		}
 	}
+	s.traceDecision(turn.ResponseID, decision, true)
 	return s.executeDecision(ctx, in, turn, decision)
 }
 
@@ -133,6 +168,13 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	if err != nil {
 		return Output{}, err
 	}
+	s.trace("route.attempt.started",
+		"response_id", turn.ResponseID,
+		"attempt_id", attempt.ID,
+		"provider", decision.Provider,
+		"model", decision.ModelID,
+		"tier", decision.Tier.String(),
+	)
 	request := in.Request
 	request.ID = turn.ResponseID
 	request.Model = decision.ModelID
@@ -140,6 +182,12 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.Input = turn.TranscriptFor(decision.Provider)
 	result, err := adapter.Execute(ctx, model, request)
 	if err != nil {
+		s.trace("route.attempt.failed",
+			"response_id", turn.ResponseID,
+			"attempt_id", attempt.ID,
+			"provider_request_id", providerRequestID(err),
+			"error_kind", errorKind(err),
+		)
 		if failErr := s.conversations.FailAttempt(ctx, attempt, providerRequestID(err), err); failErr != nil {
 			return Output{}, errors.Join(err, failErr)
 		}
@@ -147,6 +195,12 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	}
 	if !provider.IsSuccessfulCompletion(result.Status) {
 		err := provider.UnsuccessfulCompletionError(result.ProviderRequestID)
+		s.trace("route.attempt.failed",
+			"response_id", turn.ResponseID,
+			"attempt_id", attempt.ID,
+			"provider_request_id", result.ProviderRequestID,
+			"error_kind", errorKind(err),
+		)
 		if failErr := s.conversations.FailAttempt(ctx, attempt, result.ProviderRequestID, err); failErr != nil {
 			return Output{}, errors.Join(err, failErr)
 		}
@@ -158,8 +212,18 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	result.Model = decision.ModelID
 	pin := router.Pin{ModelID: decision.ModelID, Provider: decision.Provider, Floor: decision.Tier}
 	if err := s.conversations.CommitResult(ctx, turn, pin, result); err != nil {
+		s.trace("route.attempt.failed", "response_id", turn.ResponseID, "attempt_id", attempt.ID, "error_kind", "storage")
 		return Output{}, err
 	}
+	s.trace("route.attempt.completed",
+		"response_id", turn.ResponseID,
+		"attempt_id", attempt.ID,
+		"provider_request_id", result.ProviderRequestID,
+		"status", result.Status,
+		"input_tokens", result.Usage.InputTokens,
+		"cached_input_tokens", result.Usage.CachedInputTokens,
+		"output_tokens", result.Usage.OutputTokens,
+	)
 	callerResult := result
 	callerResult.ProviderRequestID = ""
 	return Output{Result: callerResult, Decision: decision, AttemptID: attempt.ID}, nil

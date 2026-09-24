@@ -1,4 +1,5 @@
 # Environment-variable names are configuration; do not put secret values here.
+debug: false
 listen: ":8080"
 
 client_auth:
