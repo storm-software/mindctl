@@ -251,7 +251,6 @@ func encodeTool(tool inference.Tool) responseTool {
 			encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
 		}
 	case "namespace":
-		encoded.Description = stringPointer(tool.Description)
 		for _, nested := range tool.Tools {
 			encoded.Tools = append(encoded.Tools, encodeTool(nested))
 		}
