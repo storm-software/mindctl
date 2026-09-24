@@ -2,6 +2,17 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.7](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.7) (09/24/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue with duplicate `provider` commands ([4eeaf8a](https://github.com/storm-software/mindctl/commit/4eeaf8a))
+
+### Features
+
+- **mindctl:** Added `debug` mode to the Mindctl application ([254164d](https://github.com/storm-software/mindctl/commit/254164d))
+- **mindctl:** Added the `history` command and filter args ([f4e7e4d](https://github.com/storm-software/mindctl/commit/f4e7e4d))
+
 ## [0.1.6](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.6) (09/23/2026)
 
 ### Bug Fixes
