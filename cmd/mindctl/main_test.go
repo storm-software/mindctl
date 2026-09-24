@@ -473,6 +473,40 @@ func TestConfigListReadsXDGConfigWithNestedGroups(t *testing.T) {
 	}
 }
 
+func TestBareManagementCommandsList(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	configDir := filepath.Join(configHome, "mindctl")
+	if err := os.Mkdir(configDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("listen: :8080\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	catalogPath := commandCatalogConfig(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "config", args: []string{"config"}, want: "listen: :8080\n"},
+		{name: "model", args: []string{"--config", catalogPath, "model"}, want: "openai\n  gpt-alpha\ndeepseek\n  deepseek-chat\n"},
+		{name: "provider", args: []string{"--config", catalogPath, "provider"}, want: "openai\ndeepseek\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			if err := run(context.Background(), test.args, &stdout, io.Discard); err != nil {
+				t.Fatalf("run(%v): %v", test.args, err)
+			}
+			if got := stdout.String(); got != test.want {
+				t.Fatalf("run(%v) output = %q; want %q", test.args, got, test.want)
+			}
+		})
+	}
+}
+
 func TestConfigGetReadsXDGConfig(t *testing.T) {
 	configHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configHome)

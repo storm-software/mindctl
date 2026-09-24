@@ -353,6 +353,7 @@ func newModelCommand(settings *viper.Viper) *cobra.Command {
 		newModelToggleCommand(settings, "enable", true),
 		newModelToggleCommand(settings, "disable", false),
 	)
+	modelCommand.RunE = listCommand.RunE
 	return modelCommand
 }
 
@@ -406,7 +407,8 @@ func newProviderCommand(settings *viper.Viper) *cobra.Command {
 		Short: "Enable or disable all models for a provider",
 		Args:  noArgs("unexpected arguments for provider"),
 	}
-	providerCommand.AddCommand(newProviderListCommand(settings))
+	listCommand := newProviderListCommand(settings)
+	providerCommand.AddCommand(listCommand)
 	for _, option := range []struct {
 		action  string
 		enabled bool
@@ -429,6 +431,7 @@ func newProviderCommand(settings *viper.Viper) *cobra.Command {
 			},
 		})
 	}
+	providerCommand.RunE = listCommand.RunE
 	return providerCommand
 }
 
@@ -524,24 +527,25 @@ func newConfigCommand() *cobra.Command {
 		Short: "Read and update the user configuration",
 		Args:  noArgs("unexpected arguments for config"),
 	}
-	configCommand.AddCommand(
-		&cobra.Command{
-			Use:   "list",
-			Short: "Display the user configuration",
-			Args:  noArgs("unexpected arguments for config list"),
-			RunE: func(command *cobra.Command, _ []string) error {
-				document, err := readUserConfig()
-				if err != nil {
-					return err
-				}
-				body, err := marshalConfig(document)
-				if err != nil {
-					return fmt.Errorf("format config: %w", err)
-				}
-				_, err = command.OutOrStdout().Write(body)
+	listCommand := &cobra.Command{
+		Use:   "list",
+		Short: "Display the user configuration",
+		Args:  noArgs("unexpected arguments for config list"),
+		RunE: func(command *cobra.Command, _ []string) error {
+			document, err := readUserConfig()
+			if err != nil {
 				return err
-			},
+			}
+			body, err := marshalConfig(document)
+			if err != nil {
+				return fmt.Errorf("format config: %w", err)
+			}
+			_, err = command.OutOrStdout().Write(body)
+			return err
 		},
+	}
+	configCommand.AddCommand(
+		listCommand,
 		&cobra.Command{
 			Use:   "get <group>.<name>",
 			Short: "Display one user configuration value",
@@ -587,6 +591,7 @@ func newConfigCommand() *cobra.Command {
 			},
 		},
 	)
+	configCommand.RunE = listCommand.RunE
 	return configCommand
 }
 
