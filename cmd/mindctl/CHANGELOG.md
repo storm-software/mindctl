@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.9](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.9) (09/24/2026)
+
+### Bug Fixes
+
+- **mindctl-npm:** Cleaned up README and CLI release processing ([a32a38f](https://github.com/storm-software/mindctl/commit/a32a38f))
+
 ## [0.1.7](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.7) (09/24/2026)
 
 ### Bug Fixes
