@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/storm-software/mindctl/internal/domain"
@@ -18,6 +19,12 @@ import (
 )
 
 const maxResponseBytes = 16 << 20
+const maxErrorBytes = 64 << 10
+
+var (
+	safeDiagnosticCode  = regexp.MustCompile(`^[a-z0-9_]+$`)
+	safeDiagnosticParam = regexp.MustCompile(`^[a-z][a-z0-9_]*(?:\[[0-9]+\]|\.[a-z][a-z0-9_]*)*$`)
+)
 
 type authMode uint8
 
@@ -68,7 +75,7 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 	if err != nil {
 		return inference.Result{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, requestID, err := c.post(ctx, encoded, false, usesResponsesLite(request))
+	response, requestID, err := c.post(ctx, encoded, false, usesResponsesLite(request), errorSensitiveValues(request))
 	if err != nil {
 		return inference.Result{}, err
 	}
@@ -91,7 +98,7 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 	if err != nil {
 		return nil, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, requestID, err := c.post(ctx, encoded, true, usesResponsesLite(request))
+	response, requestID, err := c.post(ctx, encoded, true, usesResponsesLite(request), errorSensitiveValues(request))
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +132,7 @@ func usesResponsesLite(request inference.Request) bool {
 	return false
 }
 
-func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bool) (*http.Response, string, error) {
+func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bool, sensitiveValues []string) (*http.Response, string, error) {
 	if strings.TrimSpace(c.baseURL) == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
@@ -179,10 +186,77 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 	}
 	requestID := response.Header.Get("x-request-id")
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		diagnostic := decodeErrorDiagnostic(response.Body, append(sensitiveValues, accessToken))
 		response.Body.Close()
-		return nil, requestID, &provider.Error{Kind: errorKind(response.StatusCode), Status: response.StatusCode, RequestID: requestID, Err: errors.New("provider returned an error status")}
+		return nil, requestID, &provider.Error{
+			Kind:            errorKind(response.StatusCode),
+			Status:          response.StatusCode,
+			RequestID:       requestID,
+			UpstreamCode:    diagnostic.UpstreamCode,
+			UpstreamParam:   diagnostic.UpstreamParam,
+			UpstreamMessage: diagnostic.UpstreamMessage,
+			Err:             errors.New("provider returned an error status"),
+		}
 	}
 	return response, requestID, nil
+}
+
+type errorDiagnostic struct {
+	Error struct {
+		Code    string `json:"code"`
+		Param   string `json:"param"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func decodeErrorDiagnostic(body io.Reader, sensitiveValues []string) provider.Error {
+	var diagnostic errorDiagnostic
+	if err := json.NewDecoder(io.LimitReader(body, maxErrorBytes)).Decode(&diagnostic); err != nil {
+		return provider.Error{}
+	}
+	code := safeDiagnosticValue(diagnostic.Error.Code, sensitiveValues)
+	if !safeDiagnosticCode.MatchString(code) {
+		code = ""
+	}
+	param := safeDiagnosticValue(diagnostic.Error.Param, sensitiveValues)
+	if !safeDiagnosticParam.MatchString(param) {
+		param = ""
+	}
+	message := safeDiagnosticMessage(diagnostic.Error.Message, param, sensitiveValues)
+	return provider.Error{UpstreamCode: code, UpstreamParam: param, UpstreamMessage: message}
+}
+
+func errorSensitiveValues(request inference.Request) []string {
+	values := []string{request.Instructions}
+	for _, item := range request.Input {
+		values = append(values, item.Text, item.Input, string(item.Arguments), string(item.Output))
+		for _, content := range item.Content {
+			values = append(values, content.Text)
+		}
+	}
+	return values
+}
+
+func safeDiagnosticValue(value string, sensitiveValues []string) string {
+	for _, sensitive := range sensitiveValues {
+		if sensitive != "" && strings.Contains(strings.ToLower(value), strings.ToLower(sensitive)) {
+			return ""
+		}
+	}
+	return value
+}
+
+func safeDiagnosticMessage(message, param string, sensitiveValues []string) string {
+	message = safeDiagnosticValue(message, sensitiveValues)
+	if param == "" {
+		return ""
+	}
+	for _, prefix := range []string{"Unsupported parameter: ", "Unknown parameter: ", "Invalid parameter: "} {
+		if message == prefix+"'"+param+"'." {
+			return message
+		}
+	}
+	return ""
 }
 
 func errorKind(status int) provider.ErrorKind {

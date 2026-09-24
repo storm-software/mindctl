@@ -144,15 +144,17 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		if failErr := s.failStreamAttempt(ctx, attempt, observedProviderRequestID, err); failErr != nil {
 			lastErr = errors.Join(lastErr, failErr)
 		}
-		s.trace("route.attempt.failed",
+		attributes := []any{
 			"response_id", turn.ResponseID,
 			"attempt_id", attempt.ID,
-			"attempt_number", index+1,
+			"attempt_number", index + 1,
 			"provider_request_id", observedProviderRequestID,
 			"error_kind", errorKind(err),
 			"visible_output", emitted,
 			"stream", true,
-		)
+		}
+		attributes = append(attributes, errorDiagnostic(err)...)
+		s.trace("route.attempt.failed", attributes...)
 		if emitted {
 			persistCtx, cancel := persistenceContext(ctx)
 			floorErr := s.conversations.RaiseFloor(persistCtx, turn, nextTier(candidate.Tier))

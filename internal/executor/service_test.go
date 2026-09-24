@@ -73,6 +73,46 @@ func TestExecuteWritesDetailedContentSafeDebugTrace(t *testing.T) {
 	}
 }
 
+func TestExecuteTracesAllowlistedProviderInvalidRequestDiagnostic(t *testing.T) {
+	deps := fakeDeps()
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	deps.Executor = NewWithLogger(
+		deps.Classifier,
+		router.NewPolicy(router.PolicyConfig{}),
+		provider.NewRegistry(map[string]provider.Provider{"openai": deps.OpenAI, "anthropic": deps.Anthropic}),
+		deps.Conversations,
+		logger,
+	)
+	deps.OpenAI.Err = &provider.Error{
+		Kind:            provider.ErrorInvalidRequest,
+		Status:          400,
+		UpstreamCode:    "unsupported_parameter",
+		UpstreamParam:   "input[0].tools[0].description",
+		UpstreamMessage: "Unsupported parameter: 'input[0].tools[0].description'.",
+		Err:             errors.New("private upstream error body"),
+	}
+
+	_, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	trace := logs.String()
+	for _, want := range []string{
+		`"upstream_status":400`,
+		`"upstream_code":"unsupported_parameter"`,
+		`"upstream_param":"input[0].tools[0].description"`,
+		`"upstream_message":"Unsupported parameter: 'input[0].tools[0].description'."`,
+	} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("debug trace missing %s:\n%s", want, trace)
+		}
+	}
+	if strings.Contains(trace, "private upstream error body") {
+		t.Fatalf("debug trace leaked provider error: %s", trace)
+	}
+}
+
 func TestExecuteHonorsConcreteModelWithoutClassifier(t *testing.T) {
 	deps := fakeDeps()
 	got, err := deps.Executor.Execute(context.Background(), deps.input(concreteModelInput("claude-test")))

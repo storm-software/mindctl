@@ -73,6 +73,15 @@ func errorDetail(err error) (int, ErrorDetail) {
 	case isProviderKind(err, provider.ErrorSafetyRefusal):
 		return http.StatusBadRequest, ErrorDetail{Message: "provider refused this request", Type: "invalid_request_error", Code: "safety_refusal"}
 	case isProviderKind(err, provider.ErrorInvalidRequest):
+		var providerErr *provider.Error
+		if errors.As(err, &providerErr) && providerErr.UpstreamMessage != "" {
+			return http.StatusBadRequest, ErrorDetail{
+				Message: providerErr.UpstreamMessage,
+				Type:    "invalid_request_error",
+				Param:   providerErr.UpstreamParam,
+				Code:    providerErr.UpstreamCode,
+			}
+		}
 		return http.StatusBadRequest, ErrorDetail{Message: "provider cannot execute this request", Type: "invalid_request_error", Code: "provider_request_invalid"}
 	case isStorageError(err):
 		return http.StatusServiceUnavailable, ErrorDetail{Message: "gateway persistence is unavailable", Type: "server_error", Code: "persistence_unavailable"}

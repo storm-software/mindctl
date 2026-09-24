@@ -182,12 +182,14 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.Input = turn.TranscriptFor(decision.Provider)
 	result, err := adapter.Execute(ctx, model, request)
 	if err != nil {
-		s.trace("route.attempt.failed",
+		attributes := []any{
 			"response_id", turn.ResponseID,
 			"attempt_id", attempt.ID,
 			"provider_request_id", providerRequestID(err),
 			"error_kind", errorKind(err),
-		)
+		}
+		attributes = append(attributes, errorDiagnostic(err)...)
+		s.trace("route.attempt.failed", attributes...)
 		if failErr := s.conversations.FailAttempt(ctx, attempt, providerRequestID(err), err); failErr != nil {
 			return Output{}, errors.Join(err, failErr)
 		}

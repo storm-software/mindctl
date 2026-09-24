@@ -87,6 +87,28 @@ func TestResponsesHandlerMapsSafeGatewayErrors(t *testing.T) {
 	}
 }
 
+func TestResponsesHandlerSurfacesAllowlistedProviderInvalidRequestDiagnostic(t *testing.T) {
+	handler := testResponsesHandler(executor.Output{}, &provider.Error{
+		Kind:            provider.ErrorInvalidRequest,
+		Status:          http.StatusBadRequest,
+		UpstreamCode:    "unsupported_parameter",
+		UpstreamParam:   "input[0].tools[0].description",
+		UpstreamMessage: "Unsupported parameter: 'input[0].tools[0].description'.",
+		Err:             errors.New("private upstream response body"),
+	})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, authenticatedRequest(`{"model":"mindctl-auto","input":"hello"}`))
+	var body ErrorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusBadRequest || body.Error.Type != "invalid_request_error" || body.Error.Code != "unsupported_parameter" ||
+		body.Error.Param != "input[0].tools[0].description" || body.Error.Message != "Unsupported parameter: 'input[0].tools[0].description'." ||
+		strings.Contains(rr.Body.String(), "private") {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestResponsesHandlerMapsProviderAuthenticationAsOperationalFailure(t *testing.T) {
 	handler := testResponsesHandler(executor.Output{}, &provider.Error{Kind: provider.ErrorAuthentication, Err: errors.New("private upstream authentication failure")})
 	rr := httptest.NewRecorder()

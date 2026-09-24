@@ -153,6 +153,144 @@ func TestOpenAIChatGPTOAuthSanitizesAuthenticationFailures(t *testing.T) {
 	}
 }
 
+func TestOpenAIRetainsAllowlistedInvalidRequestDiagnostics(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body := `{
+  "error": {
+    "code": "unsupported_parameter",
+    "param": "input[0].tools[0].description",
+    "message": "Unsupported parameter: 'input[0].tools[0].description'."
+  },
+  "prompt": "private prompt",
+  "response": {"output": "private response"},
+  "request_headers": {"authorization": "Bearer secret"}
+	}`
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"X-Request-Id": []string{"openai-req"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	client := NewClient("https://provider.example", "secret", &http.Client{Transport: transport})
+
+	_, err := client.Execute(context.Background(), openAIModel(), textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || normalized.Status != http.StatusBadRequest || normalized.RequestID != "openai-req" ||
+		normalized.UpstreamCode != "unsupported_parameter" || normalized.UpstreamParam != "input[0].tools[0].description" || normalized.UpstreamMessage != "Unsupported parameter: 'input[0].tools[0].description'." {
+		t.Fatalf("kind=%q status=%d requestID=%q code=%q param=%q message=%q", normalized.Kind, normalized.Status, normalized.RequestID, normalized.UpstreamCode, normalized.UpstreamParam, normalized.UpstreamMessage)
+	}
+	if strings.Contains(normalized.Error(), "private") || strings.Contains(normalized.Error(), "secret") {
+		t.Fatalf("error leaked upstream body: %v", normalized)
+	}
+}
+
+func TestOpenAIRedactsUnsafeUpstreamErrorMessages(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body := `{
+  "error": {
+    "code": "invalid_value",
+    "param": "input",
+    "message": "Invalid value: private prompt and Bearer secret"
+  }
+	}`
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	client := NewClient("https://provider.example", "secret", &http.Client{Transport: transport})
+
+	_, err := client.Execute(context.Background(), openAIModel(), textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.UpstreamCode != "invalid_value" || normalized.UpstreamParam != "input" || normalized.UpstreamMessage != "" ||
+		strings.Contains(normalized.Error(), "private") || strings.Contains(normalized.Error(), "secret") {
+		t.Fatalf("error=%+v", normalized)
+	}
+}
+
+func TestOpenAIRedactsNonDiagnosticUpstreamErrorMessage(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body := `{
+  "error": {
+    "code": "invalid_value",
+    "param": "input",
+    "message": "The request contains an unsupported value."
+  }
+}`
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	client := NewClient("https://provider.example", "secret", &http.Client{Transport: transport})
+
+	_, err := client.Execute(context.Background(), openAIModel(), textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.UpstreamCode != "invalid_value" || normalized.UpstreamParam != "input" || normalized.UpstreamMessage != "" {
+		t.Fatalf("error=%+v", normalized)
+	}
+}
+
+func TestOpenAIResponsesLiteToolCallPayloadSurfacesRejectedField(t *testing.T) {
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("x-openai-internal-codex-responses-lite") != "true" {
+			t.Fatalf("responses-lite header=%q", request.Header.Get("x-openai-internal-codex-responses-lite"))
+		}
+		var body struct {
+			Input []struct {
+				Type  string `json:"type"`
+				Tools []struct {
+					Type        string  `json:"type"`
+					Description *string `json:"description"`
+					Tools       []struct {
+						Type string `json:"type"`
+						Name string `json:"name"`
+					} `json:"tools"`
+				} `json:"tools"`
+			} `json:"input"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Input) != 1 || body.Input[0].Type != "additional_tools" || len(body.Input[0].Tools) != 1 ||
+			body.Input[0].Tools[0].Type != "namespace" || body.Input[0].Tools[0].Description != nil ||
+			len(body.Input[0].Tools[0].Tools) != 2 || body.Input[0].Tools[0].Tools[0].Type != "function" || body.Input[0].Tools[0].Tools[1].Name != "apply_patch" {
+			t.Fatalf("body=%+v", body)
+		}
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body: io.NopCloser(strings.NewReader(`{
+  "error": {
+    "code": "unsupported_parameter",
+    "param": "input[0].tools[0].description",
+    "message": "Unsupported parameter: 'input[0].tools[0].description'."
+  }
+}`)),
+		}, nil
+	})
+	client := NewChatGPTOAuthClient("https://provider.example", &http.Client{Transport: transport})
+	request := inference.Request{
+		Model: "gateway-model",
+		Input: []inference.Item{{
+			Type: "additional_tools", Role: "developer",
+			Tools: []inference.Tool{{
+				Type: "namespace", Name: "functions", Description: "",
+				Tools: []inference.Tool{
+					{Type: "function", Name: "read", Description: "read files", Parameters: json.RawMessage(`{"type":"object"}`)},
+					{Type: "custom", Name: "apply_patch", Description: "apply a patch", Format: &inference.ToolFormat{Type: "grammar", Syntax: "lark", Definition: "start: PATCH"}},
+				},
+			}},
+		}},
+	}
+	ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+	_, err := client.Execute(ctx, openAIModel(), request)
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.UpstreamCode != "unsupported_parameter" || normalized.UpstreamParam != "input[0].tools[0].description" ||
+		normalized.UpstreamMessage != "Unsupported parameter: 'input[0].tools[0].description'." {
+		t.Fatalf("err=%v normalized=%+v", err, normalized)
+	}
+}
+
 func TestOpenAIRedirectDoesNotForwardChatGPTOAuth(t *testing.T) {
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
@@ -433,3 +571,7 @@ func executeFixture(t *testing.T, response string) inference.Result {
 	}
 	return got
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }

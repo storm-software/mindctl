@@ -38,10 +38,13 @@ const (
 // Error has safe, normalized provider failure metadata. Its text deliberately
 // excludes upstream response bodies, request content, and credentials.
 type Error struct {
-	Kind      ErrorKind
-	Status    int
-	RequestID string
-	Err       error
+	Kind            ErrorKind
+	Status          int
+	RequestID       string
+	UpstreamCode    string
+	UpstreamParam   string
+	UpstreamMessage string
+	Err             error
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("provider request failed (%s)", e.Kind) }

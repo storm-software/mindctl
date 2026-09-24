@@ -84,3 +84,16 @@ func errorKind(err error) string {
 		return "internal"
 	}
 }
+
+func errorDiagnostic(err error) []any {
+	var providerErr *provider.Error
+	if !errors.As(err, &providerErr) {
+		return nil
+	}
+	return []any{
+		"upstream_status", providerErr.Status,
+		"upstream_code", providerErr.UpstreamCode,
+		"upstream_param", providerErr.UpstreamParam,
+		"upstream_message", providerErr.UpstreamMessage,
+	}
+}
