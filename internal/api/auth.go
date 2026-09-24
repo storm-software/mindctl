@@ -89,7 +89,17 @@ func CaptureChatGPTOAuth(next http.Handler) http.Handler {
 		ctx := upstreamauth.WithChatGPT(r.Context(), upstreamauth.ChatGPTCredential{
 			AccessToken: fields[1],
 			AccountID:   accountIDs[0],
+			Originator:  protocolHeader(r, "Originator"),
+			UserAgent:   protocolHeader(r, "User-Agent"),
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func protocolHeader(r *http.Request, name string) string {
+	values := r.Header.Values(name)
+	if len(values) != 1 || strings.TrimSpace(values[0]) != values[0] || strings.ContainsAny(values[0], "\r\n") {
+		return ""
+	}
+	return values[0]
 }

@@ -65,8 +65,8 @@ func TestOpenAIChatGPTOAuthExecuteAndStreamUseRequestCredential(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/responses" || r.Header.Get("Authorization") != "Bearer oauth.jwt" ||
-					r.Header.Get("ChatGPT-Account-Id") != "account-1" || r.Header.Get("originator") != "mindctl" ||
-					!strings.HasPrefix(r.Header.Get("User-Agent"), "mindctl") || r.Header.Get("X-Untrusted") != "" {
+					r.Header.Get("ChatGPT-Account-Id") != "account-1" || r.Header.Get("originator") != "codex_exec" ||
+					r.Header.Get("User-Agent") != "codex_exec/0.156.1" || r.Header.Get("X-Untrusted") != "" {
 					t.Fatalf("path=%s headers=%v", r.URL.Path, r.Header)
 				}
 				var body map[string]any
@@ -90,7 +90,7 @@ func TestOpenAIChatGPTOAuthExecuteAndStreamUseRequestCredential(t *testing.T) {
 
 			type untrustedContextKey struct{}
 			ctx := context.WithValue(context.Background(), untrustedContextKey{}, "X-Untrusted: private")
-			ctx = upstreamauth.WithChatGPT(ctx, upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+			ctx = upstreamauth.WithChatGPT(ctx, upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1", Originator: "codex_exec", UserAgent: "codex_exec/0.156.1"})
 			if err := tc.invoke(ctx, NewChatGPTOAuthClient(server.URL+"/", nil)); err != nil {
 				t.Fatal(err)
 			}

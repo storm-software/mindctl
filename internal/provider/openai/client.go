@@ -131,7 +131,7 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 	}
 	path := "/v1/responses"
 	accessToken := c.apiKey
-	accountID := ""
+	accountID, originator, userAgent := "", "", ""
 	switch c.auth {
 	case authAPIKey:
 		if accessToken == "" {
@@ -145,6 +145,8 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 		path = "/responses"
 		accessToken = credential.AccessToken
 		accountID = credential.AccountID
+		originator = credential.Originator
+		userAgent = credential.UserAgent
 	default:
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
@@ -155,8 +157,14 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	if c.auth == authChatGPTOAuth {
 		request.Header.Set("ChatGPT-Account-Id", accountID)
-		request.Header.Set("originator", "mindctl")
-		request.Header.Set("User-Agent", "mindctl")
+		if originator == "" {
+			originator = "mindctl"
+		}
+		request.Header.Set("originator", originator)
+		if userAgent == "" {
+			userAgent = "mindctl"
+		}
+		request.Header.Set("User-Agent", userAgent)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	if responsesLite {

@@ -11,6 +11,8 @@ import (
 type ChatGPTCredential struct {
 	AccessToken string
 	AccountID   string
+	Originator  string
+	UserAgent   string
 }
 
 type chatGPTContextKey struct{}

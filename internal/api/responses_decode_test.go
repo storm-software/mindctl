@@ -187,6 +187,8 @@ func TestCaptureChatGPTOAuthRequiresOneCompleteCredential(t *testing.T) {
 			if tc.account != "" {
 				req.Header.Add("ChatGPT-Account-Id", tc.account)
 			}
+			req.Header.Set("Originator", "codex_exec")
+			req.Header.Set("User-Agent", "codex_exec/0.156.1")
 			if tc.extraAccount {
 				req.Header.Add("ChatGPT-Account-Id", "account-2")
 			}
@@ -194,7 +196,7 @@ func TestCaptureChatGPTOAuthRequiresOneCompleteCredential(t *testing.T) {
 			if present != tc.ok {
 				t.Fatalf("present=%v want=%v", present, tc.ok)
 			}
-			if tc.ok && (got.AccessToken != "oauth.jwt" || got.AccountID != "account-1") {
+			if tc.ok && (got.AccessToken != "oauth.jwt" || got.AccountID != "account-1" || got.Originator != "codex_exec" || got.UserAgent != "codex_exec/0.156.1") {
 				t.Fatalf("credential=%+v", got)
 			}
 		})
