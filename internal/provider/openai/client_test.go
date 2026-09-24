@@ -253,7 +253,7 @@ func TestOpenAIResponsesLiteToolCallPayloadSurfacesRejectedField(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(body.Input) != 1 || body.Input[0].Type != "additional_tools" || len(body.Input[0].Tools) != 1 ||
-			body.Input[0].Tools[0].Type != "namespace" || body.Input[0].Tools[0].Description != nil ||
+			body.Input[0].Tools[0].Type != "namespace" || body.Input[0].Tools[0].Description == nil || *body.Input[0].Tools[0].Description != "" ||
 			len(body.Input[0].Tools[0].Tools) != 2 || body.Input[0].Tools[0].Tools[0].Type != "function" || body.Input[0].Tools[0].Tools[1].Name != "apply_patch" {
 			t.Fatalf("body=%+v", body)
 		}
