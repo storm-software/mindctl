@@ -457,6 +457,8 @@ importers:
         specifier: 'catalog:'
         version: 8.8.5
 
+  packages/npm: {}
+
   tools/config: {}
 
   tools/cspell: {}
