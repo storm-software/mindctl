@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.10](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.10) (09/24/2026)
+
+### Bug Fixes
+
+- **mindctl:** Update CLI to default to list command ([acd70ed](https://github.com/storm-software/mindctl/commit/acd70ed))
+
 ## [0.1.9](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.9) (09/24/2026)
 
 ### Bug Fixes
