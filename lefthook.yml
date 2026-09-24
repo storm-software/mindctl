@@ -16,6 +16,9 @@ remotes:
 
 pre-commit:
   commands:
+    go-test:
+      glob: "**/*"
+      run: go test ./...
     nx-sync:
       glob: "**/*"
       run: "pnpm nx sync"

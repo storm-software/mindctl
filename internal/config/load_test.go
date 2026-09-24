@@ -29,15 +29,16 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 	wantPrices := map[string]struct {
 		input, cachedInput, output float64
 		capabilities               []string
+		available                  bool
 	}{
-		"gpt-6-astra":         {input: 10, cachedInput: 1, output: 50, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-6-sol":           {input: 2, cachedInput: .2, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-6-luna":          {input: .1, cachedInput: .01, output: .5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-5.6-terra":       {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-5.6-luna":        {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-5.3-codex":       {input: 3.5, cachedInput: .35, output: 28, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
-		"gpt-5.3-codex-spark": {input: 0, cachedInput: 0, output: 0, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}},
+		"gpt-6-astra":         {input: 10, cachedInput: 1, output: 50, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6-sol":           {input: 2, cachedInput: .2, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6-luna":          {input: .1, cachedInput: .01, output: .5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.6-terra":       {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.6-luna":        {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.3-codex":       {input: 3.5, cachedInput: .35, output: 28, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.3-codex-spark": {input: 0, cachedInput: 0, output: 0, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
 	}
 	wantModelCount := len(wantPrices)
 	matchedModels := 0
@@ -48,8 +49,8 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 		}
 		matchedModels++
 		delete(wantPrices, model.ID)
-		if model.Provider != "openai" || !model.Available {
-			t.Errorf("model %s provider/available = %q/%t, want openai/true", model.ID, model.Provider, model.Available)
+		if model.Provider != "openai" || model.Available != want.available {
+			t.Errorf("model %s provider/available = %q/%t, want openai/%t", model.ID, model.Provider, model.Available, want.available)
 		}
 		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
 			t.Errorf("model %s prices = input %g cached %g output %g, want input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice, want.input, want.cachedInput, want.output)
