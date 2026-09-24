@@ -8,6 +8,7 @@ type Event struct {
 	ResponseID, ProviderRequestID, ItemID, ItemType, CallID, Name, Namespace string
 	Role, Delta, ItemText, Input                                             string
 	ArgumentsDelta                                                           string
+	EncryptedContent                                                         json.RawMessage
 	OutputIndex                                                              int
 	Status                                                                   string
 	Usage                                                                    Usage

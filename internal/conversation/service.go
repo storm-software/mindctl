@@ -43,16 +43,24 @@ type Turn struct {
 	replay                               []inference.Item
 }
 
-// TranscriptFor returns portable canonical content. ProviderData is replayed
-// only to its originating provider; a different provider retains the item but
-// receives no incompatible opaque continuation metadata.
+// TranscriptFor returns portable canonical content. Opaque continuation data
+// is replayed only to its originating provider; a different provider retains
+// the item but receives no incompatible continuation metadata.
 func (t Turn) TranscriptFor(provider string) []inference.Item {
-	items := make([]inference.Item, len(t.replay))
+	items := make([]inference.Item, 0, len(t.replay))
 	for i, item := range t.replay {
-		items[i] = cloneItem(item)
-		if i < len(t.origins) && t.origins[i] != "" && t.origins[i] != provider {
-			items[i].ProviderData = nil
+		origin := item.ContinuationProvider
+		if origin == "" && i < len(t.origins) {
+			origin = t.origins[i]
 		}
+		if origin != "" && origin != provider {
+			if item.Type == "reasoning" {
+				continue
+			}
+			item.ProviderData = nil
+			item.EncryptedContent = nil
+		}
+		items = append(items, cloneItem(item))
 	}
 	return items
 }
@@ -81,6 +89,9 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 		// Caller-supplied metadata has no trusted provider provenance and must
 		// never become a continuation payload for any adapter.
 		input[index].ProviderData = nil
+		if input[index].ContinuationProvider == "" {
+			input[index].EncryptedContent = nil
+		}
 	}
 
 	if err := s.store.CreateTurn(ctx, storage.NewTurn{
@@ -179,6 +190,7 @@ func cloneItem(item inference.Item) inference.Item {
 	item.ImageURL = append(item.ImageURL[:0:0], item.ImageURL...)
 	item.Arguments = append(item.Arguments[:0:0], item.Arguments...)
 	item.Output = append(item.Output[:0:0], item.Output...)
+	item.EncryptedContent = append(item.EncryptedContent[:0:0], item.EncryptedContent...)
 	item.Content = append([]inference.ContentPart(nil), item.Content...)
 	for index := range item.Content {
 		item.Content[index].ImageURL = append(item.Content[index].ImageURL[:0:0], item.Content[index].ImageURL...)

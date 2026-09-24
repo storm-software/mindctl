@@ -227,6 +227,46 @@ func TestStreamMergesFunctionArgumentDeltasWithCompletedItem(t *testing.T) {
 	}
 }
 
+func TestStreamPreservesOpenAIItemIDsAndReasoningOutput(t *testing.T) {
+	stream := &scriptedStream{events: []inference.Event{
+		{Type: "response.output_item.done", ItemID: "msg_1", ItemType: "message", Role: "assistant", ItemText: "hello"},
+		{Type: "response.output_item.done", ItemID: "rs_1", ItemType: "reasoning", EncryptedContent: []byte(`"opaque-openai-state"`)},
+		{Type: "response.output_item.done", ItemID: "fc_1", ItemType: "function_call", CallID: "call_1", Name: "lookup", ArgumentsDelta: `{"q":"mindctl"}`},
+		{Type: "response.completed", Status: "completed", ProviderRequestID: "openai-request"},
+	}, err: io.EOF}
+	deps := newStreamDependencies(stream)
+	deps.models = deps.models[:1]
+
+	if err := deps.executor.Stream(context.Background(), deps.input(), deps.writer); err != nil {
+		t.Fatal(err)
+	}
+	output := deps.conversations.committed.Output
+	if len(output) != 3 || output[0].ID != "msg_1" || output[1].ID != "rs_1" ||
+		string(output[1].EncryptedContent) != `"opaque-openai-state"` || output[2].ID != "fc_1" {
+		t.Fatalf("committed output=%+v", output)
+	}
+}
+
+func TestStreamOrdersReasoningBeforeFunctionArguments(t *testing.T) {
+	stream := &scriptedStream{events: []inference.Event{
+		{Type: "response.function_call_arguments.delta", OutputIndex: 1, ItemID: "fc_1", CallID: "call_1", Name: "lookup", ArgumentsDelta: `{"q":"mindctl"}`},
+		{Type: "response.output_item.done", OutputIndex: 0, ItemID: "rs_1", ItemType: "reasoning", EncryptedContent: []byte(`"opaque-openai-state"`)},
+		{Type: "response.output_item.done", OutputIndex: 1, ItemID: "fc_1", ItemType: "function_call", CallID: "call_1", Name: "lookup", ArgumentsDelta: `{"q":"mindctl"}`},
+		{Type: "response.completed", Status: "completed", ProviderRequestID: "openai-request"},
+	}, err: io.EOF}
+	deps := newStreamDependencies(stream)
+	deps.models = deps.models[:1]
+
+	if err := deps.executor.Stream(context.Background(), deps.input(), deps.writer); err != nil {
+		t.Fatal(err)
+	}
+	output := deps.conversations.committed.Output
+	if len(output) != 2 || output[0].Type != "reasoning" || output[0].ID != "rs_1" ||
+		output[1].Type != "function_call" || output[1].ID != "fc_1" || string(output[1].Arguments) != `{"q":"mindctl"}` {
+		t.Fatalf("committed output=%+v", output)
+	}
+}
+
 type streamDependencies struct {
 	executor      *Service
 	provider      *scriptedProvider

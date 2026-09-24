@@ -38,12 +38,14 @@ type AccessPrograms struct {
 	Cyber string
 }
 
-// Item is a portable text, image, function-call, or function-result item.
-// ProviderData remains opaque to the gateway at this layer.
+// Item is a portable text, image, reasoning, function-call, or function-result
+// item. EncryptedContent is opaque provider continuation state. Its source is
+// recorded internally so adapters never forward it to another provider.
 type Item struct {
 	ID, Type, Role, Text, CallID, Name, Namespace, Input string
+	ContinuationProvider                                 string
 	ImageURL                                             json.RawMessage
-	Arguments, Output                                    json.RawMessage
+	Arguments, Output, EncryptedContent                  json.RawMessage
 	Content                                              []ContentPart
 	Tools                                                []Tool
 	ProviderData                                         json.RawMessage

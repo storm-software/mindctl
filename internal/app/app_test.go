@@ -416,6 +416,98 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	}
 }
 
+func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T) {
+	var providerCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/classify":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/responses":
+			call := providerCalls.Add(1)
+			var body struct {
+				Input []json.RawMessage `json:"input"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if call == 1 {
+				if len(body.Input) != 1 {
+					t.Fatalf("initial input=%s", body.Input)
+				}
+			} else if call == 2 {
+				if len(body.Input) != 4 {
+					t.Fatalf("continuation input=%s", body.Input)
+				}
+				var reasoning, functionCall, functionOutput map[string]any
+				if err := json.Unmarshal(body.Input[1], &reasoning); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(body.Input[2], &functionCall); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(body.Input[3], &functionOutput); err != nil {
+					t.Fatal(err)
+				}
+				if reasoning["id"] != "rs_1" || reasoning["type"] != "reasoning" || reasoning["encrypted_content"] != "opaque-openai-state" ||
+					functionCall["id"] != "fc_1" || functionCall["type"] != "function_call" || functionCall["call_id"] != "call_lookup" ||
+					functionOutput["type"] != "function_call_output" || functionOutput["call_id"] != "call_lookup" {
+					t.Fatalf("continuation ordering or opaque state was lost: %s", body.Input)
+				}
+			} else {
+				t.Fatalf("unexpected provider call %d", call)
+			}
+
+			w.Header().Set("Content-Type", "text/event-stream")
+			if call == 1 {
+				_, _ = io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-openai-state\"}}\n\n")
+				_, _ = io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_lookup\",\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"mindctl\\\"}\"}}\n\n")
+			}
+			_, _ = io.WriteString(w, "event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"model\":\"first\",\"output\":[]}}\n\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Classifier.Endpoint = server.URL
+	cfg.Providers[0].BaseURL = server.URL
+	cfg.Providers[0].Auth = string(config.ProviderAuthChatGPTOAuthPassthrough)
+	cfg.Providers[0].APIKeyEnv = ""
+	delete(env, "TEST_PROVIDER_KEY")
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	request := func(body string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+		req.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+		req.Header.Set("Authorization", "Bearer oauth.jwt")
+		req.Header.Set("ChatGPT-Account-Id", "account-1")
+		return req
+	}
+	initial := httptest.NewRecorder()
+	app.Handler().ServeHTTP(initial, request(`{"model":"mindctl-auto","stream":true,"input":"find Mindctl"}`))
+	if initial.Code != http.StatusOK || !strings.Contains(initial.Body.String(), `"type":"reasoning"`) || !strings.Contains(initial.Body.String(), `"encrypted_content":"opaque-openai-state"`) {
+		t.Fatalf("initial response did not preserve reasoning: status=%d body=%s", initial.Code, initial.Body.String())
+	}
+	const responseIDKey = `"response_id":"`
+	responseIDStart := strings.Index(initial.Body.String(), responseIDKey)
+	if responseIDStart < 0 {
+		t.Fatalf("initial response has no gateway response ID: %s", initial.Body.String())
+	}
+	responseID := strings.SplitN(initial.Body.String()[responseIDStart+len(responseIDKey):], `"`, 2)[0]
+
+	continuation := httptest.NewRecorder()
+	app.Handler().ServeHTTP(continuation, request(`{"model":"mindctl-auto","stream":true,"previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_lookup","output":"{\"found\":true}"}]}`))
+	if continuation.Code != http.StatusOK || providerCalls.Load() != 2 {
+		t.Fatalf("continuation status=%d calls=%d body=%s", continuation.Code, providerCalls.Load(), continuation.Body.String())
+	}
+}
+
 func TestSQLiteFailureChangesReadinessButNotHealth(t *testing.T) {
 	cfg, env := fixture(t)
 	a, err := newWithLookup(context.Background(), cfg, lookup(env))

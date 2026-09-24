@@ -156,6 +156,33 @@ func TestStartDropsCallerProviderData(t *testing.T) {
 	}
 }
 
+func TestTranscriptForDoesNotForwardReasoningContinuationAcrossProviders(t *testing.T) {
+	svc := testConversationService(t)
+	turn, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.BeginAttempt(context.Background(), turn, router.Decision{Provider: "openai", ModelID: "gpt-test", Tier: domain.T3}); err != nil {
+		t.Fatal(err)
+	}
+	result := inference.Result{Status: "completed", Output: []inference.Item{{
+		ID: "rs_1", Type: "reasoning", EncryptedContent: []byte(`"opaque-openai-state"`),
+	}}}
+	if err := svc.CommitResult(context.Background(), turn, pin("openai", "gpt-test", domain.T3), result); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := svc.Resume(context.Background(), "client-a", turn.ResponseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resumed.TranscriptFor("openai"); len(got) != 2 || got[1].ID != "rs_1" || string(got[1].EncryptedContent) != `"opaque-openai-state"` {
+		t.Fatalf("same-provider transcript=%+v", got)
+	}
+	if got := resumed.TranscriptFor("anthropic"); len(got) != 1 || got[0].Type != "message" {
+		t.Fatalf("cross-provider transcript=%+v", got)
+	}
+}
+
 func TestResumeRejectsUnknownAndForeignResponse(t *testing.T) {
 	svc := testConversationService(t)
 	if _, err := svc.Resume(context.Background(), "client-a", "resp_missing"); !errors.Is(err, conversation.ErrNotFound) {

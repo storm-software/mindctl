@@ -45,6 +45,32 @@ func TestExecuteTranslatesOpenAIRequestAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsePreservesReasoningAndOutputItemIDs(t *testing.T) {
+	result := fromResponsesResponse(responsesResponse{
+		ID:     "upstream-response",
+		Status: "completed",
+		Output: []responseOutput{
+			{ID: "msg_1", Type: "message", Role: "assistant", Content: []responseContent{{Type: "output_text", Text: "hello"}}},
+			{ID: "rs_1", Type: "reasoning", EncryptedContent: json.RawMessage(`"opaque-openai-state"`)},
+			{ID: "fc_1", Type: "function_call", CallID: "call_lookup", Name: "lookup", Arguments: json.RawMessage(`{"q":"mindctl"}`)},
+		},
+	}, openAIModel(), "openai-request")
+	if len(result.Output) != 3 || result.Output[0].ID != "msg_1" || result.Output[1].ID != "rs_1" ||
+		string(result.Output[1].EncryptedContent) != `"opaque-openai-state"` || result.Output[2].ID != "fc_1" {
+		t.Fatalf("output=%+v", result.Output)
+	}
+}
+
+func TestOpenAIStreamEventPreservesReasoningContinuation(t *testing.T) {
+	event, err := streamEvent("response.output_item.done", []byte(`{
+  "output_index":0,
+  "item":{"id":"rs_1","type":"reasoning","encrypted_content":"opaque-openai-state"}
+}`))
+	if err != nil || event.ItemID != "rs_1" || event.ItemType != "reasoning" || string(event.EncryptedContent) != `"opaque-openai-state"` {
+		t.Fatalf("event=%+v err=%v", event, err)
+	}
+}
+
 func TestOpenAIChatGPTOAuthExecuteAndStreamUseRequestCredential(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -461,6 +462,7 @@ type streamAccumulator struct {
 	usage                            inference.Usage
 	terminal                         bool
 	items                            []inference.Item
+	outputIndexes                    []int
 	text, functions                  map[string]int
 	customTools                      map[string]int
 }
@@ -492,12 +494,34 @@ func (a *streamAccumulator) observe(event inference.Event) {
 		case "message":
 			event.Delta = event.ItemText
 			a.appendText(event, true)
+		case "reasoning":
+			a.appendReasoning(event)
 		case "function_call":
 			a.appendFunctionArguments(event, true)
 		case "custom_tool_call":
 			a.appendCustomToolCall(event)
 		}
 	}
+}
+
+func (a *streamAccumulator) appendReasoning(event inference.Event) {
+	if event.ItemID == "" || len(event.EncryptedContent) == 0 {
+		return
+	}
+	for _, item := range a.items {
+		if item.ID == event.ItemID {
+			return
+		}
+	}
+	a.appendItem(inference.Item{
+		ID: event.ItemID, Type: "reasoning", EncryptedContent: append(json.RawMessage(nil), event.EncryptedContent...),
+	}, event.OutputIndex)
+}
+
+func (a *streamAccumulator) appendItem(item inference.Item, outputIndex int) int {
+	a.items = append(a.items, item)
+	a.outputIndexes = append(a.outputIndexes, outputIndex)
+	return len(a.items) - 1
 }
 
 func (a *streamAccumulator) appendCustomToolCall(event inference.Event) {
@@ -511,11 +535,10 @@ func (a *streamAccumulator) appendCustomToolCall(event inference.Event) {
 	if _, exists := a.customTools[key]; exists {
 		return
 	}
-	a.customTools[key] = len(a.items)
-	a.items = append(a.items, inference.Item{
+	a.customTools[key] = a.appendItem(inference.Item{
 		ID: event.ItemID, Type: "custom_tool_call", CallID: event.CallID,
 		Name: event.Name, Namespace: event.Namespace, Input: event.Input,
-	})
+	}, event.OutputIndex)
 }
 
 func (a *streamAccumulator) appendText(event inference.Event, onlyIfAbsent bool) {
@@ -525,9 +548,11 @@ func (a *streamAccumulator) appendText(event inference.Event, onlyIfAbsent bool)
 	}
 	index, ok := a.text[key]
 	if !ok {
-		index = len(a.items)
+		index = a.appendItem(inference.Item{Type: "message", Role: "assistant"}, event.OutputIndex)
 		a.text[key] = index
-		a.items = append(a.items, inference.Item{Type: "message", Role: "assistant"})
+	}
+	if event.ItemID != "" {
+		a.items[index].ID = event.ItemID
 	}
 	if onlyIfAbsent && ok {
 		return
@@ -547,8 +572,7 @@ func (a *streamAccumulator) appendFunctionArguments(event inference.Event, onlyI
 		return
 	}
 	if !ok {
-		index = len(a.items)
-		a.items = append(a.items, inference.Item{Type: "function_call"})
+		index = a.appendItem(inference.Item{Type: "function_call"}, event.OutputIndex)
 	}
 	if event.ItemID != "" {
 		a.functions[event.ItemID] = index
@@ -573,7 +597,15 @@ func (a *streamAccumulator) appendFunctionArguments(event inference.Event, onlyI
 func (a *streamAccumulator) result(responseID string) inference.Result {
 	status := a.status
 	items := make([]inference.Item, 0, len(a.items))
-	for _, item := range a.items {
+	positions := make([]int, len(a.items))
+	for index := range a.items {
+		positions[index] = index
+	}
+	sort.SliceStable(positions, func(left, right int) bool {
+		return a.outputIndexes[positions[left]] < a.outputIndexes[positions[right]]
+	})
+	for _, position := range positions {
+		item := a.items[position]
 		if item.Type == "function_call" && len(item.Arguments) != 0 && !json.Valid(item.Arguments) {
 			continue
 		}

@@ -113,19 +113,20 @@ type wireToolFormat struct {
 }
 
 type wireInputItem struct {
-	ID        string          `json:"id"`
-	Type      string          `json:"type"`
-	Role      string          `json:"role"`
-	Text      string          `json:"text"`
-	CallID    string          `json:"call_id"`
-	Name      string          `json:"name"`
-	Namespace string          `json:"namespace"`
-	Input     string          `json:"input"`
-	Content   json.RawMessage `json:"content"`
-	ImageURL  json.RawMessage `json:"image_url"`
-	Arguments json.RawMessage `json:"arguments"`
-	Output    json.RawMessage `json:"output"`
-	Tools     []wireTool      `json:"tools"`
+	ID               string          `json:"id"`
+	Type             string          `json:"type"`
+	Role             string          `json:"role"`
+	Text             string          `json:"text"`
+	CallID           string          `json:"call_id"`
+	Name             string          `json:"name"`
+	Namespace        string          `json:"namespace"`
+	Input            string          `json:"input"`
+	Content          json.RawMessage `json:"content"`
+	ImageURL         json.RawMessage `json:"image_url"`
+	Arguments        json.RawMessage `json:"arguments"`
+	Output           json.RawMessage `json:"output"`
+	EncryptedContent json.RawMessage `json:"encrypted_content"`
+	Tools            []wireTool      `json:"tools"`
 }
 
 type wireContentPart struct {
@@ -228,6 +229,11 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Namespace: wire.Namespace, Arguments: wire.Arguments}}, nil
 	case "function_call_output":
 		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Output: wire.Output}}, nil
+	case "reasoning":
+		return []inference.Item{{
+			ID: wire.ID, Type: wire.Type, EncryptedContent: append(json.RawMessage(nil), wire.EncryptedContent...),
+			ContinuationProvider: "openai",
+		}}, nil
 	case "custom_tool_call":
 		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Namespace: wire.Namespace, Input: wire.Input}}, nil
 	case "custom_tool_call_output":

@@ -77,17 +77,18 @@ type responseTextFormat struct {
 }
 
 type responseInputItem struct {
-	ID        string            `json:"id,omitempty"`
-	Type      string            `json:"type"`
-	Role      string            `json:"role,omitempty"`
-	Content   []responseContent `json:"content,omitempty"`
-	CallID    string            `json:"call_id,omitempty"`
-	Name      string            `json:"name,omitempty"`
-	Namespace string            `json:"namespace,omitempty"`
-	Input     string            `json:"input,omitempty"`
-	Arguments json.RawMessage   `json:"arguments,omitempty"`
-	Output    json.RawMessage   `json:"output,omitempty"`
-	Tools     []responseTool    `json:"tools,omitempty"`
+	ID               string            `json:"id,omitempty"`
+	Type             string            `json:"type"`
+	Role             string            `json:"role,omitempty"`
+	Content          []responseContent `json:"content,omitempty"`
+	CallID           string            `json:"call_id,omitempty"`
+	Name             string            `json:"name,omitempty"`
+	Namespace        string            `json:"namespace,omitempty"`
+	Input            string            `json:"input,omitempty"`
+	Arguments        json.RawMessage   `json:"arguments,omitempty"`
+	Output           json.RawMessage   `json:"output,omitempty"`
+	EncryptedContent json.RawMessage   `json:"encrypted_content,omitempty"`
+	Tools            []responseTool    `json:"tools,omitempty"`
 }
 
 type responseContent struct {
@@ -105,15 +106,16 @@ type responsesResponse struct {
 }
 
 type responseOutput struct {
-	ID        string            `json:"id"`
-	Type      string            `json:"type"`
-	Role      string            `json:"role"`
-	CallID    string            `json:"call_id"`
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Input     string            `json:"input"`
-	Arguments json.RawMessage   `json:"arguments"`
-	Content   []responseContent `json:"content"`
+	ID               string            `json:"id"`
+	Type             string            `json:"type"`
+	Role             string            `json:"role"`
+	CallID           string            `json:"call_id"`
+	Name             string            `json:"name"`
+	Namespace        string            `json:"namespace"`
+	Input            string            `json:"input"`
+	Arguments        json.RawMessage   `json:"arguments"`
+	EncryptedContent json.RawMessage   `json:"encrypted_content"`
+	Content          []responseContent `json:"content"`
 }
 
 type responseUsage struct {
@@ -229,6 +231,8 @@ func toResponseInput(item inference.Item) responseInputItem {
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: item.Input}
 	case "custom_tool_call_output":
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Output: item.Output}
+	case "reasoning":
+		return responseInputItem{ID: item.ID, Type: item.Type, EncryptedContent: append(json.RawMessage(nil), item.EncryptedContent...)}
 	default:
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments, Output: item.Output}
 	}
@@ -305,13 +309,19 @@ func fromResponsesResponse(response responsesResponse, model domain.Model, reque
 	for _, output := range response.Output {
 		switch output.Type {
 		case "message":
+			item := inference.Item{ID: output.ID, Type: "message", Role: output.Role}
 			for _, content := range output.Content {
 				if content.Type == "output_text" {
-					result.Output = append(result.Output, inference.Item{Type: "message", Role: output.Role, Text: content.Text})
+					item.Text += content.Text
 				}
 			}
+			if item.Text != "" {
+				result.Output = append(result.Output, item)
+			}
+		case "reasoning":
+			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, EncryptedContent: append(json.RawMessage(nil), output.EncryptedContent...)})
 		case "function_call":
-			result.Output = append(result.Output, inference.Item{Type: output.Type, CallID: output.CallID, Name: output.Name, Arguments: append(json.RawMessage(nil), output.Arguments...)})
+			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, CallID: output.CallID, Name: output.Name, Arguments: append(json.RawMessage(nil), output.Arguments...)})
 		case "custom_tool_call":
 			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, CallID: output.CallID, Name: output.Name, Namespace: output.Namespace, Input: output.Input})
 		}
@@ -354,15 +364,16 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 			Usage  json.RawMessage `json:"usage"`
 		} `json:"response"`
 		Item *struct {
-			ID        string            `json:"id"`
-			Type      string            `json:"type"`
-			Role      string            `json:"role"`
-			CallID    string            `json:"call_id"`
-			Name      string            `json:"name"`
-			Namespace string            `json:"namespace"`
-			Input     string            `json:"input"`
-			Arguments string            `json:"arguments"`
-			Content   []responseContent `json:"content"`
+			ID               string            `json:"id"`
+			Type             string            `json:"type"`
+			Role             string            `json:"role"`
+			CallID           string            `json:"call_id"`
+			Name             string            `json:"name"`
+			Namespace        string            `json:"namespace"`
+			Input            string            `json:"input"`
+			Arguments        string            `json:"arguments"`
+			EncryptedContent json.RawMessage   `json:"encrypted_content"`
+			Content          []responseContent `json:"content"`
 		} `json:"item"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -389,6 +400,7 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 		if event.ArgumentsDelta == "" {
 			event.ArgumentsDelta = frame.Item.Arguments
 		}
+		event.EncryptedContent = append(json.RawMessage(nil), frame.Item.EncryptedContent...)
 		for _, content := range frame.Item.Content {
 			if content.Type == "output_text" {
 				event.ItemText += content.Text
