@@ -118,6 +118,12 @@ func validateItem(item Item) error {
 			}
 		}
 	default:
+		if strings.HasSuffix(item.Type, "_call_output") {
+			if item.CallID == "" || len(item.Output) == 0 {
+				return errors.New("call output requires call_id and output")
+			}
+			return nil
+		}
 		return fmt.Errorf("unsupported item type %q", item.Type)
 	}
 	return nil

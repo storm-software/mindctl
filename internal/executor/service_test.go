@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -299,6 +300,19 @@ func TestNormalizedFeaturesTreatsWebSearchAsHostedTool(t *testing.T) {
 		Tools: []inference.Tool{{Type: "web_search"}},
 	}, conversation.Turn{})
 	if !features.NeedsHostedTools || features.NeedsFunctions || features.NeedsNativeTools || len(features.HostedToolTypes) != 1 || features.HostedToolTypes[0] != "web_search" {
+		t.Fatalf("features=%+v", features)
+	}
+}
+
+func TestNormalizedFeaturesTreatsComputerCallOutputAsNativeFunctionUse(t *testing.T) {
+	features := normalizedFeatures(domain.RequestFeatures{}, inference.Request{
+		Input: []inference.Item{{
+			Type:   "computer_call_output",
+			CallID: "call_computer",
+			Output: json.RawMessage(`""`),
+		}},
+	}, conversation.Turn{})
+	if !features.NeedsFunctions || !features.NeedsNativeTools {
 		t.Fatalf("features=%+v", features)
 	}
 }

@@ -245,6 +245,9 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 		}
 		return []inference.Item{item}, nil
 	default:
+		if strings.HasSuffix(wire.Type, "_call_output") {
+			return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Output: wire.Output}}, nil
+		}
 		return nil, fmt.Errorf("unsupported item type %q", wire.Type)
 	}
 }

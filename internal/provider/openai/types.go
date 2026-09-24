@@ -84,7 +84,7 @@ type responseInputItem struct {
 	CallID           string            `json:"call_id,omitempty"`
 	Name             string            `json:"name,omitempty"`
 	Namespace        string            `json:"namespace,omitempty"`
-	Input            string            `json:"input,omitempty"`
+	Input            *string           `json:"input,omitempty"`
 	Arguments        json.RawMessage   `json:"arguments,omitempty"`
 	Output           json.RawMessage   `json:"output,omitempty"`
 	EncryptedContent json.RawMessage   `json:"encrypted_content,omitempty"`
@@ -236,7 +236,7 @@ func toResponseInput(item inference.Item) responseInputItem {
 		}
 		return encoded
 	case "custom_tool_call":
-		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: item.Input}
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: nonEmptyStringPointer(item.Input)}
 	case "custom_tool_call_output":
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Output: item.Output}
 	case "reasoning":
@@ -247,13 +247,20 @@ func toResponseInput(item inference.Item) responseInputItem {
 }
 
 func toResponseInputForContinuation(item inference.Item, codexContinuation bool) responseInputItem {
-	if codexContinuation && item.Type == "custom_tool_call_output" {
-		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Input: customToolOutputInput(item.Output)}
+	if codexContinuation && strings.HasSuffix(item.Type, "_call_output") {
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Input: stringPointer(callOutputInput(item.Output))}
 	}
 	return toResponseInput(item)
 }
 
-func customToolOutputInput(output json.RawMessage) string {
+func nonEmptyStringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return stringPointer(value)
+}
+
+func callOutputInput(output json.RawMessage) string {
 	var text string
 	if json.Unmarshal(output, &text) == nil {
 		return text
@@ -288,6 +295,12 @@ func stringPointer(value string) *string { return &value }
 
 func validateCapabilities(model domain.Model, request inference.Request) error {
 	for _, item := range request.Input {
+		if strings.HasSuffix(item.Type, "_call_output") {
+			if !model.Capabilities.Functions {
+				return unsupported("functions")
+			}
+			continue
+		}
 		switch item.Type {
 		case "message":
 			if !model.Capabilities.Text {

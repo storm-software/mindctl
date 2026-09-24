@@ -348,6 +348,84 @@ func TestOpenAICodexCustomToolContinuationUsesInputAndPreservesSafeDiagnostic(t 
 	}
 }
 
+func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
+	tests := []struct {
+		name           string
+		client         *Client
+		item           inference.Item
+		wantInput      bool
+		wantInputValue string
+		wantOutput     bool
+	}{
+		{
+			name:           "Codex custom tool output",
+			client:         NewChatGPTOAuthClient("https://provider.example", nil),
+			item:           inference.Item{Type: "custom_tool_call_output", CallID: "call_custom", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:      true,
+			wantInputValue: `{"status":"complete"}`,
+			wantOutput:     false,
+		},
+		{
+			name:           "Codex function output",
+			client:         NewChatGPTOAuthClient("https://provider.example", nil),
+			item:           inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:      true,
+			wantInputValue: `{"status":"complete"}`,
+			wantOutput:     false,
+		},
+		{
+			name:           "Codex computer output",
+			client:         NewChatGPTOAuthClient("https://provider.example", nil),
+			item:           inference.Item{Type: "computer_call_output", CallID: "call_computer", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:      true,
+			wantInputValue: `{"status":"complete"}`,
+			wantOutput:     false,
+		},
+		{
+			name:           "Codex empty string function output",
+			client:         NewChatGPTOAuthClient("https://provider.example", nil),
+			item:           inference.Item{Type: "function_call_output", CallID: "call_empty", Output: json.RawMessage(`""`)},
+			wantInput:      true,
+			wantInputValue: "",
+			wantOutput:     false,
+		},
+		{
+			name:       "API key function output",
+			client:     NewClient("https://provider.example", "api-key", nil),
+			item:       inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:  false,
+			wantOutput: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := tt.client.toResponsesRequest(openAIModel(), inference.Request{
+				Model: "gateway-model",
+				Input: []inference.Item{
+					{Type: "message", Role: "user", Text: "continue"},
+					tt.item,
+				},
+			}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var encoded map[string]any
+			if err := json.Unmarshal(body.Input[1], &encoded); err != nil {
+				t.Fatal(err)
+			}
+			_, hasInput := encoded["input"]
+			_, hasOutput := encoded["output"]
+			if hasInput != tt.wantInput || hasOutput != tt.wantOutput {
+				t.Fatalf("encoded output=%v, want input=%t output=%t", encoded, tt.wantInput, tt.wantOutput)
+			}
+			if tt.wantInput && encoded["input"] != tt.wantInputValue {
+				t.Fatalf("input=%#v, want %q", encoded["input"], tt.wantInputValue)
+			}
+		})
+	}
+}
+
 func TestOpenAIRedirectDoesNotForwardChatGPTOAuth(t *testing.T) {
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))

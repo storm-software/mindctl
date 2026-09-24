@@ -61,6 +61,16 @@ func TestDecodeResponseRequestPreservesCodexReasoningContinuation(t *testing.T) 
 	}
 }
 
+func TestDecodeResponseRequestPreservesCodexComputerCallOutput(t *testing.T) {
+	got, _, err := decode(t, `{
+  "model":"mindctl-auto",
+  "input":[{"type":"computer_call_output","call_id":"call_computer","output":""}]
+}`, 1<<20)
+	if err != nil || len(got.Input) != 1 || got.Input[0].Type != "computer_call_output" || got.Input[0].CallID != "call_computer" || string(got.Input[0].Output) != `""` {
+		t.Fatalf("request=%+v err=%v", got, err)
+	}
+}
+
 func TestDecodeResponseRequestPreservesCodexWebSearchTool(t *testing.T) {
 	got, _, err := decode(t, `{
   "model":"mindctl-auto",
