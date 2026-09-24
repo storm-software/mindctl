@@ -164,6 +164,45 @@ func TestOpenAIRejectsConfiguredHostedToolWithoutNetworkCall(t *testing.T) {
 	}
 }
 
+func TestOpenAIForwardsCodexWebSearchTool(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []struct {
+				Type              string `json:"type"`
+				ExternalWebAccess *bool  `json:"external_web_access"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Tools) != 1 || body.Tools[0].Type != "web_search" || body.Tools[0].ExternalWebAccess == nil || !*body.Tools[0].ExternalWebAccess {
+			t.Fatalf("tools=%+v", body.Tools)
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"gpt-test","output":[]}`)
+	}))
+	defer server.Close()
+
+	external := true
+	request := textRequest()
+	request.Tools = []inference.Tool{{Type: "web_search", ExternalWebAccess: &external}}
+	if _, err := newClient(server.URL).Execute(context.Background(), openAIModel(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenAIPreservesMultipartMessageContent(t *testing.T) {
+	input := toResponseInput(inference.Item{
+		ID: "msg_1", Type: "message", Role: "user", Text: "combined",
+		Content: []inference.ContentPart{
+			{Type: "input_text", Text: "first"},
+			{Type: "input_text", Text: "second"},
+		},
+	})
+	if input.ID != "msg_1" || len(input.Content) != 2 || input.Content[0].Text != "first" || input.Content[1].Text != "second" {
+		t.Fatalf("input=%+v", input)
+	}
+}
+
 func TestOpenAIRejectsModelWithoutUpstreamIDBeforeNetworkCall(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))

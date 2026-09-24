@@ -138,6 +138,11 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 				mapped.Capabilities.Images = true
 			case "json_schema":
 				mapped.Capabilities.JSONSchema = true
+			case "web_search":
+				if mapped.Capabilities.HostedTools == nil {
+					mapped.Capabilities.HostedTools = make(map[string]bool)
+				}
+				mapped.Capabilities.HostedTools["web_search"] = true
 			}
 		}
 		for task, prior := range model.TaskSuccessPriors {

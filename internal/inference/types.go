@@ -44,8 +44,17 @@ type Item struct {
 	ID, Type, Role, Text, CallID, Name, Namespace, Input string
 	ImageURL                                             json.RawMessage
 	Arguments, Output                                    json.RawMessage
+	Content                                              []ContentPart
 	Tools                                                []Tool
 	ProviderData                                         json.RawMessage
+}
+
+// ContentPart preserves the ordering and shape of a Responses message's
+// content array while the gateway derives portable text and image features.
+type ContentPart struct {
+	Type     string
+	Text     string
+	ImageURL json.RawMessage
 }
 
 // Tool describes a custom function tool.
@@ -54,6 +63,7 @@ type Tool struct {
 	Parameters              json.RawMessage
 	Format                  *ToolFormat
 	DeferLoading            *bool
+	ExternalWebAccess       *bool
 	Tools                   []Tool
 	Strict                  bool
 }

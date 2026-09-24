@@ -46,14 +46,15 @@ type responseAccessPrograms struct {
 }
 
 type responseTool struct {
-	Type         string              `json:"type"`
-	Name         string              `json:"name,omitempty"`
-	Description  string              `json:"description,omitempty"`
-	Parameters   json.RawMessage     `json:"parameters,omitempty"`
-	Format       *responseToolFormat `json:"format,omitempty"`
-	DeferLoading *bool               `json:"defer_loading,omitempty"`
-	Tools        []responseTool      `json:"tools,omitempty"`
-	Strict       bool                `json:"strict,omitempty"`
+	Type              string              `json:"type"`
+	Name              string              `json:"name,omitempty"`
+	Description       string              `json:"description,omitempty"`
+	Parameters        json.RawMessage     `json:"parameters,omitempty"`
+	Format            *responseToolFormat `json:"format,omitempty"`
+	DeferLoading      *bool               `json:"defer_loading,omitempty"`
+	ExternalWebAccess *bool               `json:"external_web_access,omitempty"`
+	Tools             []responseTool      `json:"tools,omitempty"`
+	Strict            bool                `json:"strict,omitempty"`
 }
 
 type responseToolFormat struct {
@@ -197,6 +198,13 @@ func cloneStringMap(values map[string]string) map[string]string {
 func toResponseInput(item inference.Item) responseInputItem {
 	switch item.Type {
 	case "message":
+		if len(item.Content) != 0 {
+			content := make([]responseContent, 0, len(item.Content))
+			for _, part := range item.Content {
+				content = append(content, responseContent{Type: part.Type, Text: part.Text, ImageURL: append(json.RawMessage(nil), part.ImageURL...)})
+			}
+			return responseInputItem{ID: item.ID, Type: item.Type, Role: item.Role, Content: content}
+		}
 		contentType := "input_text"
 		if item.Role == "assistant" {
 			contentType = "output_text"
@@ -222,7 +230,7 @@ func toResponseInput(item inference.Item) responseInputItem {
 func encodeTool(tool inference.Tool) responseTool {
 	encoded := responseTool{
 		Type: tool.Type, Name: tool.Name, Description: tool.Description,
-		Parameters: tool.Parameters, DeferLoading: cloneBoolPointer(tool.DeferLoading), Strict: tool.Strict,
+		Parameters: tool.Parameters, DeferLoading: cloneBoolPointer(tool.DeferLoading), ExternalWebAccess: cloneBoolPointer(tool.ExternalWebAccess), Strict: tool.Strict,
 	}
 	if tool.Format != nil {
 		encoded.Format = &responseToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}
@@ -251,11 +259,17 @@ func validateCapabilities(model domain.Model, request inference.Request) error {
 		}
 	}
 	for _, tool := range request.Tools {
-		if tool.Type != "function" && tool.Type != "custom" && tool.Type != "namespace" {
+		switch tool.Type {
+		case "web_search":
+			if !model.Capabilities.HostedTools[tool.Type] {
+				return unsupported(tool.Type)
+			}
+		case "function", "custom", "namespace":
+			if !model.Capabilities.Functions {
+				return unsupported("functions")
+			}
+		default:
 			return unsupported(tool.Type)
-		}
-		if !model.Capabilities.Functions {
-			return unsupported("functions")
 		}
 	}
 	if request.TextFormat != nil && !model.Capabilities.JSONSchema {

@@ -215,11 +215,15 @@ func normalizedFeatures(supplied domain.RequestFeatures, request inference.Reque
 	if request.MaxOutputTokens > features.MaxOutputTokens {
 		features.MaxOutputTokens = request.MaxOutputTokens
 	}
-	features.NeedsFunctions = features.NeedsFunctions || len(request.Tools) > 0
 	for _, tool := range request.Tools {
-		if tool.Type != "function" {
+		switch tool.Type {
+		case "web_search":
+			features.HostedToolTypes = append(features.HostedToolTypes, tool.Type)
+		case "function":
+			features.NeedsFunctions = true
+		default:
+			features.NeedsFunctions = true
 			features.NeedsNativeTools = true
-			break
 		}
 	}
 	features.NeedsJSONSchema = features.NeedsJSONSchema || request.TextFormat != nil

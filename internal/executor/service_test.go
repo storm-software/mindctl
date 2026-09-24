@@ -209,6 +209,16 @@ func hostedToolInput(tool string) Input {
 	return in
 }
 
+func TestNormalizedFeaturesTreatsWebSearchAsHostedTool(t *testing.T) {
+	features := normalizedFeatures(domain.RequestFeatures{}, inference.Request{
+		Input: []inference.Item{{Type: "message", Role: "user", Text: "hello"}},
+		Tools: []inference.Tool{{Type: "web_search"}},
+	}, conversation.Turn{})
+	if !features.NeedsHostedTools || features.NeedsFunctions || features.NeedsNativeTools || len(features.HostedToolTypes) != 1 || features.HostedToolTypes[0] != "web_search" {
+		t.Fatalf("features=%+v", features)
+	}
+}
+
 type fakeClassifier struct {
 	Calls    int
 	Judgment domain.ClassifierJudgment

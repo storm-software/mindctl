@@ -95,14 +95,15 @@ type wireJSONSchemaFormat struct {
 }
 
 type wireTool struct {
-	Type         string          `json:"type"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	Parameters   json.RawMessage `json:"parameters"`
-	Format       *wireToolFormat `json:"format"`
-	DeferLoading *bool           `json:"defer_loading"`
-	Tools        []wireTool      `json:"tools"`
-	Strict       bool            `json:"strict"`
+	Type              string          `json:"type"`
+	Name              string          `json:"name"`
+	Description       string          `json:"description"`
+	Parameters        json.RawMessage `json:"parameters"`
+	Format            *wireToolFormat `json:"format"`
+	DeferLoading      *bool           `json:"defer_loading"`
+	ExternalWebAccess *bool           `json:"external_web_access"`
+	Tools             []wireTool      `json:"tools"`
+	Strict            bool            `json:"strict"`
 }
 
 type wireToolFormat struct {
@@ -251,7 +252,7 @@ func decodeMessage(wire wireInputItem) ([]inference.Item, error) {
 	if err := decodeStrict(wire.Content, &parts); err != nil {
 		return nil, errors.New("message content must be text or content parts")
 	}
-	items := make([]inference.Item, 0, len(parts))
+	item := inference.Item{ID: wire.ID, Type: "message", Role: wire.Role}
 	for _, raw := range parts {
 		var part wireContentPart
 		if err := decodeStrict(raw, &part); err != nil {
@@ -259,20 +260,25 @@ func decodeMessage(wire wireInputItem) ([]inference.Item, error) {
 		}
 		switch part.Type {
 		case "input_text", "output_text":
-			items = append(items, inference.Item{ID: wire.ID, Type: "message", Role: wire.Role, Text: part.Text})
+			item.Content = append(item.Content, inference.ContentPart{Type: part.Type, Text: part.Text})
+			item.Text += part.Text
 		case "input_image":
-			items = append(items, inference.Item{Type: "input_image", Role: wire.Role, ImageURL: part.ImageURL})
+			imageURL := append(json.RawMessage(nil), part.ImageURL...)
+			item.Content = append(item.Content, inference.ContentPart{Type: part.Type, ImageURL: imageURL})
+			if len(item.ImageURL) == 0 {
+				item.ImageURL = append(json.RawMessage(nil), imageURL...)
+			}
 		default:
 			return nil, fmt.Errorf("unsupported content type %q", part.Type)
 		}
 	}
-	return items, nil
+	return []inference.Item{item}, nil
 }
 
 func decodeWireTool(tool wireTool) inference.Tool {
 	decoded := inference.Tool{
 		Type: tool.Type, Name: tool.Name, Description: tool.Description,
-		Parameters: append(json.RawMessage(nil), tool.Parameters...), DeferLoading: cloneBool(tool.DeferLoading), Strict: tool.Strict,
+		Parameters: append(json.RawMessage(nil), tool.Parameters...), DeferLoading: cloneBool(tool.DeferLoading), ExternalWebAccess: cloneBool(tool.ExternalWebAccess), Strict: tool.Strict,
 	}
 	if tool.Format != nil {
 		decoded.Format = &inference.ToolFormat{Type: tool.Format.Type, Syntax: tool.Format.Syntax, Definition: tool.Format.Definition}

@@ -125,6 +125,8 @@ func validateTool(tool Tool) error {
 		if strings.TrimSpace(tool.Name) == "" {
 			return errors.New("must be a named function")
 		}
+	case "web_search":
+		return nil
 	case "custom":
 		if strings.TrimSpace(tool.Name) == "" || tool.Format == nil || strings.TrimSpace(tool.Format.Type) == "" || strings.TrimSpace(tool.Format.Definition) == "" {
 			return errors.New("must be a named custom tool with a format")

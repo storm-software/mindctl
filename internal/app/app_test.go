@@ -37,7 +37,7 @@ func fixture(t *testing.T) (config.Config, map[string]string) {
 			Encryption: config.EncryptionConfig{ActiveKeyID: "active", Keys: map[string]string{"active": "TEST_ENCRYPTION_KEY", "old": "TEST_OLD_KEY"}},
 			Routing:    config.RoutingConfig{MinTier: "T0", MaxTier: "T6"},
 			Providers:  []config.ProviderConfig{{ID: "openai", BaseURL: "https://provider.example.com", APIKeyEnv: "TEST_PROVIDER_KEY"}},
-			Models:     []config.ModelConfig{{ID: "first", Provider: "openai", Tier: "T4", Available: true, Capabilities: []string{"chat", "tools", "images", "json_schema"}, ContextWindow: 32000, InputPrice: 2, OutputPrice: 8, SuccessPrior: .9, TaskSuccessPriors: map[string]float64{"coding": .95}}},
+			Models:     []config.ModelConfig{{ID: "first", Provider: "openai", Tier: "T4", Available: true, Capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, ContextWindow: 32000, InputPrice: 2, OutputPrice: 8, SuccessPrior: .9, TaskSuccessPriors: map[string]float64{"coding": .95}}},
 		}, map[string]string{
 			"TEST_GATEWAY_TOKEN": "private-gateway-token", "TEST_LAYA_TOKEN": "private-laya-token", "TEST_PROVIDER_KEY": "private-provider-token",
 			"TEST_ENCRYPTION_KEY": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)),
@@ -64,6 +64,9 @@ func TestNewInitializesStorageKeyringAndStableHandler(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	if a.Handler() != a.Handler() || status(a, "/healthz") != 200 || status(a, "/readyz") != 200 {
 		t.Fatal("operational handler is not stable and ready")
+	}
+	if !a.catalog[0].Capabilities.HostedTools["web_search"] {
+		t.Fatal("web_search capability was not mapped")
 	}
 	var migrations int
 	if err := a.store.SQL().QueryRow("SELECT count(*) FROM schema_migrations").Scan(&migrations); err != nil || migrations != 3 {

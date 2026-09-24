@@ -179,6 +179,10 @@ func cloneItem(item inference.Item) inference.Item {
 	item.ImageURL = append(item.ImageURL[:0:0], item.ImageURL...)
 	item.Arguments = append(item.Arguments[:0:0], item.Arguments...)
 	item.Output = append(item.Output[:0:0], item.Output...)
+	item.Content = append([]inference.ContentPart(nil), item.Content...)
+	for index := range item.Content {
+		item.Content[index].ImageURL = append(item.Content[index].ImageURL[:0:0], item.Content[index].ImageURL...)
+	}
 	item.ProviderData = append(item.ProviderData[:0:0], item.ProviderData...)
 	if bytes.Equal(bytes.TrimSpace(item.ProviderData), []byte("null")) {
 		item.ProviderData = nil

@@ -42,11 +42,22 @@ func TestDecodeResponseRequestPreservesPortableItems(t *testing.T) {
   "text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":true}},
   "max_output_tokens":123
 }`, 1<<20)
-	if err != nil || len(got.Input) != 4 || got.Input[2].CallID != "call_1" || got.Tools[0].Name != "lookup" || got.TextFormat == nil || got.TextFormat.Name != "answer" || got.MaxOutputTokens != 123 {
+	if err != nil || len(got.Input) != 3 || got.Input[1].CallID != "call_1" || len(got.Input[0].Content) != 2 || got.Input[0].Content[0].Type != "input_text" || got.Input[0].Content[1].Type != "input_image" || got.Tools[0].Name != "lookup" || got.TextFormat == nil || got.TextFormat.Name != "answer" || got.MaxOutputTokens != 123 {
 		t.Fatalf("request=%+v controls=%+v err=%v", got, controls, err)
 	}
 	if got.PreviousResponseID != "resp_prior_1" {
 		t.Fatalf("previous response ID = %q", got.PreviousResponseID)
+	}
+}
+
+func TestDecodeResponseRequestPreservesCodexWebSearchTool(t *testing.T) {
+	got, _, err := decode(t, `{
+  "model":"mindctl-auto",
+  "input":[{"id":"msg_1","type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}],
+  "tools":[{"type":"web_search","external_web_access":true}]
+}`, 1<<20)
+	if err != nil || len(got.Tools) != 1 || got.Tools[0].Type != "web_search" || got.Tools[0].ExternalWebAccess == nil || !*got.Tools[0].ExternalWebAccess {
+		t.Fatalf("request=%+v err=%v", got, err)
 	}
 }
 
