@@ -106,6 +106,36 @@ type ProviderAttempt struct {
 	Error                            []byte
 }
 
+// HistoryFilter selects response history. Attempt filters must all match the
+// same provider attempt. Zero times and a zero limit leave those bounds open.
+type HistoryFilter struct {
+	Provider, ModelID, Status string
+	Since, Until              time.Time
+	Limit                     int
+}
+
+// HistoryAttempt contains one model selection and its retained outcome.
+// ContentRetained is false when the attempt is still running or retention has
+// removed its encrypted result or error body.
+type HistoryAttempt struct {
+	ID, Provider, ModelID, Status, ProviderRequestID string
+	Tier                                             domain.Tier
+	CreatedAt                                        time.Time
+	CompletedAt                                      *time.Time
+	Result                                           *inference.Result
+	Error                                            []byte
+	ContentRetained                                  bool
+}
+
+// HistoryRecord is one client request and every model attempt made for it.
+type HistoryRecord struct {
+	ResponseID, ConversationID, Status string
+	CreatedAt                          time.Time
+	Request                            []inference.Item
+	RequestContentRetained             bool
+	Attempts                           []HistoryAttempt
+}
+
 // ConversationRepository adds the transactional persistence needed by the
 // gateway-owned conversation service.
 type ConversationRepository interface {
@@ -120,6 +150,7 @@ type ConversationRepository interface {
 type Repository interface {
 	WithTx(context.Context, func(Tx) error) error
 	GetRequest(context.Context, string) (RequestRecord, error)
+	ListHistory(context.Context, HistoryFilter) ([]HistoryRecord, error)
 	// DeleteExpiredContent deletes blobs strictly older than now-retention and
 	// returns the blob count. Zero retention is unlimited and performs no work.
 	DeleteExpiredContent(context.Context, time.Duration, time.Time) (int64, error)

@@ -17,6 +17,12 @@ import (
 	"time"
 
 	"github.com/storm-software/mindctl/internal/config"
+	"github.com/storm-software/mindctl/internal/contentcrypto"
+	"github.com/storm-software/mindctl/internal/conversation"
+	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/inference"
+	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/storage/sqlite"
 	"gopkg.in/yaml.v3"
 )
 
@@ -237,6 +243,144 @@ func TestProviderCommandsAliasProviderWideModelChanges(t *testing.T) {
 	}
 	if got, want := stdout.String(), "openai\ndeepseek\n"; got != want {
 		t.Fatalf("provider list output = %q; want %q", got, want)
+	}
+}
+
+func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
+	path := mainConfig(t)
+	cfg, err := config.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := contentcrypto.New("active", map[string][]byte{
+		"active": bytes.Repeat([]byte{4}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sqlite.Open(context.Background(), sqlite.Options{
+		Path: cfg.SQLite.Path, Keyring: keyring,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	svc := conversation.New(db)
+
+	first, err := svc.Start(context.Background(), "client-a", inference.Request{
+		Input: []inference.Item{{Type: "message", Role: "user", Text: "hidden request"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstAttempt, err := svc.BeginAttempt(context.Background(), first, router.Decision{
+		Provider: "anthropic", ModelID: "claude-small", Tier: domain.T2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FailAttempt(
+		context.Background(),
+		firstAttempt,
+		"upstream-first",
+		context.DeadlineExceeded,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := svc.Start(context.Background(), "client-b", inference.Request{
+		Input: []inference.Item{{Type: "message", Role: "user", Text: "visible request"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.BeginAttempt(context.Background(), second, router.Decision{
+		Provider: "openai", ModelID: "gpt-large", Tier: domain.T4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(context.Background(), second, router.Pin{
+		Provider: "openai", ModelID: "gpt-large", Floor: domain.T4,
+	}, inference.Result{
+		ProviderRequestID: "upstream-second",
+		Status:            "completed",
+		Output: []inference.Item{{
+			Type: "message", Role: "assistant", Text: "visible response",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	firstCreated := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	secondCreated := firstCreated.Add(time.Hour)
+	for _, update := range []struct {
+		responseID string
+		created    time.Time
+	}{{first.ResponseID, firstCreated}, {second.ResponseID, secondCreated}} {
+		if _, err := db.SQL().Exec(
+			"UPDATE responses SET created_at = ? WHERE id = ?",
+			update.created.UnixNano(),
+			update.responseID,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	err = run(context.Background(), []string{
+		"--config", path,
+		"history",
+		"--provider", "openai",
+		"--model", "gpt-large",
+		"--status", "succeeded",
+		"--since", "2026-09-23T12:30:00Z",
+		"--until", "2026-09-23T14:00:00Z",
+		"--limit", "1",
+	}, &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"2026-09-23T13:00:00Z  " + second.ResponseID + "  completed",
+		"request:\n    visible request",
+		"attempt: openai/gpt-large (T4, succeeded)",
+		"response:\n    visible response",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("history output missing %q:\n%s", want, output)
+		}
+	}
+	for _, unwanted := range []string{"hidden request", "claude-small"} {
+		if strings.Contains(output, unwanted) {
+			t.Errorf("history output unexpectedly contains %q:\n%s", unwanted, output)
+		}
+	}
+}
+
+func TestHistoryCommandRejectsInvalidFilters(t *testing.T) {
+	path := mainConfig(t)
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"negative limit", []string{"history", "--limit", "-1"}, "limit must be nonnegative"},
+		{"invalid since", []string{"history", "--since", "yesterday"}, "parse --since"},
+		{
+			"reversed range",
+			[]string{"history", "--since", "2026-09-24T00:00:00Z", "--until", "2026-09-23T00:00:00Z"},
+			"since must not be after until",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"--config", path}, test.args...)
+			err := run(context.Background(), args, io.Discard, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("history error = %v; want %q", err, test.want)
+			}
+		})
 	}
 }
 

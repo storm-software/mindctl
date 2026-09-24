@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +22,10 @@ import (
 	"github.com/spf13/viper"
 	"github.com/storm-software/mindctl/internal/app"
 	"github.com/storm-software/mindctl/internal/config"
+	"github.com/storm-software/mindctl/internal/contentcrypto"
+	"github.com/storm-software/mindctl/internal/inference"
+	"github.com/storm-software/mindctl/internal/storage"
+	"github.com/storm-software/mindctl/internal/storage/sqlite"
 	"gopkg.in/yaml.v3"
 )
 
@@ -96,8 +102,204 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		},
 	})
 	root.AddCommand(newConfigCommand())
-	root.AddCommand(newModelCommand(settings), newProviderCommand(settings))
+	root.AddCommand(
+		newModelCommand(settings),
+		newProviderCommand(settings),
+		newHistoryCommand(settings),
+	)
 	return root
+}
+
+func newHistoryCommand(settings *viper.Viper) *cobra.Command {
+	var filter storage.HistoryFilter
+	var since, until string
+	command := &cobra.Command{
+		Use:   "history",
+		Short: "List processed requests, selected models, and responses",
+		Args:  noArgs("unexpected arguments for history"),
+		RunE: func(command *cobra.Command, _ []string) error {
+			var err error
+			filter.Since, err = parseHistoryTime("since", since)
+			if err != nil {
+				return err
+			}
+			filter.Until, err = parseHistoryTime("until", until)
+			if err != nil {
+				return err
+			}
+			if filter.Limit < 0 {
+				return errors.New("limit must be nonnegative")
+			}
+			if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
+				return errors.New("since must not be after until")
+			}
+			switch filter.Status {
+			case "", "started", "succeeded", "failed":
+			default:
+				return errors.New("status must be started, succeeded, or failed")
+			}
+
+			cfg, err := readHistoryConfig(command, settings)
+			if err != nil {
+				return err
+			}
+			db, err := openHistoryStorage(command.Context(), cfg, os.LookupEnv)
+			if err != nil {
+				return err
+			}
+			defer db.Close()
+
+			records, err := db.ListHistory(command.Context(), filter)
+			if err != nil {
+				return err
+			}
+			return writeHistory(command.OutOrStdout(), records)
+		},
+	}
+	command.Flags().StringVar(&filter.Provider, "provider", "", "filter by selected provider")
+	command.Flags().StringVar(&filter.ModelID, "model", "", "filter by selected model")
+	command.Flags().StringVar(&filter.Status, "status", "", "filter by attempt status")
+	command.Flags().StringVar(&since, "since", "", "include requests at or after an RFC3339 timestamp")
+	command.Flags().StringVar(&until, "until", "", "include requests at or before an RFC3339 timestamp")
+	command.Flags().IntVar(&filter.Limit, "limit", 0, "maximum requests to return (0 means all)")
+	return command
+}
+
+func parseHistoryTime(name, value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse --%s as RFC3339: %w", name, err)
+	}
+	return parsed, nil
+}
+
+func readHistoryConfig(command *cobra.Command, settings *viper.Viper) (config.Config, error) {
+	path, err := selectedConfigPath(command, settings)
+	if err != nil {
+		return config.Config{}, err
+	}
+	return config.Read(path)
+}
+
+func openHistoryStorage(
+	ctx context.Context,
+	cfg config.Config,
+	getenv func(string) (string, bool),
+) (*sqlite.DB, error) {
+	keys := make(map[string][]byte, len(cfg.Encryption.Keys))
+	defer func() {
+		for _, key := range keys {
+			clear(key)
+		}
+	}()
+	for id, environmentName := range cfg.Encryption.Keys {
+		value, exists := getenv(environmentName)
+		if !exists || value == "" {
+			return nil, fmt.Errorf("encryption key environment variable %s is not set", environmentName)
+		}
+		decoded, err := base64.StdEncoding.DecodeString(value)
+		if err != nil || len(decoded) != 32 {
+			return nil, errors.New("invalid encryption key")
+		}
+		keys[id] = decoded
+	}
+	keyring, err := contentcrypto.New(cfg.Encryption.ActiveKeyID, keys)
+	if err != nil {
+		return nil, err
+	}
+	return sqlite.Open(ctx, sqlite.Options{Path: cfg.SQLite.Path, Keyring: keyring})
+}
+
+func writeHistory(output io.Writer, records []storage.HistoryRecord) error {
+	for index, record := range records {
+		if index > 0 {
+			if _, err := fmt.Fprintln(output); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(
+			output,
+			"%s  %s  %s\n",
+			record.CreatedAt.Format(time.RFC3339),
+			record.ResponseID,
+			record.Status,
+		); err != nil {
+			return err
+		}
+		if !record.RequestContentRetained {
+			if _, err := fmt.Fprintln(output, "  request: [not retained]"); err != nil {
+				return err
+			}
+		} else if err := writeHistoryItems(output, "request", record.Request); err != nil {
+			return err
+		}
+		for _, attempt := range record.Attempts {
+			if _, err := fmt.Fprintf(
+				output,
+				"  attempt: %s/%s (%s, %s)\n",
+				attempt.Provider,
+				attempt.ModelID,
+				attempt.Tier,
+				attempt.Status,
+			); err != nil {
+				return err
+			}
+			switch {
+			case attempt.Status == "started":
+				if _, err := fmt.Fprintln(output, "  response: [pending]"); err != nil {
+					return err
+				}
+			case !attempt.ContentRetained:
+				if _, err := fmt.Fprintln(output, "  response: [not retained]"); err != nil {
+					return err
+				}
+			case attempt.Result != nil:
+				if err := writeHistoryItems(output, "response", attempt.Result.Output); err != nil {
+					return err
+				}
+			default:
+				if err := writeIndentedHistoryValue(output, "error", string(attempt.Error)); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func writeHistoryItems(output io.Writer, label string, items []inference.Item) error {
+	if len(items) == 0 {
+		_, err := fmt.Fprintf(output, "  %s: [empty]\n", label)
+		return err
+	}
+	values := make([]string, 0, len(items))
+	for _, item := range items {
+		value := item.Text
+		if value == "" {
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				return fmt.Errorf("encode history %s: %w", label, err)
+			}
+			value = string(encoded)
+		}
+		values = append(values, value)
+	}
+	return writeIndentedHistoryValue(output, label, strings.Join(values, "\n"))
+}
+
+func writeIndentedHistoryValue(output io.Writer, label, value string) error {
+	if _, err := fmt.Fprintf(output, "  %s:\n", label); err != nil {
+		return err
+	}
+	for line := range strings.SplitSeq(value, "\n") {
+		if _, err := fmt.Fprintf(output, "    %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func selectedConfigPath(command *cobra.Command, settings *viper.Viper) (string, error) {

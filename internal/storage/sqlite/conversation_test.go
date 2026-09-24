@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,179 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/storage"
 )
+
+func TestListHistoryReturnsNewestRequestsWithAttemptsAndDecryptedContent(t *testing.T) {
+	db := openTestDB(t, filepath.Join(t.TempDir(), "history.db"))
+	svc := conversation.New(db)
+	ctx := context.Background()
+
+	first, err := svc.Start(ctx, "client-a", inference.Request{
+		Input: []inference.Item{{Type: "message", Role: "user", Text: "first request"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := svc.BeginAttempt(ctx, first, router.Decision{
+		Provider: "openai", ModelID: "gpt-small", Tier: domain.T2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FailAttempt(ctx, failed, "upstream-failed", errors.New("retryable failure")); err != nil {
+		t.Fatal(err)
+	}
+	succeeded, err := svc.BeginAttempt(ctx, first, router.Decision{
+		Provider: "anthropic", ModelID: "claude-large", Tier: domain.T4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(ctx, first, router.Pin{
+		Provider: "anthropic", ModelID: "claude-large", Floor: domain.T4,
+	}, inference.Result{
+		ProviderRequestID: "upstream-success",
+		Status:            "completed",
+		Output: []inference.Item{{
+			Type: "message", Role: "assistant", Text: "first response",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := svc.Start(ctx, "client-b", inference.Request{
+		Input: []inference.Item{{Type: "message", Role: "user", Text: "second request"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondAttempt, err := svc.BeginAttempt(ctx, second, router.Decision{
+		Provider: "openai", ModelID: "gpt-large", Tier: domain.T4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(ctx, second, router.Pin{
+		Provider: "openai", ModelID: "gpt-large", Floor: domain.T4,
+	}, inference.Result{
+		ProviderRequestID: "upstream-second",
+		Status:            "completed",
+		Output: []inference.Item{{
+			Type: "message", Role: "assistant", Text: "second response",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	firstCreated := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	secondCreated := firstCreated.Add(time.Hour)
+	for _, update := range []struct {
+		responseID string
+		created    time.Time
+	}{{first.ResponseID, firstCreated}, {second.ResponseID, secondCreated}} {
+		if _, err := db.SQL().Exec(
+			"UPDATE responses SET created_at = ? WHERE id = ?",
+			update.created.UnixNano(),
+			update.responseID,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	records, err := db.ListHistory(ctx, storage.HistoryFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("history length = %d; want 2", len(records))
+	}
+	if records[0].ResponseID != second.ResponseID || records[1].ResponseID != first.ResponseID {
+		t.Fatalf("response order = [%q %q]", records[0].ResponseID, records[1].ResponseID)
+	}
+	if got := records[1].Request[0].Text; got != "first request" {
+		t.Fatalf("request text = %q", got)
+	}
+	if len(records[1].Attempts) != 2 {
+		t.Fatalf("attempt count = %d; want 2", len(records[1].Attempts))
+	}
+	if got := records[1].Attempts[0]; got.ID != failed.ID || got.Status != "failed" ||
+		got.Provider != "openai" || got.ModelID != "gpt-small" || string(got.Error) != "retryable failure" {
+		t.Fatalf("failed attempt = %#v", got)
+	}
+	if got := records[1].Attempts[1]; got.ID != succeeded.ID || got.Status != "succeeded" ||
+		got.Result == nil || got.Result.Output[0].Text != "first response" {
+		t.Fatalf("successful attempt = %#v", got)
+	}
+	if got := records[0].Attempts[0]; got.ID != secondAttempt.ID || got.Result == nil ||
+		got.Result.Output[0].Text != "second response" {
+		t.Fatalf("second attempt = %#v", got)
+	}
+}
+
+func TestListHistoryCombinesAttemptAndTimeFiltersAndLimit(t *testing.T) {
+	db := openTestDB(t, filepath.Join(t.TempDir(), "history-filter.db"))
+	ctx := context.Background()
+	created := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+
+	for index, fixture := range []struct {
+		responseID string
+		provider   string
+		model      string
+		status     string
+	}{
+		{"resp_old", "openai", "gpt-test", "failed"},
+		{"resp_match", "openai", "gpt-test", "succeeded"},
+		{"resp_other", "anthropic", "claude-test", "succeeded"},
+	} {
+		conversationID := "conv_" + fixture.responseID
+		attemptID := "attempt_" + fixture.responseID
+		stamp := created.Add(time.Duration(index) * time.Hour).UnixNano()
+		if _, err := db.SQL().Exec(
+			"INSERT INTO conversations (id, client_id, created_at, escalation_floor) VALUES (?, 'client', ?, 0)",
+			conversationID,
+			stamp,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.SQL().Exec(
+			"INSERT INTO responses (id, conversation_id, sequence, created_at, status) VALUES (?, ?, 0, ?, 'completed')",
+			fixture.responseID,
+			conversationID,
+			stamp,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.SQL().Exec(
+			`INSERT INTO provider_attempts
+				(id, response_id, sequence, provider, model_id, tier, decision_json, status, created_at)
+				VALUES (?, ?, 0, ?, ?, 2, '{}', ?, ?)`,
+			attemptID,
+			fixture.responseID,
+			fixture.provider,
+			fixture.model,
+			fixture.status,
+			stamp,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	records, err := db.ListHistory(ctx, storage.HistoryFilter{
+		Provider: "openai",
+		ModelID:  "gpt-test",
+		Status:   "succeeded",
+		Since:    created.Add(30 * time.Minute),
+		Until:    created.Add(3 * time.Hour),
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].ResponseID != "resp_match" {
+		t.Fatalf("filtered history = %#v", records)
+	}
+}
 
 func TestConversationPersistsEncryptedProviderBodiesAndFiltersOpaqueData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "conversation.db")

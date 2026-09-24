@@ -190,6 +190,206 @@ func (db *DB) GetRequest(ctx context.Context, id string) (storage.RequestRecord,
 	return record, nil
 }
 
+func (db *DB) ListHistory(ctx context.Context, filter storage.HistoryFilter) ([]storage.HistoryRecord, error) {
+	if filter.Limit < 0 {
+		return nil, failure("validate history filter", errors.New("limit must be nonnegative"))
+	}
+	if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
+		return nil, failure("validate history filter", errors.New("since must not be after until"))
+	}
+
+	records := []storage.HistoryRecord{}
+	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
+		query := `SELECT r.id, r.conversation_id, r.status, r.created_at
+			FROM responses r WHERE 1 = 1`
+		args := []any{}
+		if filter.Provider != "" || filter.ModelID != "" || filter.Status != "" {
+			query += ` AND EXISTS (SELECT 1 FROM provider_attempts a WHERE a.response_id = r.id`
+			if filter.Provider != "" {
+				query += " AND a.provider = ?"
+				args = append(args, filter.Provider)
+			}
+			if filter.ModelID != "" {
+				query += " AND a.model_id = ?"
+				args = append(args, filter.ModelID)
+			}
+			if filter.Status != "" {
+				query += " AND a.status = ?"
+				args = append(args, filter.Status)
+			}
+			query += ")"
+		}
+		if !filter.Since.IsZero() {
+			query += " AND r.created_at >= ?"
+			args = append(args, filter.Since.UnixNano())
+		}
+		if !filter.Until.IsZero() {
+			query += " AND r.created_at <= ?"
+			args = append(args, filter.Until.UnixNano())
+		}
+		query += " ORDER BY r.created_at DESC, r.id DESC"
+		if filter.Limit > 0 {
+			query += " LIMIT ?"
+			args = append(args, filter.Limit)
+		}
+
+		rows, err := conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return failure("list history", err)
+		}
+		for rows.Next() {
+			var record storage.HistoryRecord
+			var createdAt int64
+			if err := rows.Scan(
+				&record.ResponseID,
+				&record.ConversationID,
+				&record.Status,
+				&createdAt,
+			); err != nil {
+				rows.Close()
+				return failure("decode history", err)
+			}
+			record.CreatedAt = time.Unix(0, createdAt).UTC()
+			record.Request = []inference.Item{}
+			record.Attempts = []storage.HistoryAttempt{}
+			records = append(records, record)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return failure("iterate history", err)
+		}
+		if err := rows.Close(); err != nil {
+			return failure("close history", err)
+		}
+
+		for index := range records {
+			if err := db.readHistoryRequest(ctx, conn, &records[index]); err != nil {
+				return err
+			}
+			if err := db.readHistoryAttempts(ctx, conn, &records[index]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (db *DB) readHistoryRequest(
+	ctx context.Context,
+	conn *sql.Conn,
+	record *storage.HistoryRecord,
+) error {
+	rows, err := conn.QueryContext(ctx, `SELECT key_id, version, nonce, ciphertext
+		FROM transcript_items WHERE response_id = ? AND provider = '' ORDER BY position`, record.ResponseID)
+	if err != nil {
+		return failure("read history request", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var envelope contentcrypto.Envelope
+		if err := rows.Scan(
+			&envelope.KeyID,
+			&envelope.Version,
+			&envelope.Nonce,
+			&envelope.Ciphertext,
+		); err != nil {
+			return failure("decode history request envelope", err)
+		}
+		plain, err := db.keyring.Decrypt(envelope)
+		if err != nil {
+			return failure("decrypt history request", err)
+		}
+		var item inference.Item
+		if err := json.Unmarshal(plain, &item); err != nil {
+			return failure("decode history request", err)
+		}
+		record.Request = append(record.Request, item)
+		record.RequestContentRetained = true
+	}
+	if err := rows.Err(); err != nil {
+		return failure("iterate history request", err)
+	}
+	return nil
+}
+
+func (db *DB) readHistoryAttempts(
+	ctx context.Context,
+	conn *sql.Conn,
+	record *storage.HistoryRecord,
+) error {
+	rows, err := conn.QueryContext(ctx, `SELECT id, provider, model_id, tier, status,
+		provider_request_id, key_id, version, nonce, ciphertext, created_at, completed_at
+		FROM provider_attempts WHERE response_id = ? ORDER BY sequence`, record.ResponseID)
+	if err != nil {
+		return failure("read history attempts", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var attempt storage.HistoryAttempt
+		var keyID sql.NullString
+		var version sql.NullByte
+		var nonce, ciphertext []byte
+		var createdAt int64
+		var completedAt sql.NullInt64
+		if err := rows.Scan(
+			&attempt.ID,
+			&attempt.Provider,
+			&attempt.ModelID,
+			&attempt.Tier,
+			&attempt.Status,
+			&attempt.ProviderRequestID,
+			&keyID,
+			&version,
+			&nonce,
+			&ciphertext,
+			&createdAt,
+			&completedAt,
+		); err != nil {
+			return failure("decode history attempt", err)
+		}
+		attempt.CreatedAt = time.Unix(0, createdAt).UTC()
+		if completedAt.Valid {
+			completed := time.Unix(0, completedAt.Int64).UTC()
+			attempt.CompletedAt = &completed
+		}
+		hasEnvelope := keyID.Valid || version.Valid || nonce != nil || ciphertext != nil
+		completeEnvelope := keyID.Valid && version.Valid && len(nonce) > 0 && len(ciphertext) > 0
+		if hasEnvelope && !completeEnvelope {
+			return failure("decode history attempt", errors.New("incomplete content envelope"))
+		}
+		if completeEnvelope {
+			envelope := contentcrypto.Envelope{
+				KeyID:      keyID.String,
+				Version:    version.Byte,
+				Nonce:      nonce,
+				Ciphertext: ciphertext,
+			}
+			plain, err := db.keyring.Decrypt(envelope)
+			if err != nil {
+				return failure("decrypt history attempt", err)
+			}
+			attempt.ContentRetained = true
+			if attempt.Status == "succeeded" {
+				attempt.Result = new(inference.Result)
+				if err := json.Unmarshal(plain, attempt.Result); err != nil {
+					return failure("decode history result", err)
+				}
+			} else {
+				attempt.Error = plain
+			}
+		}
+		record.Attempts = append(record.Attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return failure("iterate history attempts", err)
+	}
+	return nil
+}
+
 func readCandidates(ctx context.Context, conn *sql.Conn, record *storage.RequestRecord) error {
 	rows, err := conn.QueryContext(ctx, `SELECT model_id, provider, direct_cost, failure_probability,
 		escalation_cost, success_probability, latency_penalty, expected_total_cost, latency_ns
