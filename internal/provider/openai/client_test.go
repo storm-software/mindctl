@@ -390,6 +390,13 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 			wantOutput:     false,
 		},
 		{
+			name:       "Codex function call omits null output",
+			client:     NewChatGPTOAuthClient("https://provider.example", nil),
+			item:       inference.Item{Type: "function_call", CallID: "call_shell", Name: "exec", Arguments: json.RawMessage(`{"cmd":"pwd"}`), Output: json.RawMessage(`null`)},
+			wantInput:  false,
+			wantOutput: false,
+		},
+		{
 			name:       "API key function output",
 			client:     NewClient("https://provider.example", "api-key", nil),
 			item:       inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`{"status":"complete"}`)},
