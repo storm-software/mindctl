@@ -17,7 +17,9 @@
 </div>
 
 <br />
-This package is part of the ⚡<b>Mindctl</b> monorepo. The Mindctl packages include CLI utility applications, tools, and various libraries used to create modern, scalable web applications.
+
+**Mindctl** is an LLM router that uses built-in logic and a System 1 decision model like [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) or [Laya](https://huggingface.co/convaiinnovations/laya) to intelligently route requests to the appropriate LLM model based on the input prompt.
+
 <br />
 
 <h3 align="center">💻 Visit <a href="https://stormsoftware.com" target="_blank">stormsoftware.com</a> to stay up to date with this developer</h3><br />

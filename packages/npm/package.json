@@ -1,5 +1,5 @@
 {
-  "name": "mindctl",
+  "name": "@mindctl/cli",
   "version": "0.0.0-development",
   "description": "Mindctl native CLI",
   "license": "Apache-2.0",
