@@ -271,8 +271,11 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 				customCall, _ := input[2].(map[string]any)
 				customOutput, _ := input[3].(map[string]any)
 				if customCall["type"] != "custom_tool_call" || customCall["input"] != "*** Begin Patch" ||
-					customOutput["type"] != "custom_tool_call_output" || customOutput["output"] != "Done!" {
+					customOutput["type"] != "custom_tool_call_output" || customOutput["input"] != "Done!" {
 					t.Fatalf("continuation input=%v", input)
+				}
+				if _, present := customOutput["output"]; present {
+					t.Fatalf("Codex custom-tool continuation sent rejected output field: %v", customOutput)
 				}
 			}
 			if call == 3 {

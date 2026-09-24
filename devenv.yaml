@@ -8,5 +8,6 @@ inputs:
 imports:
   - storm-ops/devenv-modules/pnpm
   - storm-ops/devenv-modules/go
+  - storm-ops/devenv-modules/python
   - storm-ops/devenv-modules/graphify
   - storm-ops/devenv-modules/agents

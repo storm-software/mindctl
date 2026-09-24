@@ -127,6 +127,14 @@ type responseUsage struct {
 }
 
 func toResponsesRequest(model domain.Model, request inference.Request, stream bool) (responsesRequest, error) {
+	return toResponsesRequestWithCustomToolContinuation(model, request, stream, false)
+}
+
+func toCodexResponsesRequest(model domain.Model, request inference.Request, stream bool) (responsesRequest, error) {
+	return toResponsesRequestWithCustomToolContinuation(model, request, stream, true)
+}
+
+func toResponsesRequestWithCustomToolContinuation(model domain.Model, request inference.Request, stream, codexContinuation bool) (responsesRequest, error) {
 	if strings.TrimSpace(model.UpstreamID) == "" {
 		return responsesRequest{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider upstream model is not configured")}
 	}
@@ -159,7 +167,7 @@ func toResponsesRequest(model domain.Model, request inference.Request, stream bo
 		result.AccessPrograms = &responseAccessPrograms{Cyber: request.AccessPrograms.Cyber}
 	}
 	for _, item := range request.Input {
-		encoded, err := json.Marshal(toResponseInput(item))
+		encoded, err := json.Marshal(toResponseInputForContinuation(item, codexContinuation))
 		if err != nil {
 			return responsesRequest{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request item")}
 		}
@@ -236,6 +244,21 @@ func toResponseInput(item inference.Item) responseInputItem {
 	default:
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments, Output: item.Output}
 	}
+}
+
+func toResponseInputForContinuation(item inference.Item, codexContinuation bool) responseInputItem {
+	if codexContinuation && item.Type == "custom_tool_call_output" {
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Input: customToolOutputInput(item.Output)}
+	}
+	return toResponseInput(item)
+}
+
+func customToolOutputInput(output json.RawMessage) string {
+	var text string
+	if json.Unmarshal(output, &text) == nil {
+		return text
+	}
+	return string(output)
 }
 
 func encodeTool(tool inference.Tool) responseTool {

@@ -66,7 +66,7 @@ func newClientWithAuth(baseURL, apiKey string, auth authMode, httpClient *http.C
 
 // Execute performs one native non-streaming Responses request.
 func (c *Client) Execute(ctx context.Context, model domain.Model, request inference.Request) (inference.Result, error) {
-	body, err := toResponsesRequest(model, request, false)
+	body, err := c.toResponsesRequest(model, request, false)
 	if err != nil {
 		return inference.Result{}, err
 	}
@@ -89,7 +89,7 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 
 // Stream opens a native Responses SSE stream and returns portable events.
 func (c *Client) Stream(ctx context.Context, model domain.Model, request inference.Request) (provider.Stream, error) {
-	body, err := toResponsesRequest(model, request, true)
+	body, err := c.toResponsesRequest(model, request, true)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +103,13 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 		return nil, err
 	}
 	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body), requestID: requestID}, nil
+}
+
+func (c *Client) toResponsesRequest(model domain.Model, request inference.Request, stream bool) (responsesRequest, error) {
+	if c.auth == authChatGPTOAuth {
+		return toCodexResponsesRequest(model, request, stream)
+	}
+	return toResponsesRequest(model, request, stream)
 }
 
 func (c *Client) applyAuthenticationContract(body *responsesRequest, stream bool) {

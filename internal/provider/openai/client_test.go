@@ -291,6 +291,63 @@ func TestOpenAIResponsesLiteToolCallPayloadSurfacesRejectedField(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexCustomToolContinuationUsesInputAndPreservesSafeDiagnostic(t *testing.T) {
+	const toolOutput = "private tool output sentinel"
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body struct {
+			Input []json.RawMessage `json:"input"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Input) != 3 {
+			t.Fatalf("input=%s", body.Input)
+		}
+		var customOutput map[string]any
+		if err := json.Unmarshal(body.Input[2], &customOutput); err != nil {
+			t.Fatal(err)
+		}
+		if customOutput["type"] != "custom_tool_call_output" || customOutput["call_id"] != "call_patch" || customOutput["input"] != toolOutput {
+			t.Fatalf("custom tool continuation=%v", customOutput)
+		}
+		if _, present := customOutput["output"]; present {
+			t.Fatalf("custom tool continuation sent rejected output field: %v", customOutput)
+		}
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body: io.NopCloser(strings.NewReader(`{
+  "error": {
+    "code": "unknown_parameter",
+    "param": "input[2].output",
+    "message": "Unknown parameter: 'input[2].output'."
+  }
+}`)),
+		}, nil
+	})
+	client := NewChatGPTOAuthClient("https://provider.example", &http.Client{Transport: transport})
+	request := inference.Request{
+		Model:        "gateway-model",
+		Instructions: "private prompt sentinel",
+		Input: []inference.Item{
+			{Type: "message", Role: "user", Text: "continue"},
+			{Type: "custom_tool_call", CallID: "call_patch", Name: "apply_patch", Input: "*** Begin Patch"},
+			{Type: "custom_tool_call_output", CallID: "call_patch", Output: json.RawMessage(`"private tool output sentinel"`)},
+		},
+	}
+	ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+	_, err := client.Execute(ctx, openAIModel(), request)
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || normalized.UpstreamCode != "unknown_parameter" ||
+		normalized.UpstreamParam != "input[2].output" || normalized.UpstreamMessage != "Unknown parameter: 'input[2].output'." {
+		t.Fatalf("err=%v normalized=%+v", err, normalized)
+	}
+	for _, sensitive := range []string{toolOutput, request.Instructions, "oauth.jwt"} {
+		if strings.Contains(normalized.Error(), sensitive) {
+			t.Fatalf("error leaked sensitive value %q: %v", sensitive, normalized)
+		}
+	}
+}
+
 func TestOpenAIRedirectDoesNotForwardChatGPTOAuth(t *testing.T) {
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { targetCalls.Add(1) }))
