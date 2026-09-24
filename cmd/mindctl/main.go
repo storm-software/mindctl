@@ -96,7 +96,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		},
 	})
 	root.AddCommand(newConfigCommand())
-	root.AddCommand(newModelCommand(settings), newProviderListCommand(settings), newProviderCommand(settings))
+	root.AddCommand(newModelCommand(settings), newProviderCommand(settings))
 	return root
 }
 
@@ -172,12 +172,6 @@ func newModelToggleCommand(settings *viper.Viper, action string, enabled bool) *
 }
 
 func newProviderListCommand(settings *viper.Viper) *cobra.Command {
-	providerCommand := &cobra.Command{
-		Use:   "provider",
-		Short: "List routable providers",
-		Args:  noArgs("unexpected arguments for provider"),
-	}
-
 	var all bool
 	listCommand := &cobra.Command{
 		Use:   "list",
@@ -192,9 +186,7 @@ func newProviderListCommand(settings *viper.Viper) *cobra.Command {
 		},
 	}
 	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
-	providerCommand.AddCommand(listCommand)
-
-	return providerCommand
+	return listCommand
 }
 
 func newProviderCommand(settings *viper.Viper) *cobra.Command {
@@ -203,6 +195,7 @@ func newProviderCommand(settings *viper.Viper) *cobra.Command {
 		Short: "Enable or disable all models for a provider",
 		Args:  noArgs("unexpected arguments for provider"),
 	}
+	providerCommand.AddCommand(newProviderListCommand(settings))
 	for _, option := range []struct {
 		action  string
 		enabled bool
