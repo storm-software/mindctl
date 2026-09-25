@@ -271,11 +271,11 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 				customCall, _ := input[2].(map[string]any)
 				customOutput, _ := input[3].(map[string]any)
 				if customCall["type"] != "custom_tool_call" || customCall["input"] != "*** Begin Patch" ||
-					customOutput["type"] != "custom_tool_call_output" || customOutput["input"] != "Done!" {
+					customOutput["type"] != "custom_tool_call_output" || customOutput["output"] != "Done!" {
 					t.Fatalf("continuation input=%v", input)
 				}
-				if _, present := customOutput["output"]; present {
-					t.Fatalf("Codex custom-tool continuation sent rejected output field: %v", customOutput)
+				if _, present := customOutput["input"]; present {
+					t.Fatalf("Codex custom-tool continuation sent input field: %v", customOutput)
 				}
 			}
 			if call == 3 {
@@ -461,15 +461,13 @@ func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T
 					!reflect.DeepEqual(reasoning["summary"], []any{map[string]any{"type": "summary_text", "text": "safe summary"}}) ||
 					functionCall["id"] != "fc_1" || functionCall["type"] != "function_call" || functionCall["call_id"] != "call_lookup" ||
 					functionOutput["type"] != "function_call_output" || functionOutput["call_id"] != "call_lookup" || functionOutput["output"] != `{"found":true}` ||
-					customOutput["type"] != "custom_tool_call_output" || customOutput["call_id"] != "call_custom" || customOutput["input"] != `{"done":true}` ||
+					customOutput["type"] != "custom_tool_call_output" || customOutput["call_id"] != "call_custom" || customOutput["output"] != `{"done":true}` ||
 					computerOutput["type"] != "computer_call_output" || computerOutput["call_id"] != "call_computer" || computerOutput["output"] != `{"done":true}` {
 					t.Fatal("continuation ordering or opaque state was lost")
 				}
 				for _, item := range []map[string]any{functionOutput, customOutput, computerOutput} {
-					if item["type"] != "custom_tool_call_output" {
-						if _, present := item["input"]; present {
-							t.Fatal("unexpected input field")
-						}
+					if _, present := item["input"]; present {
+						t.Fatal("unexpected input field")
 					}
 				}
 			} else {

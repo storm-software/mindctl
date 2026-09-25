@@ -74,12 +74,18 @@ func errorDetail(err error) (int, ErrorDetail) {
 		return http.StatusBadRequest, ErrorDetail{Message: "provider refused this request", Type: "invalid_request_error", Code: "safety_refusal"}
 	case isProviderKind(err, provider.ErrorInvalidRequest):
 		var providerErr *provider.Error
-		if errors.As(err, &providerErr) && providerErr.UpstreamMessage != "" {
-			return http.StatusBadRequest, ErrorDetail{
-				Message: providerErr.UpstreamMessage,
-				Type:    "invalid_request_error",
-				Param:   providerErr.UpstreamParam,
-				Code:    providerErr.UpstreamCode,
+		if errors.As(err, &providerErr) {
+			message := providerErr.UpstreamMessage
+			if message == "" && (providerErr.UpstreamCode != "" || providerErr.UpstreamParam != "") {
+				message = "provider cannot execute this request"
+			}
+			if message != "" {
+				return http.StatusBadRequest, ErrorDetail{
+					Message: message,
+					Type:    "invalid_request_error",
+					Param:   providerErr.UpstreamParam,
+					Code:    providerErr.UpstreamCode,
+				}
 			}
 		}
 		return http.StatusBadRequest, ErrorDetail{Message: "provider cannot execute this request", Type: "invalid_request_error", Code: "provider_request_invalid"}

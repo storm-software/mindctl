@@ -109,6 +109,27 @@ func TestResponsesHandlerSurfacesAllowlistedProviderInvalidRequestDiagnostic(t *
 	}
 }
 
+func TestResponsesHandlerSurfacesProviderInvalidRequestCodeAndParamWithoutMessage(t *testing.T) {
+	handler := testResponsesHandler(executor.Output{}, &provider.Error{
+		Kind:          provider.ErrorInvalidRequest,
+		Status:        http.StatusBadRequest,
+		UpstreamCode:  "missing_required_parameter",
+		UpstreamParam: "input[5].output",
+		Err:           errors.New("private upstream response body"),
+	})
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, authenticatedRequest(`{"model":"mindctl-auto","input":"hello"}`))
+	var body ErrorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusBadRequest || body.Error.Type != "invalid_request_error" ||
+		body.Error.Code != "missing_required_parameter" || body.Error.Param != "input[5].output" ||
+		body.Error.Message != "provider cannot execute this request" || strings.Contains(rr.Body.String(), "private") {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestResponsesHandlerMapsProviderAuthenticationAsOperationalFailure(t *testing.T) {
 	handler := testResponsesHandler(executor.Output{}, &provider.Error{Kind: provider.ErrorAuthentication, Err: errors.New("private upstream authentication failure")})
 	rr := httptest.NewRecorder()

@@ -252,9 +252,6 @@ func toResponseInputForContinuation(item inference.Item, codexContinuation bool)
 	if codexContinuation && item.Type == "function_call" {
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace}
 	}
-	if codexContinuation && item.Type == "custom_tool_call_output" {
-		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Input: stringPointer(callOutputInput(item.Output))}
-	}
 	return toResponseInput(item)
 }
 
@@ -263,14 +260,6 @@ func nonEmptyStringPointer(value string) *string {
 		return nil
 	}
 	return stringPointer(value)
-}
-
-func callOutputInput(output json.RawMessage) string {
-	var text string
-	if json.Unmarshal(output, &text) == nil {
-		return text
-	}
-	return string(output)
 }
 
 func encodeTool(tool inference.Tool) responseTool {

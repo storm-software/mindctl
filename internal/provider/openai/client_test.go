@@ -294,7 +294,7 @@ func TestOpenAIResponsesLiteToolCallPayloadSurfacesRejectedField(t *testing.T) {
 	}
 }
 
-func TestOpenAICodexCustomToolContinuationUsesInputAndPreservesSafeDiagnostic(t *testing.T) {
+func TestOpenAICodexCustomToolContinuationUsesOutput(t *testing.T) {
 	const toolOutput = "private tool output sentinel"
 	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		var body struct {
@@ -310,21 +310,15 @@ func TestOpenAICodexCustomToolContinuationUsesInputAndPreservesSafeDiagnostic(t 
 		if err := json.Unmarshal(body.Input[2], &customOutput); err != nil {
 			t.Fatal(err)
 		}
-		if customOutput["type"] != "custom_tool_call_output" || customOutput["call_id"] != "call_patch" || customOutput["input"] != toolOutput {
+		if customOutput["type"] != "custom_tool_call_output" || customOutput["call_id"] != "call_patch" || customOutput["output"] != toolOutput {
 			t.Fatalf("custom tool continuation=%v", customOutput)
 		}
-		if _, present := customOutput["output"]; present {
-			t.Fatalf("custom tool continuation sent rejected output field: %v", customOutput)
+		if _, present := customOutput["input"]; present {
+			t.Fatalf("custom tool continuation sent input field: %v", customOutput)
 		}
 		return &http.Response{
-			StatusCode: http.StatusBadRequest,
-			Body: io.NopCloser(strings.NewReader(`{
-  "error": {
-    "code": "unknown_parameter",
-    "param": "input[2].output",
-    "message": "Unknown parameter: 'input[2].output'."
-  }
-}`)),
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"id":"upstream","status":"completed","model":"gpt-test","output":[]}`)),
 		}, nil
 	})
 	client := NewChatGPTOAuthClient("https://provider.example", &http.Client{Transport: transport})
@@ -338,35 +332,25 @@ func TestOpenAICodexCustomToolContinuationUsesInputAndPreservesSafeDiagnostic(t 
 		},
 	}
 	ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
-	_, err := client.Execute(ctx, openAIModel(), request)
-	var normalized *provider.Error
-	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || normalized.UpstreamCode != "unknown_parameter" ||
-		normalized.UpstreamParam != "input[2].output" || normalized.UpstreamMessage != "Unknown parameter: 'input[2].output'." {
-		t.Fatalf("err=%v normalized=%+v", err, normalized)
-	}
-	for _, sensitive := range []string{toolOutput, request.Instructions, "oauth.jwt"} {
-		if strings.Contains(normalized.Error(), sensitive) {
-			t.Fatalf("error leaked sensitive value %q: %v", sensitive, normalized)
-		}
+	if _, err := client.Execute(ctx, openAIModel(), request); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 	tests := []struct {
-		name           string
-		client         *Client
-		item           inference.Item
-		wantInput      bool
-		wantInputValue string
-		wantOutput     bool
+		name       string
+		client     *Client
+		item       inference.Item
+		wantInput  bool
+		wantOutput bool
 	}{
 		{
-			name:           "Codex custom tool output",
-			client:         NewChatGPTOAuthClient("https://provider.example", nil),
-			item:           inference.Item{Type: "custom_tool_call_output", CallID: "call_custom", Output: json.RawMessage(`{"status":"complete"}`)},
-			wantInput:      true,
-			wantInputValue: `{"status":"complete"}`,
-			wantOutput:     false,
+			name:       "Codex custom tool output",
+			client:     NewChatGPTOAuthClient("https://provider.example", nil),
+			item:       inference.Item{Type: "custom_tool_call_output", CallID: "call_custom", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:  false,
+			wantOutput: true,
 		},
 		{
 			name:       "Codex function output",
@@ -426,9 +410,6 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 			if hasInput != tt.wantInput || hasOutput != tt.wantOutput {
 				t.Fatalf("encoded output=%v, want input=%t output=%t", encoded, tt.wantInput, tt.wantOutput)
 			}
-			if tt.wantInput && encoded["input"] != tt.wantInputValue {
-				t.Fatalf("input=%#v, want %q", encoded["input"], tt.wantInputValue)
-			}
 		})
 	}
 }
@@ -477,17 +458,14 @@ func TestOpenAIChatGPTOAuthTwoTurnContinuationPreservesReasoningAndToolOutputFie
 			!reflect.DeepEqual(reasoning["summary"], []any{map[string]any{"type": "summary_text", "text": "safe summary"}}) ||
 			functionCall["type"] != "function_call" || functionCall["id"] != "fc_1" || functionCall["call_id"] != "call_function" ||
 			functionOutput["type"] != "function_call_output" || functionOutput["output"] != "function result" ||
-			customOutput["type"] != "custom_tool_call_output" || customOutput["input"] != "custom result" ||
+			customOutput["type"] != "custom_tool_call_output" || customOutput["output"] != "custom result" ||
 			computerOutput["type"] != "computer_call_output" || computerOutput["output"] != "computer result" {
 			t.Fatal("continuation field contract was not preserved")
 		}
-		for _, item := range []map[string]any{functionOutput, computerOutput} {
+		for _, item := range []map[string]any{functionOutput, customOutput, computerOutput} {
 			if _, present := item["input"]; present {
-				t.Fatal("function or computer output used input")
+				t.Fatal("call output used input")
 			}
-		}
-		if _, present := customOutput["output"]; present {
-			t.Fatal("custom tool output used output")
 		}
 		if _, present := functionCall["arguments"]; present {
 			t.Fatal("Codex function-call continuation sent rejected arguments field")
