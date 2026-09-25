@@ -435,13 +435,13 @@ func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T
 			}
 			if call == 1 {
 				if len(body.Input) != 1 {
-					t.Fatalf("initial input=%s", body.Input)
+					t.Fatalf("initial input count=%d", len(body.Input))
 				}
 			} else if call == 2 {
-				if len(body.Input) != 4 {
-					t.Fatalf("continuation input=%s", body.Input)
+				if len(body.Input) != 6 {
+					t.Fatalf("continuation input count=%d", len(body.Input))
 				}
-				var reasoning, functionCall, functionOutput map[string]any
+				var reasoning, functionCall, functionOutput, customOutput, computerOutput map[string]any
 				if err := json.Unmarshal(body.Input[1], &reasoning); err != nil {
 					t.Fatal(err)
 				}
@@ -451,10 +451,26 @@ func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T
 				if err := json.Unmarshal(body.Input[3], &functionOutput); err != nil {
 					t.Fatal(err)
 				}
+				if err := json.Unmarshal(body.Input[4], &customOutput); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(body.Input[5], &computerOutput); err != nil {
+					t.Fatal(err)
+				}
 				if reasoning["id"] != "rs_1" || reasoning["type"] != "reasoning" || reasoning["encrypted_content"] != "opaque-openai-state" ||
+					!reflect.DeepEqual(reasoning["summary"], []any{map[string]any{"type": "summary_text", "text": "safe summary"}}) ||
 					functionCall["id"] != "fc_1" || functionCall["type"] != "function_call" || functionCall["call_id"] != "call_lookup" ||
-					functionOutput["type"] != "function_call_output" || functionOutput["call_id"] != "call_lookup" {
-					t.Fatalf("continuation ordering or opaque state was lost: %s", body.Input)
+					functionOutput["type"] != "function_call_output" || functionOutput["call_id"] != "call_lookup" || functionOutput["output"] != `{"found":true}` ||
+					customOutput["type"] != "custom_tool_call_output" || customOutput["call_id"] != "call_custom" || customOutput["input"] != `{"done":true}` ||
+					computerOutput["type"] != "computer_call_output" || computerOutput["call_id"] != "call_computer" || computerOutput["output"] != `{"done":true}` {
+					t.Fatal("continuation ordering or opaque state was lost")
+				}
+				for _, item := range []map[string]any{functionOutput, customOutput, computerOutput} {
+					if item["type"] != "custom_tool_call_output" {
+						if _, present := item["input"]; present {
+							t.Fatal("unexpected input field")
+						}
+					}
 				}
 			} else {
 				t.Fatalf("unexpected provider call %d", call)
@@ -462,7 +478,7 @@ func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T
 
 			w.Header().Set("Content-Type", "text/event-stream")
 			if call == 1 {
-				_, _ = io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"encrypted_content\":\"opaque-openai-state\"}}\n\n")
+				_, _ = io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"safe summary\"}],\"encrypted_content\":\"opaque-openai-state\"}}\n\n")
 				_, _ = io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_lookup\",\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"mindctl\\\"}\"}}\n\n")
 			}
 			_, _ = io.WriteString(w, "event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"model\":\"first\",\"output\":[]}}\n\n")
@@ -494,20 +510,20 @@ func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T
 	}
 	initial := httptest.NewRecorder()
 	app.Handler().ServeHTTP(initial, request(`{"model":"mindctl-auto","stream":true,"input":"find Mindctl"}`))
-	if initial.Code != http.StatusOK || !strings.Contains(initial.Body.String(), `"type":"reasoning"`) || !strings.Contains(initial.Body.String(), `"encrypted_content":"opaque-openai-state"`) {
-		t.Fatalf("initial response did not preserve reasoning: status=%d body=%s", initial.Code, initial.Body.String())
+	if initial.Code != http.StatusOK || !strings.Contains(initial.Body.String(), `"type":"reasoning"`) || !strings.Contains(initial.Body.String(), `"summary":[{"type":"summary_text","text":"safe summary"}]`) || !strings.Contains(initial.Body.String(), `"encrypted_content":"opaque-openai-state"`) {
+		t.Fatalf("initial response did not preserve reasoning: status=%d", initial.Code)
 	}
 	const responseIDKey = `"response_id":"`
 	responseIDStart := strings.Index(initial.Body.String(), responseIDKey)
 	if responseIDStart < 0 {
-		t.Fatalf("initial response has no gateway response ID: %s", initial.Body.String())
+		t.Fatal("initial response has no gateway response ID")
 	}
 	responseID := strings.SplitN(initial.Body.String()[responseIDStart+len(responseIDKey):], `"`, 2)[0]
 
 	continuation := httptest.NewRecorder()
-	app.Handler().ServeHTTP(continuation, request(`{"model":"mindctl-auto","stream":true,"previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_lookup","output":"{\"found\":true}"}]}`))
+	app.Handler().ServeHTTP(continuation, request(`{"model":"mindctl-auto","stream":true,"previous_response_id":"`+responseID+`","input":[{"type":"function_call_output","call_id":"call_lookup","output":"{\"found\":true}"},{"type":"custom_tool_call_output","call_id":"call_custom","output":"{\"done\":true}"},{"type":"computer_call_output","call_id":"call_computer","output":"{\"done\":true}"}]}`))
 	if continuation.Code != http.StatusOK || providerCalls.Load() != 2 {
-		t.Fatalf("continuation status=%d calls=%d body=%s", continuation.Code, providerCalls.Load(), continuation.Body.String())
+		t.Fatalf("continuation status=%d calls=%d", continuation.Code, providerCalls.Load())
 	}
 }
 

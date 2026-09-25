@@ -170,6 +170,7 @@ type responseOutput struct {
 	Namespace        string            `json:"namespace,omitempty"`
 	Input            string            `json:"input,omitempty"`
 	Arguments        json.RawMessage   `json:"arguments,omitempty"`
+	Summary          json.RawMessage   `json:"summary,omitempty"`
 	EncryptedContent json.RawMessage   `json:"encrypted_content,omitempty"`
 	Content          []responseContent `json:"content,omitempty"`
 }
@@ -197,7 +198,7 @@ func responseFromResult(result inference.Result) responseBody {
 		case "message":
 			body.Output = append(body.Output, responseOutput{ID: item.ID, Type: "message", Role: item.Role, Content: []responseContent{{Type: "output_text", Text: item.Text}}})
 		case "reasoning":
-			body.Output = append(body.Output, responseOutput{ID: item.ID, Type: "reasoning", EncryptedContent: item.EncryptedContent})
+			body.Output = append(body.Output, responseOutput{ID: item.ID, Type: "reasoning", Summary: item.Summary, EncryptedContent: item.EncryptedContent})
 		case "function_call":
 			body.Output = append(body.Output, responseOutput{ID: item.ID, Type: "function_call", CallID: item.CallID, Name: item.Name, Arguments: item.Arguments})
 		case "custom_tool_call":
@@ -330,6 +331,7 @@ func streamPayload(event inference.Event, metadata executor.StreamMetadata) any 
 				item["namespace"] = event.Namespace
 			}
 		case "reasoning":
+			item["summary"] = event.Summary
 			item["encrypted_content"] = event.EncryptedContent
 		default:
 			return struct {

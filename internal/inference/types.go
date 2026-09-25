@@ -45,7 +45,7 @@ type Item struct {
 	ID, Type, Role, Text, CallID, Name, Namespace, Input string
 	ContinuationProvider                                 string
 	ImageURL                                             json.RawMessage
-	Arguments, Output, EncryptedContent                  json.RawMessage
+	Arguments, Output, Summary, EncryptedContent         json.RawMessage
 	Content                                              []ContentPart
 	Tools                                                []Tool
 	ProviderData                                         json.RawMessage

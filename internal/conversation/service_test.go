@@ -166,7 +166,7 @@ func TestTranscriptForDoesNotForwardReasoningContinuationAcrossProviders(t *test
 		t.Fatal(err)
 	}
 	result := inference.Result{Status: "completed", Output: []inference.Item{{
-		ID: "rs_1", Type: "reasoning", EncryptedContent: []byte(`"opaque-openai-state"`),
+		ID: "rs_1", Type: "reasoning", Summary: []byte(`[{"type":"summary_text","text":"safe summary"}]`), EncryptedContent: []byte(`"opaque-openai-state"`),
 	}}}
 	if err := svc.CommitResult(context.Background(), turn, pin("openai", "gpt-test", domain.T3), result); err != nil {
 		t.Fatal(err)
@@ -175,7 +175,8 @@ func TestTranscriptForDoesNotForwardReasoningContinuationAcrossProviders(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resumed.TranscriptFor("openai"); len(got) != 2 || got[1].ID != "rs_1" || string(got[1].EncryptedContent) != `"opaque-openai-state"` {
+	if got := resumed.TranscriptFor("openai"); len(got) != 2 || got[1].ID != "rs_1" ||
+		string(got[1].Summary) != `[{"type":"summary_text","text":"safe summary"}]` || string(got[1].EncryptedContent) != `"opaque-openai-state"` {
 		t.Fatalf("same-provider transcript=%+v", got)
 	}
 	if got := resumed.TranscriptFor("anthropic"); len(got) != 1 || got[0].Type != "message" {

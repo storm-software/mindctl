@@ -190,6 +190,7 @@ func cloneItem(item inference.Item) inference.Item {
 	item.ImageURL = append(item.ImageURL[:0:0], item.ImageURL...)
 	item.Arguments = append(item.Arguments[:0:0], item.Arguments...)
 	item.Output = append(item.Output[:0:0], item.Output...)
+	item.Summary = append(item.Summary[:0:0], item.Summary...)
 	item.EncryptedContent = append(item.EncryptedContent[:0:0], item.EncryptedContent...)
 	item.Content = append([]inference.ContentPart(nil), item.Content...)
 	for index := range item.Content {

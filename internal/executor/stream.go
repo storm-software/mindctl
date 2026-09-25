@@ -516,7 +516,7 @@ func (a *streamAccumulator) appendReasoning(event inference.Event) {
 		}
 	}
 	a.appendItem(inference.Item{
-		ID: event.ItemID, Type: "reasoning", EncryptedContent: append(json.RawMessage(nil), event.EncryptedContent...),
+		ID: event.ItemID, Type: "reasoning", Summary: append(json.RawMessage(nil), event.Summary...), EncryptedContent: append(json.RawMessage(nil), event.EncryptedContent...),
 	}, event.OutputIndex)
 }
 

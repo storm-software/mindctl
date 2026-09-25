@@ -125,6 +125,7 @@ type wireInputItem struct {
 	ImageURL         json.RawMessage `json:"image_url"`
 	Arguments        json.RawMessage `json:"arguments"`
 	Output           json.RawMessage `json:"output"`
+	Summary          json.RawMessage `json:"summary"`
 	EncryptedContent json.RawMessage `json:"encrypted_content"`
 	Tools            []wireTool      `json:"tools"`
 }
@@ -231,7 +232,7 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Output: wire.Output}}, nil
 	case "reasoning":
 		return []inference.Item{{
-			ID: wire.ID, Type: wire.Type, EncryptedContent: append(json.RawMessage(nil), wire.EncryptedContent...),
+			ID: wire.ID, Type: wire.Type, Summary: append(json.RawMessage(nil), wire.Summary...), EncryptedContent: append(json.RawMessage(nil), wire.EncryptedContent...),
 			ContinuationProvider: "openai",
 		}}, nil
 	case "custom_tool_call":

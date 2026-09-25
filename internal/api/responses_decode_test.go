@@ -52,10 +52,11 @@ func TestDecodeResponseRequestPreservesPortableItems(t *testing.T) {
 
 func TestDecodeResponseRequestPreservesCodexReasoningContinuation(t *testing.T) {
 	got, _, err := decode(t, `{
-  "model":"mindctl-auto",
-  "input":[{"id":"rs_1","type":"reasoning","encrypted_content":"opaque-openai-state"}]
-}`, 1<<20)
+	  "model":"mindctl-auto",
+	  "input":[{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"safe summary"}],"encrypted_content":"opaque-openai-state"}]
+	}`, 1<<20)
 	if err != nil || len(got.Input) != 1 || got.Input[0].Type != "reasoning" || got.Input[0].ID != "rs_1" ||
+		string(got.Input[0].Summary) != `[{"type":"summary_text","text":"safe summary"}]` ||
 		string(got.Input[0].EncryptedContent) != `"opaque-openai-state"` || got.Input[0].ContinuationProvider != "openai" {
 		t.Fatalf("request=%+v err=%v", got, err)
 	}

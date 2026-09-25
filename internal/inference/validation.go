@@ -92,6 +92,9 @@ func validateItem(item Item) error {
 		if item.ID == "" || len(item.EncryptedContent) == 0 || !json.Valid(item.EncryptedContent) {
 			return errors.New("reasoning requires id and encrypted_content")
 		}
+		if len(item.Summary) != 0 && !json.Valid(item.Summary) {
+			return errors.New("reasoning summary must be valid JSON")
+		}
 	case "function_call":
 		if item.CallID == "" || item.Name == "" || len(item.Arguments) == 0 {
 			return errors.New("function call requires call_id, name, and arguments")

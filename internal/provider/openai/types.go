@@ -87,6 +87,7 @@ type responseInputItem struct {
 	Input            *string           `json:"input,omitempty"`
 	Arguments        json.RawMessage   `json:"arguments,omitempty"`
 	Output           json.RawMessage   `json:"output,omitempty"`
+	Summary          json.RawMessage   `json:"summary,omitempty"`
 	EncryptedContent json.RawMessage   `json:"encrypted_content,omitempty"`
 	Tools            []responseTool    `json:"tools,omitempty"`
 }
@@ -114,6 +115,7 @@ type responseOutput struct {
 	Namespace        string            `json:"namespace"`
 	Input            string            `json:"input"`
 	Arguments        json.RawMessage   `json:"arguments"`
+	Summary          json.RawMessage   `json:"summary"`
 	EncryptedContent json.RawMessage   `json:"encrypted_content"`
 	Content          []responseContent `json:"content"`
 }
@@ -240,7 +242,7 @@ func toResponseInput(item inference.Item) responseInputItem {
 	case "custom_tool_call_output":
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Output: item.Output}
 	case "reasoning":
-		return responseInputItem{ID: item.ID, Type: item.Type, EncryptedContent: append(json.RawMessage(nil), item.EncryptedContent...)}
+		return responseInputItem{ID: item.ID, Type: item.Type, Summary: append(json.RawMessage(nil), item.Summary...), EncryptedContent: append(json.RawMessage(nil), item.EncryptedContent...)}
 	default:
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments, Output: item.Output}
 	}
@@ -250,7 +252,7 @@ func toResponseInputForContinuation(item inference.Item, codexContinuation bool)
 	if codexContinuation && item.Type == "function_call" {
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments}
 	}
-	if codexContinuation && strings.HasSuffix(item.Type, "_call_output") {
+	if codexContinuation && item.Type == "custom_tool_call_output" {
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Input: stringPointer(callOutputInput(item.Output))}
 	}
 	return toResponseInput(item)
@@ -358,7 +360,7 @@ func fromResponsesResponse(response responsesResponse, model domain.Model, reque
 				result.Output = append(result.Output, item)
 			}
 		case "reasoning":
-			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, EncryptedContent: append(json.RawMessage(nil), output.EncryptedContent...)})
+			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, Summary: append(json.RawMessage(nil), output.Summary...), EncryptedContent: append(json.RawMessage(nil), output.EncryptedContent...)})
 		case "function_call":
 			result.Output = append(result.Output, inference.Item{ID: output.ID, Type: output.Type, CallID: output.CallID, Name: output.Name, Arguments: append(json.RawMessage(nil), output.Arguments...)})
 		case "custom_tool_call":
@@ -411,6 +413,7 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 			Namespace        string            `json:"namespace"`
 			Input            string            `json:"input"`
 			Arguments        string            `json:"arguments"`
+			Summary          json.RawMessage   `json:"summary"`
 			EncryptedContent json.RawMessage   `json:"encrypted_content"`
 			Content          []responseContent `json:"content"`
 		} `json:"item"`
@@ -439,6 +442,7 @@ func streamEvent(kind string, data []byte) (inference.Event, error) {
 		if event.ArgumentsDelta == "" {
 			event.ArgumentsDelta = frame.Item.Arguments
 		}
+		event.Summary = append(json.RawMessage(nil), frame.Item.Summary...)
 		event.EncryptedContent = append(json.RawMessage(nil), frame.Item.EncryptedContent...)
 		for _, content := range frame.Item.Content {
 			if content.Type == "output_text" {

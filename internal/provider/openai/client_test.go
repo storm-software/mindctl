@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -51,11 +52,12 @@ func TestOpenAIResponsePreservesReasoningAndOutputItemIDs(t *testing.T) {
 		Status: "completed",
 		Output: []responseOutput{
 			{ID: "msg_1", Type: "message", Role: "assistant", Content: []responseContent{{Type: "output_text", Text: "hello"}}},
-			{ID: "rs_1", Type: "reasoning", EncryptedContent: json.RawMessage(`"opaque-openai-state"`)},
+			{ID: "rs_1", Type: "reasoning", Summary: json.RawMessage(`[{"type":"summary_text","text":"safe summary"}]`), EncryptedContent: json.RawMessage(`"opaque-openai-state"`)},
 			{ID: "fc_1", Type: "function_call", CallID: "call_lookup", Name: "lookup", Arguments: json.RawMessage(`{"q":"mindctl"}`)},
 		},
 	}, openAIModel(), "openai-request")
 	if len(result.Output) != 3 || result.Output[0].ID != "msg_1" || result.Output[1].ID != "rs_1" ||
+		string(result.Output[1].Summary) != `[{"type":"summary_text","text":"safe summary"}]` ||
 		string(result.Output[1].EncryptedContent) != `"opaque-openai-state"` || result.Output[2].ID != "fc_1" {
 		t.Fatalf("output=%+v", result.Output)
 	}
@@ -64,9 +66,10 @@ func TestOpenAIResponsePreservesReasoningAndOutputItemIDs(t *testing.T) {
 func TestOpenAIStreamEventPreservesReasoningContinuation(t *testing.T) {
 	event, err := streamEvent("response.output_item.done", []byte(`{
   "output_index":0,
-  "item":{"id":"rs_1","type":"reasoning","encrypted_content":"opaque-openai-state"}
-}`))
-	if err != nil || event.ItemID != "rs_1" || event.ItemType != "reasoning" || string(event.EncryptedContent) != `"opaque-openai-state"` {
+	  "item":{"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"safe summary"}],"encrypted_content":"opaque-openai-state"}
+	}`))
+	if err != nil || event.ItemID != "rs_1" || event.ItemType != "reasoning" ||
+		string(event.Summary) != `[{"type":"summary_text","text":"safe summary"}]` || string(event.EncryptedContent) != `"opaque-openai-state"` {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
 }
@@ -366,28 +369,25 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 			wantOutput:     false,
 		},
 		{
-			name:           "Codex function output",
-			client:         NewChatGPTOAuthClient("https://provider.example", nil),
-			item:           inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`{"status":"complete"}`)},
-			wantInput:      true,
-			wantInputValue: `{"status":"complete"}`,
-			wantOutput:     false,
+			name:       "Codex function output",
+			client:     NewChatGPTOAuthClient("https://provider.example", nil),
+			item:       inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:  false,
+			wantOutput: true,
 		},
 		{
-			name:           "Codex computer output",
-			client:         NewChatGPTOAuthClient("https://provider.example", nil),
-			item:           inference.Item{Type: "computer_call_output", CallID: "call_computer", Output: json.RawMessage(`{"status":"complete"}`)},
-			wantInput:      true,
-			wantInputValue: `{"status":"complete"}`,
-			wantOutput:     false,
+			name:       "Codex computer output",
+			client:     NewChatGPTOAuthClient("https://provider.example", nil),
+			item:       inference.Item{Type: "computer_call_output", CallID: "call_computer", Output: json.RawMessage(`{"status":"complete"}`)},
+			wantInput:  false,
+			wantOutput: true,
 		},
 		{
-			name:           "Codex empty string function output",
-			client:         NewChatGPTOAuthClient("https://provider.example", nil),
-			item:           inference.Item{Type: "function_call_output", CallID: "call_empty", Output: json.RawMessage(`""`)},
-			wantInput:      true,
-			wantInputValue: "",
-			wantOutput:     false,
+			name:       "Codex empty string function output",
+			client:     NewChatGPTOAuthClient("https://provider.example", nil),
+			item:       inference.Item{Type: "function_call_output", CallID: "call_empty", Output: json.RawMessage(`""`)},
+			wantInput:  false,
+			wantOutput: true,
 		},
 		{
 			name:       "Codex function call omits null output",
@@ -430,6 +430,81 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 				t.Fatalf("input=%#v, want %q", encoded["input"], tt.wantInputValue)
 			}
 		})
+	}
+}
+
+func TestOpenAIChatGPTOAuthTwoTurnContinuationPreservesReasoningAndToolOutputFields(t *testing.T) {
+	var calls int
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		if request.URL.Path != "/responses" || request.Header.Get("Authorization") != "Bearer oauth.jwt" || request.Header.Get("ChatGPT-Account-Id") != "account-1" {
+			t.Fatal("OAuth request contract was not preserved")
+		}
+		var body struct {
+			Input []json.RawMessage `json:"input"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if calls == 1 {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{
+  "id":"upstream-1","status":"completed","model":"gpt-test","output":[
+    {"id":"rs_1","type":"reasoning","summary":[{"type":"summary_text","text":"safe summary"}],"encrypted_content":"opaque-openai-state"},
+    {"id":"fc_1","type":"function_call","call_id":"call_function","name":"lookup","arguments":"{}"}
+  ]
+}`))}, nil
+		}
+		if calls != 2 || len(body.Input) != 5 {
+			t.Fatal("unexpected continuation shape")
+		}
+		var reasoning, functionCall, functionOutput, customOutput, computerOutput map[string]any
+		if err := json.Unmarshal(body.Input[0], &reasoning); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body.Input[1], &functionCall); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body.Input[2], &functionOutput); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body.Input[3], &customOutput); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body.Input[4], &computerOutput); err != nil {
+			t.Fatal(err)
+		}
+		if reasoning["type"] != "reasoning" || reasoning["id"] != "rs_1" || reasoning["encrypted_content"] != "opaque-openai-state" ||
+			!reflect.DeepEqual(reasoning["summary"], []any{map[string]any{"type": "summary_text", "text": "safe summary"}}) ||
+			functionCall["type"] != "function_call" || functionCall["id"] != "fc_1" || functionCall["call_id"] != "call_function" ||
+			functionOutput["type"] != "function_call_output" || functionOutput["output"] != "function result" ||
+			customOutput["type"] != "custom_tool_call_output" || customOutput["input"] != "custom result" ||
+			computerOutput["type"] != "computer_call_output" || computerOutput["output"] != "computer result" {
+			t.Fatal("continuation field contract was not preserved")
+		}
+		for _, item := range []map[string]any{functionOutput, computerOutput} {
+			if _, present := item["input"]; present {
+				t.Fatal("function or computer output used input")
+			}
+		}
+		if _, present := customOutput["output"]; present {
+			t.Fatal("custom tool output used output")
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"upstream-2","status":"completed","model":"gpt-test","output":[]}`))}, nil
+	})
+	client := NewChatGPTOAuthClient("https://provider.example", &http.Client{Transport: transport})
+	ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+	first, err := client.Execute(ctx, openAIModel(), inference.Request{Model: "gateway-model", Input: []inference.Item{{Type: "message", Role: "user", Text: "continue"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation := append([]inference.Item(nil), first.Output...)
+	continuation = append(continuation,
+		inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`"function result"`)},
+		inference.Item{Type: "custom_tool_call_output", CallID: "call_custom", Output: json.RawMessage(`"custom result"`)},
+		inference.Item{Type: "computer_call_output", CallID: "call_computer", Output: json.RawMessage(`"computer result"`)},
+	)
+	if _, err := client.Execute(ctx, openAIModel(), inference.Request{Model: "gateway-model", Input: continuation}); err != nil || calls != 2 {
+		t.Fatalf("continuation failed: calls=%d err=%v", calls, err)
 	}
 }
 
