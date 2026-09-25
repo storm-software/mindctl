@@ -250,7 +250,7 @@ func toResponseInput(item inference.Item) responseInputItem {
 
 func toResponseInputForContinuation(item inference.Item, codexContinuation bool) responseInputItem {
 	if codexContinuation && item.Type == "function_call" {
-		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments}
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace}
 	}
 	if codexContinuation && item.Type == "custom_tool_call_output" {
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Input: stringPointer(callOutputInput(item.Output))}

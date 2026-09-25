@@ -489,6 +489,9 @@ func TestOpenAIChatGPTOAuthTwoTurnContinuationPreservesReasoningAndToolOutputFie
 		if _, present := customOutput["output"]; present {
 			t.Fatal("custom tool output used output")
 		}
+		if _, present := functionCall["arguments"]; present {
+			t.Fatal("Codex function-call continuation sent rejected arguments field")
+		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"upstream-2","status":"completed","model":"gpt-test","output":[]}`))}, nil
 	})
 	client := NewChatGPTOAuthClient("https://provider.example", &http.Client{Transport: transport})
