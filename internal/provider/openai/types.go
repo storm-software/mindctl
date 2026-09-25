@@ -244,15 +244,30 @@ func toResponseInput(item inference.Item) responseInputItem {
 	case "reasoning":
 		return responseInputItem{ID: item.ID, Type: item.Type, Summary: append(json.RawMessage(nil), item.Summary...), EncryptedContent: append(json.RawMessage(nil), item.EncryptedContent...)}
 	default:
+		if strings.HasSuffix(item.Type, "_call_output") {
+			return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Output: item.Output}
+		}
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments, Output: item.Output}
 	}
 }
 
 func toResponseInputForContinuation(item inference.Item, codexContinuation bool) responseInputItem {
 	if codexContinuation && item.Type == "function_call" {
-		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace}
+		return responseInputItem{
+			ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace,
+			Arguments: encodeFunctionCallArguments(item.Arguments),
+		}
 	}
 	return toResponseInput(item)
+}
+
+func encodeFunctionCallArguments(arguments json.RawMessage) json.RawMessage {
+	var encoded string
+	if json.Unmarshal(arguments, &encoded) == nil {
+		return append(json.RawMessage(nil), arguments...)
+	}
+	result, _ := json.Marshal(string(arguments))
+	return result
 }
 
 func nonEmptyStringPointer(value string) *string {

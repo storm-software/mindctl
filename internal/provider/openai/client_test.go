@@ -344,6 +344,7 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 		item       inference.Item
 		wantInput  bool
 		wantOutput bool
+		wantArgs   string
 	}{
 		{
 			name:       "Codex custom tool output",
@@ -355,7 +356,7 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 		{
 			name:       "Codex function output",
 			client:     NewChatGPTOAuthClient("https://provider.example", nil),
-			item:       inference.Item{Type: "function_call_output", CallID: "call_function", Output: json.RawMessage(`{"status":"complete"}`)},
+			item:       inference.Item{Type: "function_call_output", CallID: "call_function", Arguments: json.RawMessage(`null`), Output: json.RawMessage(`{"status":"complete"}`)},
 			wantInput:  false,
 			wantOutput: true,
 		},
@@ -379,6 +380,7 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 			item:       inference.Item{Type: "function_call", CallID: "call_shell", Name: "exec", Arguments: json.RawMessage(`{"cmd":"pwd"}`), Output: json.RawMessage(`null`)},
 			wantInput:  false,
 			wantOutput: false,
+			wantArgs:   `{"cmd":"pwd"}`,
 		},
 		{
 			name:       "API key function output",
@@ -409,6 +411,14 @@ func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 			_, hasOutput := encoded["output"]
 			if hasInput != tt.wantInput || hasOutput != tt.wantOutput {
 				t.Fatalf("encoded output=%v, want input=%t output=%t", encoded, tt.wantInput, tt.wantOutput)
+			}
+			if tt.wantArgs != "" && encoded["arguments"] != tt.wantArgs {
+				t.Fatalf("arguments=%T, want JSON string", encoded["arguments"])
+			}
+			if strings.HasSuffix(tt.item.Type, "_call_output") {
+				if _, present := encoded["arguments"]; present {
+					t.Fatal("call output included arguments")
+				}
 			}
 		})
 	}
@@ -456,7 +466,7 @@ func TestOpenAIChatGPTOAuthTwoTurnContinuationPreservesReasoningAndToolOutputFie
 		}
 		if reasoning["type"] != "reasoning" || reasoning["id"] != "rs_1" || reasoning["encrypted_content"] != "opaque-openai-state" ||
 			!reflect.DeepEqual(reasoning["summary"], []any{map[string]any{"type": "summary_text", "text": "safe summary"}}) ||
-			functionCall["type"] != "function_call" || functionCall["id"] != "fc_1" || functionCall["call_id"] != "call_function" ||
+			functionCall["type"] != "function_call" || functionCall["id"] != "fc_1" || functionCall["call_id"] != "call_function" || functionCall["arguments"] != "{}" ||
 			functionOutput["type"] != "function_call_output" || functionOutput["output"] != "function result" ||
 			customOutput["type"] != "custom_tool_call_output" || customOutput["output"] != "custom result" ||
 			computerOutput["type"] != "computer_call_output" || computerOutput["output"] != "computer result" {
@@ -466,9 +476,6 @@ func TestOpenAIChatGPTOAuthTwoTurnContinuationPreservesReasoningAndToolOutputFie
 			if _, present := item["input"]; present {
 				t.Fatal("call output used input")
 			}
-		}
-		if _, present := functionCall["arguments"]; present {
-			t.Fatal("Codex function-call continuation sent rejected arguments field")
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"upstream-2","status":"completed","model":"gpt-test","output":[]}`))}, nil
 	})
