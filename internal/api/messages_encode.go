@@ -103,11 +103,13 @@ func writeMessagesError(w http.ResponseWriter, err error) {
 		Error struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
+			Code    string `json:"code,omitempty"`
 		} `json:"error"`
 	}{Type: "error", Error: struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
-	}{Type: detail.Type, Message: detail.Message}})
+		Code    string `json:"code,omitempty"`
+	}{Type: detail.Type, Message: detail.Message, Code: detail.Code}})
 }
 
 // WriteMessagesError emits Anthropic-shaped errors for outer middleware.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
@@ -71,6 +72,28 @@ func TestWriteMessagesError(t *testing.T) {
 			}
 			if json.Unmarshal(response.Body.Bytes(), &body) != nil || response.Code != test.want || body.Type != "error" || body.Error.Type == "" || strings.Contains(response.Body.String(), "private") {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestHeadroomUnavailableResponseFormats(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		write func(http.ResponseWriter, error)
+		body  string
+	}{
+		{name: "responses", write: WriteError, body: `"code":"headroom_unavailable"`},
+		{name: "messages", write: WriteMessagesError, body: `"code":"headroom_unavailable"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			test.write(response, errors.Join(headroom.ErrUnavailable, errors.New("private secret")))
+			if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), test.body) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), "headroom.enabled: false") || strings.Contains(response.Body.String(), "private secret") {
+				t.Fatalf("unsafe Headroom error body: %s", response.Body.String())
 			}
 		})
 	}

@@ -1,0 +1,37 @@
+{
+  "headroom_version": "0.39.0",
+  "python": "3.13.15",
+  "uv_version": "0.12.11",
+  "targets": {
+    "darwin/amd64": {
+      "uv_sha256": "96d773bf5fda4f9b08c4444847f9183d1c14bc8a28ff9c0490e261a8fc6e5309",
+      "uv_url": "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-apple-darwin.tar.gz",
+      "wheel_sha256": "4c43bf08a78f0b059cb077632734ab8552520ff1e7bb15a1c1c136b05a1ea70d",
+      "wheel_url": "https://files.pythonhosted.org/packages/ed/0e/0cbb6839e858ade88575ff71017b41d79ff5e7b99841e2d29ec610a55e63/headroom_ai-0.39.0-cp310-abi3-macosx_10_12_x86_64.whl"
+    },
+    "darwin/arm64": {
+      "uv_sha256": "e01b69ee15e81918d5e8fc9cf39b3db7f59c5576e5e306cd9b7aeb2c7b7321c3",
+      "uv_url": "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-apple-darwin.tar.gz",
+      "wheel_sha256": "07496d9b2e3e7178e6e7060587f7a0234df238716841c8e468b14c6130d46695",
+      "wheel_url": "https://files.pythonhosted.org/packages/b9/c0/585a2dd630a8936c20bf1062fa76cdbbe3cb4a29a909367f7c040770a1e5/headroom_ai-0.39.0-cp310-abi3-macosx_11_0_arm64.whl"
+    },
+    "linux/amd64": {
+      "uv_sha256": "4ae93e0f148a18434cc094072547cec88912fc4a72b984183c7d0d0e9586cb5e",
+      "uv_url": "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-unknown-linux-gnu.tar.gz",
+      "wheel_sha256": "8c7594012ce0dcd28202af471fb1bd08c6f226c8e10fc6a682b3fb233e809a74",
+      "wheel_url": "https://files.pythonhosted.org/packages/a5/a7/0a005ed79752f9230ad749180f8347c76f2e5cf0fb9f53a226ac55ae1c64/headroom_ai-0.39.0-cp310-abi3-manylinux_2_28_x86_64.whl"
+    },
+    "linux/arm64": {
+      "uv_sha256": "e9933d907fb9cd27d606d819bbded419f2844c0e2efc98225ecfa409288eb28d",
+      "uv_url": "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-unknown-linux-gnu.tar.gz",
+      "wheel_sha256": "5858a56e68dea0b44a0aa940ebd3a4d295b1b4913a05472674e135e970dce5cd",
+      "wheel_url": "https://files.pythonhosted.org/packages/49/69/b011db0bc2db3af9878d93ac25fd224481db899476cb5c84185d2e7ec242/headroom_ai-0.39.0-cp310-abi3-manylinux_2_28_aarch64.whl"
+    },
+    "windows/amd64": {
+      "uv_sha256": "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9",
+      "uv_url": "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip",
+      "wheel_sha256": "893a0ca18b74655d5c6e52cd6e2751e6a71a1acf01c3fd26513d0c0b92888365",
+      "wheel_url": "https://files.pythonhosted.org/packages/b3/f1/f745ff8f3cc0b0d99eed71a03bade541bb7bcf530b1112cc0720ab057622/headroom_ai-0.39.0-cp310-abi3-win_amd64.whl"
+    }
+  }
+}

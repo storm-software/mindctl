@@ -90,14 +90,24 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 			"tier", candidate.Tier.String(),
 			"stream", true,
 		)
-		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, Provider: candidate.Provider, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
-			return s.failStreamAttempt(ctx, attempt, "", err)
-		}
-
 		request := in.Request
 		request.ID, request.Model, request.PreviousResponseID = turn.ResponseID, candidate.ModelID, ""
 		request.Input = turn.TranscriptFor(candidate.Provider)
-		stream, err := adapter.Stream(providerScopedContext(ctx, candidate.Provider), model, providerScopedRequest(request, candidate.Provider))
+		request = providerScopedRequest(request, candidate.Provider)
+		if s.compressor != nil {
+			compressed, _, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, candidate.Provider, request)
+			if compressErr != nil {
+				if failErr := s.failStreamAttempt(ctx, attempt, "", compressErr); failErr != nil {
+					return errors.Join(compressErr, failErr)
+				}
+				return compressErr
+			}
+			request = compressed
+		}
+		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, Provider: candidate.Provider, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
+			return s.failStreamAttempt(ctx, attempt, "", err)
+		}
+		stream, err := adapter.Stream(providerScopedContext(ctx, candidate.Provider), model, request)
 		var result inference.Result
 		if err == nil {
 			var completion inference.Event

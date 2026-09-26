@@ -20,6 +20,35 @@ func TestShippedExampleReachesSecretValidation(t *testing.T) {
 	}
 }
 
+func TestHeadroomConfigDefaultsAndValidation(t *testing.T) {
+	defaultConfig, err := Read(writeConfig(t, "debug: false\n"))
+	if err != nil {
+		t.Fatalf("Read default config: %v", err)
+	}
+	if defaultConfig.Headroom.Enabled || defaultConfig.Headroom.ModeValue() != "cache" {
+		t.Fatalf("default Headroom config = %+v", defaultConfig.Headroom)
+	}
+
+	for _, mode := range []string{"cache", "token"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Headroom = HeadroomConfig{Enabled: true, Mode: mode}
+			if err := cfg.Validate(testEnv); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
+	}
+
+	invalid := validConfig()
+	invalid.Headroom.Mode = "invalid"
+	if err := invalid.Validate(testEnv); err == nil || !strings.Contains(err.Error(), "headroom mode") {
+		t.Fatalf("Validate() error = %v; want invalid Headroom mode", err)
+	}
+	if _, err := Read("../../config.example.yaml"); err != nil {
+		t.Fatalf("shipped example is not readable: %v", err)
+	}
+}
+
 func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 	cfg, err := Read("../../config.example.yaml")
 	if err != nil {

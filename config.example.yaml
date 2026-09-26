@@ -12,6 +12,12 @@ client_auth:
 # claude_messages:
 #   enabled: true
 
+# Optional local Headroom compression. Failures are returned before any
+# provider request; disable this option and restart to recover from an outage.
+headroom:
+  enabled: false
+  mode: cache
+
 classifier:
   # Points to either the optional local Laya sidecar or an operator-managed
   # compatible endpoint. The sidecar pins convaiinnovations/laya internally.

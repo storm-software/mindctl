@@ -180,6 +180,27 @@ Container deployments should continue to mount the configuration explicitly at
 `/etc/mindctl/config.yaml`, as shown above; the image command supplies that
 path through its configuration flag.
 
+### Managed Headroom compression
+
+Compression is opt-in:
+
+```yaml
+headroom:
+  enabled: true
+  mode: cache # cache or token
+```
+
+On first use, an enabled installation may need network access and writable
+private cache storage to provision the pinned Headroom runtime. Mindctl sends
+only round-trip-safe assistant and string tool-result text to a loopback,
+token-authenticated child; provider credentials and inference requests never
+go to that child. Compression failures are fail-closed and return HTTP 503
+with code `headroom_unavailable`; Mindctl never forwards the uncompressed
+request. Disable it by setting `headroom.enabled: false` and restarting.
+
+Do not enable this option when another Headroom proxy already fronts Mindctl,
+or the request may be compressed twice.
+
 ## Debug router traces
 
 Set top-level `debug: true`, export `MINDCTL_DEBUG=true`, or start the gateway

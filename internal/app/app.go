@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/storm-software/mindctl/internal/debugtrace"
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/executor"
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/provider/anthropic"
 	"github.com/storm-software/mindctl/internal/provider/gemini"
@@ -46,6 +48,7 @@ type App struct {
 	closeOnce            sync.Once
 	closeErr             error
 	debugTrace           *debugtrace.Trace
+	headroomManager      *headroom.Manager
 }
 
 // New validates secret references again so callers need not use config.Load.
@@ -190,11 +193,23 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	if a.debugTrace != nil {
 		debugLogger = a.debugTrace.Logger()
 	}
-	a.executor = executor.NewWithLogger(
+	var compressor headroom.Compressor
+	if cfg.Headroom.Enabled {
+		cacheDir, cacheErr := os.UserCacheDir()
+		if cacheErr != nil {
+			cacheDir = os.TempDir()
+		}
+		provisioner := headroom.NewProvisioner(filepath.Join(cacheDir, "mindctl"), a.httpClient, nil)
+		a.headroomManager = headroom.NewManager(cfg.Headroom, provisioner, a.httpClient, headroom.NewExecRunner())
+		_ = a.headroomManager.Start(ctx)
+		compressor = a.headroomManager
+	}
+	a.executor = executor.NewWithCompressor(
 		a.classifier,
 		a.policy,
 		provider.NewRegistry(providers),
 		conversation.New(a.store),
+		compressor,
 		debugLogger,
 	)
 	clientToken, _ := getenv(cfg.ClientAuth.TokenEnv)
@@ -309,8 +324,11 @@ func (a *App) Close() error {
 		if a.maintenance != nil {
 			a.maintenance.Close()
 		}
+		if a.headroomManager != nil {
+			a.closeErr = a.headroomManager.Close()
+		}
 		a.httpClient.CloseIdleConnections()
-		a.closeErr = a.store.Close()
+		a.closeErr = errors.Join(a.closeErr, a.store.Close())
 		if a.debugTrace != nil {
 			a.closeErr = errors.Join(a.closeErr, a.debugTrace.Close())
 		}

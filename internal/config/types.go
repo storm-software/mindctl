@@ -33,12 +33,28 @@ type Config struct {
 	Listen         string               `yaml:"listen"`
 	ClientAuth     ClientAuthConfig     `yaml:"client_auth"`
 	ClaudeMessages ClaudeMessagesConfig `yaml:"claude_messages"`
+	Headroom       HeadroomConfig       `yaml:"headroom"`
 	Classifier     ClassifierConfig     `yaml:"classifier"`
 	SQLite         SQLiteConfig         `yaml:"sqlite"`
 	Encryption     EncryptionConfig     `yaml:"encryption"`
 	Routing        RoutingConfig        `yaml:"routing"`
 	Providers      []ProviderConfig     `yaml:"providers"`
 	Models         []ModelConfig        `yaml:"models"`
+}
+
+// HeadroomConfig controls the optional locally managed compression sidecar.
+type HeadroomConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Mode    string `yaml:"mode"`
+}
+
+// ModeValue returns the configured proxy mode while keeping the empty mode
+// backward-compatible with the default cache strategy.
+func (c HeadroomConfig) ModeValue() string {
+	if c.Mode == "" {
+		return "cache"
+	}
+	return c.Mode
 }
 
 // ClientAuthConfig configures gateway authentication using a referenced secret.
@@ -222,6 +238,9 @@ func (cfg Config) ValidateCatalog() error {
 func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	var errs []error
 	errs = append(errs, cfg.ValidateCatalog())
+	if mode := cfg.Headroom.ModeValue(); mode != "cache" && mode != "token" {
+		errs = append(errs, fmt.Errorf("headroom mode must be cache or token: %s", cfg.Headroom.Mode))
+	}
 
 	requireEnv := func(label, name string) {
 		value, ok := getenv(name)

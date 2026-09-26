@@ -13,6 +13,7 @@ import (
 	"github.com/storm-software/mindctl/internal/classifier"
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
@@ -44,6 +45,7 @@ type Service struct {
 	policy        *router.Policy
 	providers     *provider.Registry
 	conversations conversation.Service
+	compressor    headroom.Compressor
 	logger        *slog.Logger
 }
 
@@ -54,7 +56,7 @@ func New(
 	providers *provider.Registry,
 	conversations conversation.Service,
 ) *Service {
-	return NewWithLogger(classifier, policy, providers, conversations, nil)
+	return NewWithCompressor(classifier, policy, providers, conversations, nil, nil)
 }
 
 // NewWithLogger composes the execution path with optional content-safe debug tracing.
@@ -65,9 +67,22 @@ func NewWithLogger(
 	conversations conversation.Service,
 	logger *slog.Logger,
 ) *Service {
+	return NewWithCompressor(classifier, policy, providers, conversations, nil, logger)
+}
+
+// NewWithCompressor composes the execution path with optional managed
+// Headroom compression.
+func NewWithCompressor(
+	classifier classifier.Classifier,
+	policy *router.Policy,
+	providers *provider.Registry,
+	conversations conversation.Service,
+	compressor headroom.Compressor,
+	logger *slog.Logger,
+) *Service {
 	return &Service{
 		classifier: classifier, policy: policy, providers: providers,
-		conversations: conversations, logger: logger,
+		conversations: conversations, compressor: compressor, logger: logger,
 	}
 }
 
@@ -183,7 +198,18 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.Model = decision.ModelID
 	request.PreviousResponseID = ""
 	request.Input = turn.TranscriptFor(decision.Provider)
-	result, err := adapter.Execute(providerScopedContext(ctx, decision.Provider), model, providerScopedRequest(request, decision.Provider))
+	request = providerScopedRequest(request, decision.Provider)
+	if s.compressor != nil {
+		compressed, _, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, decision.Provider, request)
+		if compressErr != nil {
+			if failErr := s.conversations.FailAttempt(ctx, attempt, "", compressErr); failErr != nil {
+				return Output{}, errors.Join(compressErr, failErr)
+			}
+			return Output{}, compressErr
+		}
+		request = compressed
+	}
+	result, err := adapter.Execute(providerScopedContext(ctx, decision.Provider), model, request)
 	if err != nil {
 		attributes := []any{
 			"response_id", turn.ResponseID,

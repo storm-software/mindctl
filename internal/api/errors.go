@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/storm-software/mindctl/internal/conversation"
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
@@ -58,6 +59,12 @@ func errorDetail(err error) (int, ErrorDetail) {
 			detail.Param = validation.Param
 		}
 		return http.StatusBadRequest, detail
+	case errors.Is(err, headroom.ErrUnavailable):
+		return http.StatusServiceUnavailable, ErrorDetail{
+			Message: "Headroom compression is unavailable; set headroom.enabled: false and restart",
+			Type:    "server_error",
+			Code:    "headroom_unavailable",
+		}
 	case isNoEligibleModel(err):
 		return http.StatusBadRequest, ErrorDetail{Message: "no configured model can satisfy this request", Type: "invalid_request_error", Code: "model_not_available"}
 	case isUnsupportedFeature(err):

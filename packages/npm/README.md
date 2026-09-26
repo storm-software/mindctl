@@ -89,6 +89,12 @@ npx mindctl version
 The gateway still requires a runtime configuration file and the required
 environment variables. See the repository README for configuration guidance.
 
+Managed Headroom compression is included in the native executable and is
+disabled by default. Enabling `headroom.enabled` may require network access
+and a writable cache on first use; a failed sidecar returns 503 rather than
+forwarding uncompressed input. Disable it in configuration and restart to
+recover from an outage.
+
 ## Roadmap
 
 See the [open issues](https://github.com/storm-software/mindctl/issues) for
