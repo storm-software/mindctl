@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.23](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.23) (09/25/2026)
+
+### Features
+
+- **mindctl:** Added Anthropic model provider implementation logic ([a2edd2b](https://github.com/storm-software/mindctl/commit/a2edd2b))
+
 ## [0.1.11](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.11) (09/24/2026)
 
 ### Bug Fixes
