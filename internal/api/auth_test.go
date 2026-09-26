@@ -50,6 +50,67 @@ func TestCaptureNativeClaudeOAuthIsRequestScoped(t *testing.T) {
 	}
 }
 
+// TestCaptureNativeClaudeOAuthToleratesRepeatedIdenticalProtocolHeaders covers
+// a relay proxy (e.g. Headroom) repeating anthropic-beta/anthropic-version
+// verbatim instead of folding them into one value. Unlike Authorization, these
+// headers carry no credential weight, so identical repeats must not 400.
+func TestCaptureNativeClaudeOAuthToleratesRepeatedIdenticalProtocolHeaders(t *testing.T) {
+	var credential upstreamauth.ClaudeCredential
+	var present bool
+	handler := CaptureNativeClaudeOAuth(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		credential, present = upstreamauth.Claude(request.Context())
+	}))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Add("Authorization", "Bearer oauth-token")
+	request.Header.Add("anthropic-beta", "oauth-2025-04-20,context-1")
+	request.Header.Add("anthropic-beta", "oauth-2025-04-20,context-1")
+	request.Header.Add("anthropic-version", "2023-06-01")
+	request.Header.Add("anthropic-version", "2023-06-01")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d, want %d", recorder.Code, http.StatusOK)
+	}
+	if !present {
+		t.Fatal("credential not present")
+	}
+	if credential.Beta != "oauth-2025-04-20,context-1" || credential.Version != "2023-06-01" {
+		t.Fatalf("credential did not retain repeated protocol headers: %+v", credential)
+	}
+}
+
+// TestCaptureNativeClaudeOAuthRejectsConflictingProtocolHeaders keeps the
+// existing fail-closed behavior for genuinely conflicting repeated values.
+func TestCaptureNativeClaudeOAuthRejectsConflictingProtocolHeaders(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		betas    []string
+		versions []string
+	}{
+		{name: "conflicting beta", betas: []string{"a", "b"}, versions: []string{"2023-06-01"}},
+		{name: "conflicting version", betas: []string{"a"}, versions: []string{"2023-06-01", "2024-01-01"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := CaptureNativeClaudeOAuth(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+				t.Fatal("next handler must not run for conflicting protocol headers")
+			}))
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			request.Header.Add("Authorization", "Bearer oauth-token")
+			for _, beta := range test.betas {
+				request.Header.Add("anthropic-beta", beta)
+			}
+			for _, version := range test.versions {
+				request.Header.Add("anthropic-version", version)
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d, want %d", recorder.Code, http.StatusBadRequest)
+			}
+		})
+	}
+}
+
 func TestAuthenticateWithErrorKeepsExistingResponsesShape(t *testing.T) {
 	for _, test := range []struct {
 		name, header string

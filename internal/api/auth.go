@@ -100,12 +100,21 @@ func CaptureNativeClaudeOAuth(next http.Handler) http.Handler {
 			name  string
 			value *string
 		}{{"anthropic-beta", &credential.Beta}, {"anthropic-version", &credential.Version}} {
+			// A compression/relay proxy in front of Mindctl (e.g. Headroom) may
+			// repeat one of these protocol headers verbatim rather than folding
+			// it into a single value. That repetition carries no security
+			// weight, unlike Authorization, so only genuinely conflicting
+			// values are rejected.
 			values := r.Header.Values(header.name)
 			if len(values) > 1 {
-				writeMessagesError(w, ErrInvalidRequest)
-				return
+				for _, value := range values[1:] {
+					if value != values[0] {
+						writeMessagesError(w, ErrInvalidRequest)
+						return
+					}
+				}
 			}
-			if len(values) == 1 {
+			if len(values) >= 1 {
 				*header.value = values[0]
 			}
 		}
