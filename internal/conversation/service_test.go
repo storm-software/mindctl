@@ -156,6 +156,21 @@ func TestStartDropsCallerProviderData(t *testing.T) {
 	}
 }
 
+func TestStartRetainsTrustedAnthropicContinuationOnlyForAnthropic(t *testing.T) {
+	svc := testConversationService(t)
+	request := inference.Request{Model: "mindctl-auto", Input: []inference.Item{{
+		Type: "message", Role: "assistant", Text: "hello", ContinuationProvider: "anthropic",
+		ProviderData: []byte(`{"anthropic_content_block":{"type":"text","text":"hello"}}`),
+	}}}
+	turn, err := svc.Start(conversation.WithTrustedNativeInput(context.Background()), "client-a", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turn.TranscriptFor("anthropic")[0].ProviderData) == 0 || len(turn.TranscriptFor("openai")[0].ProviderData) != 0 {
+		t.Fatal("native content was lost or crossed providers")
+	}
+}
+
 func TestTranscriptForDoesNotForwardReasoningContinuationAcrossProviders(t *testing.T) {
 	svc := testConversationService(t)
 	turn, err := svc.Start(context.Background(), "client-a", requestWithText("hello"))

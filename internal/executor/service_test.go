@@ -15,7 +15,31 @@ import (
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
+
+type inspectingClaudeProvider struct {
+	provider.Provider
+	hasClaude bool
+}
+
+func (p *inspectingClaudeProvider) Execute(ctx context.Context, model domain.Model, request inference.Request) (inference.Result, error) {
+	_, p.hasClaude = upstreamauth.Claude(ctx)
+	return p.Provider.Execute(ctx, model, request)
+}
+
+func TestExecuteDoesNotGiveClaudeCredentialToDifferentProvider(t *testing.T) {
+	deps := fakeDeps()
+	inspector := &inspectingClaudeProvider{Provider: deps.OpenAI}
+	deps.Executor = New(deps.Classifier, router.NewPolicy(router.PolicyConfig{}), provider.NewRegistry(map[string]provider.Provider{"openai": inspector, "anthropic": deps.Anthropic}), deps.Conversations)
+	ctx := upstreamauth.WithClaude(context.Background(), upstreamauth.ClaudeCredential{AccessToken: "native-secret", Beta: "feature-x"})
+	if _, err := deps.Executor.Execute(ctx, deps.input(concreteModelInput("gpt-test"))); err != nil {
+		t.Fatal(err)
+	}
+	if inspector.hasClaude {
+		t.Fatal("Claude credential crossed provider boundary")
+	}
+}
 
 func TestExecuteSkipsClassifierForCompatibleConversationPin(t *testing.T) {
 	deps := fakeDepsWithPin("gpt-pinned", domain.T3)

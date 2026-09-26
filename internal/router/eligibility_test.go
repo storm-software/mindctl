@@ -7,6 +7,27 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 )
 
+func TestMessagesNativeOnlyFeaturesRequireAnthropic(t *testing.T) {
+	models := []domain.Model{
+		{ID: "claude", Provider: "anthropic", Tier: domain.T3, Available: true},
+		{ID: "other", Provider: "openai", Tier: domain.T3, Available: true},
+	}
+	for _, test := range []struct {
+		name, required string
+		want           int
+	}{
+		{name: "portable", want: 2},
+		{name: "signed thinking", required: "anthropic", want: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			eligible, _ := EligibleModels(EligibilityInput{Models: models, RequiredProvider: test.required})
+			if len(eligible) != test.want || (test.required != "" && eligible[0].Provider != test.required) {
+				t.Fatalf("eligible=%v", eligible)
+			}
+		})
+	}
+}
+
 func TestEligibleModelsRejectsCapabilityAndFloorViolations(t *testing.T) {
 	models := []domain.Model{
 		{ID: "text-t3", Tier: domain.T3, Capabilities: domain.Capabilities{Text: true}},

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -112,11 +114,106 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	})
 	root.AddCommand(newConfigCommand())
 	root.AddCommand(
+		newStatusCommand(),
 		newModelCommand(settings),
 		newProviderCommand(settings),
 		newHistoryCommand(settings),
 	)
 	return root
+}
+
+func newStatusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status [harness]",
+		Short: "Show harness connections to the Mindctl router",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(command *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				var connected bool
+				var err error
+				switch args[0] {
+				case "codex":
+					connected, err = codexConnected()
+				case "claude":
+					connected, err = claudeConnected()
+				default:
+					return fmt.Errorf("unknown harness %q", args[0])
+				}
+				if err != nil {
+					return err
+				}
+				_, err = fmt.Fprintln(command.OutOrStdout(), connectionStatus(connected))
+				return err
+			}
+			codex, err := codexConnected()
+			if err != nil {
+				return err
+			}
+			claude, err := claudeConnected()
+			if err != nil {
+				return err
+			}
+			output := tabwriter.NewWriter(command.OutOrStdout(), 0, 0, 2, ' ', 0)
+			if _, err := fmt.Fprintf(output, "HARNESS\tSTATUS\ncodex\t%s\nclaude\t%s\n", connectionStatus(codex), connectionStatus(claude)); err != nil {
+				return err
+			}
+			return output.Flush()
+		},
+	}
+}
+
+func connectionStatus(connected bool) string {
+	if connected {
+		return "connected"
+	}
+	return "disconnected"
+}
+
+func claudeConnected() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("find home directory: %w", err)
+	}
+	body, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Claude settings: %w", err)
+	}
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		return false, errors.New("read Claude settings: expected a JSON object")
+	}
+	var settings struct {
+		Env struct {
+			AnthropicBaseURL string `json:"ANTHROPIC_BASE_URL"`
+		} `json:"env"`
+	}
+	if err := json.Unmarshal(body, &settings); err != nil {
+		return false, fmt.Errorf("read Claude settings: %w", err)
+	}
+	return settings.Env.AnthropicBaseURL == "http://127.0.0.1:8080" || settings.Env.AnthropicBaseURL == "http://127.0.0.1:8080/", nil
+}
+
+func codexConnected() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("find home directory: %w", err)
+	}
+	path := filepath.Join(home, ".codex", "config.toml")
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Codex config: %w", err)
+	}
+	settings := viper.New()
+	settings.SetConfigType("toml")
+	if err := settings.ReadConfig(bytes.NewReader(body)); err != nil {
+		return false, fmt.Errorf("read Codex config: %w", err)
+	}
+	return settings.GetString("model_provider") == "mindctl", nil
 }
 
 func newHistoryCommand(settings *viper.Viper) *cobra.Command {

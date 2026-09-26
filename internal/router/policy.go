@@ -51,6 +51,7 @@ type DecisionInput struct {
 	// callers honor explicit model requests while retaining all policy hard
 	// eligibility checks and rejection explanations.
 	ModelID                                   string
+	RequiredProvider                          string
 	Floor                                     domain.Tier
 	TaskType                                  domain.TaskType
 	Pin                                       *Pin
@@ -142,7 +143,7 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 			}
 		}
 	}
-	eligible, rejections := EligibleModels(EligibilityInput{Models: models, Features: in.Features, Floor: floor, MinTier: in.MinTier, MaxTier: in.MaxTier, ProviderCredentials: in.ProviderCredentials, ProviderAvailability: in.ProviderAvailability})
+	eligible, rejections := EligibleModels(EligibilityInput{Models: models, Features: in.Features, Floor: floor, MinTier: in.MinTier, MaxTier: in.MaxTier, RequiredProvider: in.RequiredProvider, ProviderCredentials: in.ProviderCredentials, ProviderAvailability: in.ProviderAvailability})
 	decision.Rejections = rejections
 	type candidate struct {
 		model   domain.Model

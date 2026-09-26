@@ -106,12 +106,14 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Resp
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
 	accessToken := c.apiKey
+	var claudeCredential upstreamauth.ClaudeCredential
 	if c.auth == authClaudeOAuth {
 		credential, ok := upstreamauth.Claude(ctx)
 		if !ok {
 			return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 		}
 		accessToken = credential.AccessToken
+		claudeCredential = credential
 	}
 	if accessToken == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
@@ -122,11 +124,19 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Resp
 	}
 	if c.auth == authClaudeOAuth {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
-		request.Header.Set("anthropic-beta", claudeOAuthBetaHeader)
+		beta := claudeCredential.Beta
+		if beta == "" {
+			beta = claudeOAuthBetaHeader
+		}
+		request.Header.Set("anthropic-beta", beta)
 	} else {
 		request.Header.Set("x-api-key", accessToken)
 	}
-	request.Header.Set("anthropic-version", anthropicVersion)
+	version := anthropicVersion
+	if c.auth == authClaudeOAuth && claudeCredential.Version != "" {
+		version = claudeCredential.Version
+	}
+	request.Header.Set("anthropic-version", version)
 	request.Header.Set("Content-Type", "application/json")
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
@@ -278,6 +288,8 @@ func parseStreamEvent(kind string, data []byte, previousResponseID, previousStat
 		Delta        struct {
 			Type        string          `json:"type"`
 			Text        string          `json:"text"`
+			Thinking    string          `json:"thinking"`
+			Signature   string          `json:"signature"`
 			PartialJSON string          `json:"partial_json"`
 			StopReason  json.RawMessage `json:"stop_reason"`
 		} `json:"delta"`
@@ -297,6 +309,7 @@ func parseStreamEvent(kind string, data []byte, previousResponseID, previousStat
 		event.Status = "in_progress"
 	case "content_block_start":
 		event.ItemID = itemID(frame.Index, frame.ContentBlock)
+		event.ItemType = frame.ContentBlock.Type
 		event.CallID, event.Name = frame.ContentBlock.ID, frame.ContentBlock.Name
 	case "content_block_delta":
 		event.ItemID = strconv.Itoa(frame.Index)
@@ -305,9 +318,14 @@ func parseStreamEvent(kind string, data []byte, previousResponseID, previousStat
 			event.Delta = frame.Delta.Text
 		case "input_json_delta":
 			event.ArgumentsDelta = frame.Delta.PartialJSON
+		case "thinking_delta":
+			event.ItemType, event.Thinking = "thinking", frame.Delta.Thinking
+		case "signature_delta":
+			event.ItemType, event.Signature = "thinking", frame.Delta.Signature
 		}
 	case "message_delta":
 		event.Status = statusForStop(frame.Delta.StopReason)
+		_ = json.Unmarshal(frame.Delta.StopReason, &event.StopReason)
 		usage = frame.Usage
 	case "message_stop":
 		event.Status = previousStatus

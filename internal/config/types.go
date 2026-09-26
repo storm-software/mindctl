@@ -29,15 +29,16 @@ const (
 
 // Config is the complete gateway configuration loaded from YAML.
 type Config struct {
-	Debug      bool             `yaml:"debug"`
-	Listen     string           `yaml:"listen"`
-	ClientAuth ClientAuthConfig `yaml:"client_auth"`
-	Classifier ClassifierConfig `yaml:"classifier"`
-	SQLite     SQLiteConfig     `yaml:"sqlite"`
-	Encryption EncryptionConfig `yaml:"encryption"`
-	Routing    RoutingConfig    `yaml:"routing"`
-	Providers  []ProviderConfig `yaml:"providers"`
-	Models     []ModelConfig    `yaml:"models"`
+	Debug          bool                 `yaml:"debug"`
+	Listen         string               `yaml:"listen"`
+	ClientAuth     ClientAuthConfig     `yaml:"client_auth"`
+	ClaudeMessages ClaudeMessagesConfig `yaml:"claude_messages"`
+	Classifier     ClassifierConfig     `yaml:"classifier"`
+	SQLite         SQLiteConfig         `yaml:"sqlite"`
+	Encryption     EncryptionConfig     `yaml:"encryption"`
+	Routing        RoutingConfig        `yaml:"routing"`
+	Providers      []ProviderConfig     `yaml:"providers"`
+	Models         []ModelConfig        `yaml:"models"`
 }
 
 // ClientAuthConfig configures gateway authentication using a referenced secret.
@@ -45,6 +46,10 @@ type ClientAuthConfig struct {
 	TokenEnv     string `yaml:"token_env"`
 	Header       string `yaml:"header"`
 	MaxBodyBytes int64  `yaml:"max_body_bytes"`
+}
+
+type ClaudeMessagesConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // HeaderName returns the configured gateway credential header while retaining
@@ -268,6 +273,14 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 	if claudeOAuthConfigured && strings.EqualFold(clientAuthHeader, upstreamauth.ClaudeTokenHeader) {
 		errs = append(errs, fmt.Errorf("client authentication header %s conflicts with Claude OAuth", clientAuthHeader))
+	}
+	if cfg.ClaudeMessages.Enabled {
+		if strings.EqualFold(clientAuthHeader, "Authorization") {
+			errs = append(errs, errors.New("Claude Messages requires a separate client authentication header instead of Authorization"))
+		}
+		if !claudeOAuthConfigured {
+			errs = append(errs, errors.New("Claude Messages requires an Anthropic Claude OAuth passthrough provider"))
+		}
 	}
 
 	for keyID, envName := range cfg.Encryption.Keys {

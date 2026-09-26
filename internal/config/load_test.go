@@ -522,6 +522,48 @@ func TestValidateRejectsInvalidConfiguredPolicyValues(t *testing.T) {
 	}
 }
 
+func TestClaudeMessagesRequiresSeparateClientHeaderAndOAuthProvider(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		enabled   bool
+		header    string
+		withOAuth bool
+		wantError string
+	}{
+		{name: "disabled preserves default"},
+		{name: "enabled with dedicated header and OAuth", enabled: true, header: "X-Mindctl-Token", withOAuth: true},
+		{name: "enabled with Authorization", enabled: true, withOAuth: true, wantError: "Authorization"},
+		{name: "enabled without Anthropic OAuth", enabled: true, header: "X-Mindctl-Token", wantError: "Claude OAuth"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.ClaudeMessages.Enabled = test.enabled
+			cfg.ClientAuth.Header = test.header
+			if test.withOAuth {
+				cfg.Providers = append(cfg.Providers, ProviderConfig{
+					ID: "anthropic", BaseURL: "https://api.anthropic.com", Auth: string(ProviderAuthClaudeOAuthPassthrough),
+				})
+			}
+			err := cfg.Validate(testEnv)
+			if test.wantError == "" && err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("Validate() error = %v; want %q", err, test.wantError)
+			}
+		})
+	}
+	path := writeConfig(t, "claude_messages:\n  enabled: true\n")
+	cfg, err := Read(path)
+	if err != nil || !cfg.ClaudeMessages.Enabled {
+		t.Fatalf("Read() = %+v, %v; want enabled", cfg.ClaudeMessages, err)
+	}
+	path = writeConfig(t, "claude_messages:\n  unknowable: true\n")
+	if _, err := Read(path); err == nil {
+		t.Fatal("Read() accepted unknown Claude Messages config")
+	}
+}
+
 func validConfig() Config {
 	return Config{
 		Listen:     ":8080",

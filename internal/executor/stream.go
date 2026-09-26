@@ -22,6 +22,7 @@ import (
 // before its first SSE frame is written.
 type StreamMetadata struct {
 	ResponseID, Model, DecisionID string
+	Provider                      string
 	Tier                          domain.Tier
 	Attempts                      int
 }
@@ -89,19 +90,19 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 			"tier", candidate.Tier.String(),
 			"stream", true,
 		)
-		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
+		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, Provider: candidate.Provider, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
 			return s.failStreamAttempt(ctx, attempt, "", err)
 		}
 
 		request := in.Request
 		request.ID, request.Model, request.PreviousResponseID = turn.ResponseID, candidate.ModelID, ""
 		request.Input = turn.TranscriptFor(candidate.Provider)
-		stream, err := adapter.Stream(ctx, model, request)
+		stream, err := adapter.Stream(providerScopedContext(ctx, candidate.Provider), model, providerScopedRequest(request, candidate.Provider))
 		var result inference.Result
 		if err == nil {
 			var completion inference.Event
 			var attemptEmitted bool
-			result, completion, attemptEmitted, err = drainStream(ctx, stream, turn.ResponseID, candidate.ModelID, writer)
+			result, completion, attemptEmitted, err = drainStream(ctx, stream, turn.ResponseID, candidate.ModelID, candidate.Provider, writer)
 			emitted = emitted || attemptEmitted
 			if closeErr := stream.Close(); closeErr != nil && err == nil {
 				err = closeErr
@@ -116,6 +117,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 					completion.ResponseID = turn.ResponseID
 					completion.Status = result.Status
 					completion.Usage = result.Usage
+					completion.StopReason = result.StopReason
 					completion.ProviderRequestID = result.ProviderRequestID
 					if writeErr := writer.WriteEvent(ctx, completion); writeErr != nil {
 						return writeErr
@@ -223,6 +225,7 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 	s.traceFeatures(turn.ResponseID, features)
 	decisionInput := router.DecisionInput{
 		Features: features, Models: in.Models, MinTier: in.MinTier, MaxTier: in.MaxTier,
+		RequiredProvider:    in.RequiredProvider,
 		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: providerAvailability(in.Models, in.ProviderAvailability, s.providers),
 	}
 	if in.Request.Model != automaticModel {
@@ -320,6 +323,7 @@ func (s *Service) explicitStreamCandidates(in Input, turn conversation.Turn, ini
 	}
 	decision, err := s.policy.Decide(router.DecisionInput{
 		Features: features, Models: in.Models, Floor: floor, MinTier: in.MinTier, MaxTier: in.MaxTier,
+		RequiredProvider:    in.RequiredProvider,
 		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: providerAvailability(in.Models, in.ProviderAvailability, s.providers),
 	})
 	if err != nil {
@@ -381,7 +385,7 @@ func nextTier(tier domain.Tier) domain.Tier {
 	return tier + 1
 }
 
-func drainStream(ctx context.Context, stream provider.Stream, responseID, model string, writer EventWriter) (inference.Result, inference.Event, bool, error) {
+func drainStream(ctx context.Context, stream provider.Stream, responseID, model, selectedProvider string, writer EventWriter) (inference.Result, inference.Event, bool, error) {
 	accumulator := streamAccumulator{model: model, text: make(map[string]int), functions: make(map[string]int), customTools: make(map[string]int)}
 	var completion inference.Event
 	emitted := false
@@ -390,6 +394,9 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				result := accumulator.result(responseID)
+				if len(accumulator.pendingNative) != 0 || accumulator.currentNative != nil {
+					return result, completion, emitted, inference.Invalid("output", "incomplete signed thinking continuation")
+				}
 				if !accumulator.terminal || !provider.IsSuccessfulCompletion(result.Status) {
 					return result, completion, emitted, provider.UnsuccessfulCompletionError(result.ProviderRequestID)
 				}
@@ -400,10 +407,25 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model 
 			}
 			return accumulator.result(responseID), completion, emitted, err
 		}
+		rawEvent := event
+		if selectedProvider == "anthropic" {
+			if nativeWriter, ok := writer.(interface{ MessagesEvents() bool }); ok && nativeWriter.MessagesEvents() {
+				if err := accumulator.observeNative(rawEvent); err != nil {
+					return accumulator.result(responseID), completion, emitted, err
+				}
+			}
+		}
 		event, visible := canonicalStreamEvent(event)
 		accumulator.observe(event)
 		if event.Status != "" && event.Status != "in_progress" && !provider.IsSuccessfulCompletion(event.Status) {
 			return accumulator.result(responseID), completion, emitted, provider.UnsuccessfulCompletionError(accumulator.providerRequestID)
+		}
+		if nativeWriter, ok := writer.(interface{ MessagesEvents() bool }); ok && nativeWriter.MessagesEvents() {
+			if strings.HasPrefix(rawEvent.Type, "content_block_") || rawEvent.Type == "message_start" {
+				event, visible = rawEvent, true
+			} else if rawEvent.Type == "message_delta" || rawEvent.Type == "message_stop" {
+				visible = false
+			}
 		}
 		if !visible {
 			continue
@@ -460,13 +482,56 @@ func canonicalStreamEvent(event inference.Event) (inference.Event, bool) {
 }
 
 type streamAccumulator struct {
-	model, status, providerRequestID string
-	usage                            inference.Usage
-	terminal                         bool
-	items                            []inference.Item
-	outputIndexes                    []int
-	text, functions                  map[string]int
-	customTools                      map[string]int
+	model, status, providerRequestID, stopReason string
+	usage                                        inference.Usage
+	terminal                                     bool
+	items                                        []inference.Item
+	outputIndexes                                []int
+	text, functions                              map[string]int
+	customTools                                  map[string]int
+	currentNative                                *nativeThinkingBlock
+	pendingNative                                []nativeThinkingBlock
+	nativeFor                                    map[int][]nativeThinkingBlock
+}
+
+type nativeThinkingBlock struct {
+	Type      string `json:"type"`
+	Thinking  string `json:"thinking"`
+	Signature string `json:"signature"`
+}
+
+func (a *streamAccumulator) observeNative(event inference.Event) error {
+	switch event.Type {
+	case "content_block_start":
+		if event.ItemType == "thinking" {
+			a.currentNative = &nativeThinkingBlock{Type: "thinking"}
+		}
+	case "content_block_delta":
+		if a.currentNative != nil {
+			a.currentNative.Thinking += event.Thinking
+			a.currentNative.Signature += event.Signature
+		}
+	case "content_block_stop":
+		if a.currentNative != nil {
+			if a.currentNative.Signature == "" {
+				return inference.Invalid("output", "incomplete signed thinking continuation")
+			}
+			a.pendingNative = append(a.pendingNative, *a.currentNative)
+			a.currentNative = nil
+		}
+	}
+	return nil
+}
+
+func (a *streamAccumulator) attachNative(index int) {
+	if len(a.pendingNative) == 0 {
+		return
+	}
+	if a.nativeFor == nil {
+		a.nativeFor = make(map[int][]nativeThinkingBlock)
+	}
+	a.nativeFor[index] = append([]nativeThinkingBlock(nil), a.pendingNative...)
+	a.pendingNative = nil
 }
 
 func (a *streamAccumulator) observe(event inference.Event) {
@@ -478,6 +543,9 @@ func (a *streamAccumulator) observe(event inference.Event) {
 		if event.Status != "in_progress" {
 			a.terminal = true
 		}
+	}
+	if event.StopReason != "" {
+		a.stopReason = event.StopReason
 	}
 	if event.Usage.Known {
 		a.usage = event.Usage
@@ -552,6 +620,7 @@ func (a *streamAccumulator) appendText(event inference.Event, onlyIfAbsent bool)
 	if !ok {
 		index = a.appendItem(inference.Item{Type: "message", Role: "assistant"}, event.OutputIndex)
 		a.text[key] = index
+		a.attachNative(index)
 	}
 	if event.ItemID != "" {
 		a.items[index].ID = event.ItemID
@@ -575,6 +644,7 @@ func (a *streamAccumulator) appendFunctionArguments(event inference.Event, onlyI
 	}
 	if !ok {
 		index = a.appendItem(inference.Item{Type: "function_call"}, event.OutputIndex)
+		a.attachNative(index)
 	}
 	if event.ItemID != "" {
 		a.functions[event.ItemID] = index
@@ -611,7 +681,15 @@ func (a *streamAccumulator) result(responseID string) inference.Result {
 		if item.Type == "function_call" && len(item.Arguments) != 0 && !json.Valid(item.Arguments) {
 			continue
 		}
+		if prefix := a.nativeFor[position]; len(prefix) != 0 {
+			content := map[string]any{"type": "text", "text": item.Text}
+			if item.Type == "function_call" {
+				content = map[string]any{"type": "tool_use", "id": item.CallID, "name": item.Name, "input": item.Arguments}
+			}
+			item.ProviderData, _ = json.Marshal(map[string]any{"anthropic_content_block": content, "anthropic_prefix": prefix})
+			item.ContinuationProvider = "anthropic"
+		}
 		items = append(items, item)
 	}
-	return inference.Result{ID: responseID, Model: a.model, ProviderRequestID: a.providerRequestID, Status: status, Output: items, Usage: a.usage}
+	return inference.Result{ID: responseID, Model: a.model, ProviderRequestID: a.providerRequestID, Status: status, StopReason: a.stopReason, Output: items, Usage: a.usage}
 }

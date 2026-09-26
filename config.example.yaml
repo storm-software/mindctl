@@ -7,6 +7,11 @@ client_auth:
   header: X-Mindctl-Token
   max_body_bytes: 16777216
 
+# Opt in to Claude Code's Anthropic Messages endpoint with a separate client
+# authentication header and the Anthropic OAuth provider configured below.
+# claude_messages:
+#   enabled: true
+
 classifier:
   # Points to either the optional local Laya sidecar or an operator-managed
   # compatible endpoint. The sidecar pins convaiinnovations/laya internally.
@@ -58,7 +63,8 @@ providers:
   #   base_url: https://api.openai.com
   #   auth: api_key
   #   api_key_env: OPENAI_API_KEY
-  # Claude Code supplies this header from CLAUDE_CODE_OAUTH_TOKEN:
+  # For Codex using /v1/responses, supply this header from CLAUDE_CODE_OAUTH_TOKEN;
+  # Claude Code using /v1/messages supplies its native bearer credential instead:
   # env_http_headers = { "X-Mindctl-Claude-Token" = "CLAUDE_CODE_OAUTH_TOKEN" }
   - id: anthropic
     base_url: https://api.anthropic.com

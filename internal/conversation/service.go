@@ -31,6 +31,14 @@ type service struct {
 	store storage.ConversationRepository
 }
 
+type trustedNativeInputKey struct{}
+
+// WithTrustedNativeInput marks native continuation blocks decoded by the
+// Messages API as eligible for provider-scoped encrypted transcript storage.
+func WithTrustedNativeInput(ctx context.Context) context.Context {
+	return context.WithValue(ctx, trustedNativeInputKey{}, true)
+}
+
 // New creates a service over the encrypted durable storage boundary.
 func New(store storage.ConversationRepository) Service { return &service{store: store} }
 
@@ -88,7 +96,9 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 		input[index] = cloneItem(item)
 		// Caller-supplied metadata has no trusted provider provenance and must
 		// never become a continuation payload for any adapter.
-		input[index].ProviderData = nil
+		if ctx.Value(trustedNativeInputKey{}) != true || input[index].ContinuationProvider != "anthropic" {
+			input[index].ProviderData = nil
+		}
 		if input[index].ContinuationProvider == "" {
 			input[index].EncryptedContent = nil
 		}

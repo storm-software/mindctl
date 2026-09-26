@@ -11,6 +11,7 @@ import (
 // A non-nil provider map is authoritative: a missing provider entry is false.
 type EligibilityInput struct {
 	Models               []domain.Model
+	RequiredProvider     string
 	Features             domain.RequestFeatures
 	Floor                domain.Tier
 	MinTier, MaxTier     *domain.Tier
@@ -29,6 +30,7 @@ const (
 	RejectModality     RejectionCode = "modality"
 	RejectTools        RejectionCode = "tools"
 	RejectCredentials  RejectionCode = "credentials"
+	RejectProvider     RejectionCode = "provider"
 	RejectAvailability RejectionCode = "availability"
 
 	// RejectUnavailable is retained as a readable alias for availability.
@@ -125,6 +127,9 @@ func EligibleModels(input EligibilityInput) ([]domain.Model, []Rejection) {
 			}
 		}
 
+		if input.RequiredProvider != "" && model.Provider != input.RequiredProvider {
+			add(RejectProvider, "request requires a different provider")
+		}
 		if input.ProviderCredentials != nil && !input.ProviderCredentials[model.Provider] {
 			add(RejectCredentials, "provider credentials are unavailable")
 		}

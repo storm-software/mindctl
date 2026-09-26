@@ -34,23 +34,29 @@ func ClientID(ctx context.Context) (string, bool) {
 // uses Bearer syntax; dedicated headers carry the raw token. Tokens are
 // compared as fixed-size hashes, and every configured token is checked.
 func Authenticate(next http.Handler, header string, tokens TokenSource) http.Handler {
+	return AuthenticateWithError(next, header, tokens, WriteError)
+}
+
+// AuthenticateWithError validates the gateway credential and writes failures
+// using the endpoint's error envelope.
+func AuthenticateWithError(next http.Handler, header string, tokens TokenSource, writeError func(http.ResponseWriter, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		values := r.Header.Values(header)
 		if len(values) != 1 {
-			WriteError(w, ErrUnauthorized)
+			writeError(w, ErrUnauthorized)
 			return
 		}
 		presented := values[0]
 		if strings.EqualFold(header, "Authorization") {
 			fields := strings.Fields(presented)
 			if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
-				WriteError(w, ErrUnauthorized)
+				writeError(w, ErrUnauthorized)
 				return
 			}
 			presented = fields[1]
 		}
 		if presented == "" {
-			WriteError(w, ErrUnauthorized)
+			writeError(w, ErrUnauthorized)
 			return
 		}
 		presentedHash := sha256.Sum256([]byte(presented))
@@ -63,10 +69,52 @@ func Authenticate(next http.Handler, header string, tokens TokenSource) http.Han
 			}
 		}
 		if matchedID == "" {
-			WriteError(w, ErrUnauthorized)
+			writeError(w, ErrUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientIDContextKey{}, matchedID)))
+	})
+}
+
+// CaptureNativeClaudeOAuth captures the Messages client's bearer credential
+// exclusively for the Anthropic OAuth adapter. Missing credentials are allowed
+// so separately credentialed providers remain eligible.
+func CaptureNativeClaudeOAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorizations := r.Header.Values("Authorization")
+		if len(authorizations) == 0 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if len(authorizations) != 1 {
+			writeMessagesError(w, ErrUnauthorized)
+			return
+		}
+		fields := strings.Fields(authorizations[0])
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || authorizations[0] != fields[0]+" "+fields[1] {
+			writeMessagesError(w, ErrUnauthorized)
+			return
+		}
+		credential := upstreamauth.ClaudeCredential{AccessToken: fields[1]}
+		for _, header := range []struct {
+			name  string
+			value *string
+		}{{"anthropic-beta", &credential.Beta}, {"anthropic-version", &credential.Version}} {
+			values := r.Header.Values(header.name)
+			if len(values) > 1 {
+				writeMessagesError(w, ErrInvalidRequest)
+				return
+			}
+			if len(values) == 1 {
+				*header.value = values[0]
+			}
+		}
+		ctx := upstreamauth.WithClaude(r.Context(), credential)
+		if _, ok := upstreamauth.Claude(ctx); !ok {
+			writeMessagesError(w, ErrUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

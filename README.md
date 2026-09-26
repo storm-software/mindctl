@@ -268,6 +268,21 @@ the endpoint is unavailable.
 
 The Mindctl command line interface provides several commands to manage the application, its configuration, models, and providers. A complete list of available commands can be found in the [CLI documentation](docs/cli/mindctl.md).
 
+Check whether Codex or Claude Code is configured to use the Mindctl router:
+
+```sh
+mindctl status
+mindctl status codex
+mindctl status claude
+```
+
+The first command lists harnesses and their configuration status; the other
+commands print one status. Codex checks the top-level `model_provider` in
+`~/.codex/config.toml`; Claude checks the global `env.ANTHROPIC_BASE_URL` in
+`~/.claude/settings.json` against `http://127.0.0.1:8080` (with one optional
+trailing slash). Neither command checks project-level or shell overrides or
+tests whether the gateway is running or reachable.
+
 # Development
 
 Enter the repository's development environment before running Go commands:
@@ -365,6 +380,46 @@ The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5, and Haiku
 4.5 with comparable Claude API prices for routing decisions. Actual usage is
 governed by the selected Claude subscription's model access and plan limits,
 not API token billing.
+
+### Claude Code Messages endpoint (opt-in)
+
+To route Claude Code itself, set `client_auth.header: X-Mindctl-Token` and
+`claude_messages.enabled: true` in the gateway configuration. Configure the
+Anthropic provider with `claude_oauth_passthrough` and the models you want in
+the Mindctl catalog. The endpoint is `POST /v1/messages`; it is absent by
+default, and `/v1/responses` keeps its existing authentication behavior.
+
+Set only the non-secret gateway origin in your **global** Claude settings:
+
+```json
+{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080"}}
+```
+
+Let Claude Code retain its native subscription login. Do not set
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` for this
+connection. Supply the separate gateway token from your existing secret store
+in a trusted launcher instead of checking it into Claude settings:
+
+```sh
+#!/bin/sh
+: "${MINDCTL_GATEWAY_TOKEN:?load the gateway token from your secret store}"
+export ANTHROPIC_CUSTOM_HEADERS="X-Mindctl-Token: ${MINDCTL_GATEWAY_TOKEN}"
+exec claude "$@"
+```
+
+`mindctl-auto` can choose any eligible configured provider. A subscription
+credential is sent only to the Anthropic OAuth provider; other providers
+require their own API credentials and may incur separate billing. A specific
+model must match a Mindctl catalog ID; configure Claude Code's main and
+background model overrides deliberately, as built-in aliases are not
+automatically remapped. Signed thinking restricts a turn to Anthropic.
+
+For an existing Home Manager setup managed by Headroom, choose Mindctl
+explicitly in that separate configuration before enabling this setting; to
+roll back, restore Headroom's `ANTHROPIC_BASE_URL` and remove the launcher
+header. Mindctl does not change the managed settings automatically. Confirm
+the actual login and a streamed tool round-trip in a live Claude Code session
+before relying on the connection.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />

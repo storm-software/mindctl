@@ -12,13 +12,15 @@ import (
 )
 
 type messagesRequest struct {
-	Model        string                `json:"model"`
-	System       string                `json:"system,omitempty"`
-	Messages     []messagesMessage     `json:"messages"`
-	Tools        []messagesTool        `json:"tools,omitempty"`
-	OutputConfig *messagesOutputConfig `json:"output_config,omitempty"`
-	Stream       bool                  `json:"stream,omitempty"`
-	MaxTokens    int64                 `json:"max_tokens,omitempty"`
+	Model        string                      `json:"model"`
+	System       any                         `json:"system,omitempty"`
+	Messages     []messagesMessage           `json:"messages"`
+	Tools        []messagesTool              `json:"tools,omitempty"`
+	Thinking     *inference.ThinkingOptions  `json:"thinking,omitempty"`
+	ToolChoice   *inference.NativeToolChoice `json:"tool_choice,omitempty"`
+	OutputConfig *messagesOutputConfig       `json:"output_config,omitempty"`
+	Stream       bool                        `json:"stream,omitempty"`
+	MaxTokens    int64                       `json:"max_tokens,omitempty"`
 }
 
 type messagesMessage struct {
@@ -27,16 +29,30 @@ type messagesMessage struct {
 }
 
 type messageContent struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Source    *imageSource    `json:"source,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	Source       *imageSource    `json:"source,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      json.RawMessage `json:"content,omitempty"`
+	Thinking     string          `json:"thinking,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+}
+
+func (content messageContent) MarshalJSON() ([]byte, error) {
+	if content.Type == "thinking" {
+		return json.Marshal(struct {
+			Type         string          `json:"type"`
+			Thinking     string          `json:"thinking"`
+			Signature    string          `json:"signature"`
+			CacheControl json.RawMessage `json:"cache_control,omitempty"`
+		}{content.Type, content.Thinking, content.Signature, content.CacheControl})
+	}
+	type nativeContent messageContent
+	return json.Marshal(nativeContent(content))
 }
 
 type imageSource struct {
@@ -47,9 +63,10 @@ type imageSource struct {
 }
 
 type messagesTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type messagesOutputConfig struct {
@@ -96,7 +113,7 @@ func toMessagesRequest(model domain.Model, request inference.Request, stream boo
 	if maxTokens == 0 {
 		maxTokens = model.MaxOutputTokens
 	}
-	result := messagesRequest{Model: model.UpstreamID, Stream: stream, MaxTokens: maxTokens}
+	result := messagesRequest{Model: model.UpstreamID, Stream: stream, MaxTokens: maxTokens, Thinking: request.Thinking, ToolChoice: request.AnthropicToolChoice}
 	system := request.Instructions
 	for _, item := range request.Input {
 		if item.Type == "message" && item.Role == "system" {
@@ -110,8 +127,11 @@ func toMessagesRequest(model domain.Model, request inference.Request, stream boo
 		result.Messages = appendMessage(result.Messages, message)
 	}
 	result.System = system
+	if len(request.AnthropicSystem) > 0 {
+		result.System = request.AnthropicSystem
+	}
 	for _, tool := range request.Tools {
-		result.Tools = append(result.Tools, messagesTool{Name: tool.Name, Description: tool.Description, InputSchema: append(json.RawMessage(nil), tool.Parameters...)})
+		result.Tools = append(result.Tools, messagesTool{Name: tool.Name, Description: tool.Description, InputSchema: append(json.RawMessage(nil), tool.Parameters...), CacheControl: append(json.RawMessage(nil), tool.CacheControl...)})
 	}
 	if format := request.TextFormat; format != nil {
 		result.OutputConfig = &messagesOutputConfig{Format: messagesOutputFormat{Type: "json_schema", Schema: append(json.RawMessage(nil), format.Schema...)}}
@@ -247,6 +267,7 @@ func unsupported(feature string) error { return &provider.UnsupportedFeatureErro
 
 func fromMessagesResponse(response messagesResponse, model domain.Model, requestID string) inference.Result {
 	result := inference.Result{ID: response.ID, Model: model.UpstreamID, ProviderRequestID: requestID, Status: statusForStop(response.StopReason), Usage: parseUsage(response.Usage)}
+	_ = json.Unmarshal(response.StopReason, &result.StopReason)
 	prefix := make([]messageContent, 0)
 	for _, content := range response.Content {
 		switch content.Type {

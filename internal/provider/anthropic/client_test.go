@@ -38,6 +38,35 @@ func TestAnthropicTranslatesInstructionsFunctionsAndToolResults(t *testing.T) {
 	}
 }
 
+func TestAnthropicForwardsTypedNativeControls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		for key, expected := range map[string]string{
+			"thinking":    `"budget_tokens":500`,
+			"system":      `"cache_control":{"type":"ephemeral"}`,
+			"tools":       `"cache_control":{"type":"ephemeral"}`,
+			"tool_choice": `"name":"search"`,
+		} {
+			if !strings.Contains(string(body[key]), expected) {
+				t.Errorf("missing %s in Anthropic request", key)
+			}
+		}
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`)
+	}))
+	defer server.Close()
+	request := textRequest()
+	request.Thinking = &inference.ThinkingOptions{Type: "enabled", BudgetTokens: 500}
+	request.AnthropicSystem = []inference.NativeSystemBlock{{Type: "text", Text: "instructions", CacheControl: []byte(`{"type":"ephemeral"}`)}}
+	request.Tools = []inference.Tool{{Type: "function", Name: "search", Parameters: []byte(`{"type":"object"}`), CacheControl: []byte(`{"type":"ephemeral"}`)}}
+	request.AnthropicToolChoice = &inference.NativeToolChoice{Type: "tool", Name: "search"}
+	if _, err := newAnthropic(server.URL).Execute(context.Background(), anthropicModel(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAnthropicClaudeOAuthUsesRequestCredential(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer oauth-token" {
@@ -54,6 +83,28 @@ func TestAnthropicClaudeOAuthUsesRequestCredential(t *testing.T) {
 	ctx := upstreamauth.WithClaude(context.Background(), upstreamauth.ClaudeCredential{AccessToken: "oauth-token"})
 	if _, err := NewClaudeOAuthClient(server.URL, nil).Execute(ctx, anthropicModel(), textRequest()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestClaudeOAuthForwardsCallerBetaAndVersionOnlyToAnthropic(t *testing.T) {
+	var redirectedCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirectedCalls.Add(1) }))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer oauth-token" ||
+			request.Header.Get("anthropic-beta") != "oauth-2025-04-20,custom-2026-01-01" ||
+			request.Header.Get("anthropic-version") != "2026-01-01" {
+			t.Error("caller-managed headers not forwarded unchanged")
+		}
+		http.Redirect(w, request, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	ctx := upstreamauth.WithClaude(context.Background(), upstreamauth.ClaudeCredential{
+		AccessToken: "oauth-token", Beta: "oauth-2025-04-20,custom-2026-01-01", Version: "2026-01-01",
+	})
+	_, err := NewClaudeOAuthClient(server.URL, nil).Execute(ctx, anthropicModel(), textRequest())
+	if err == nil || redirectedCalls.Load() != 0 || strings.Contains(err.Error(), "oauth-token") {
+		t.Fatal("OAuth request followed redirect or exposed credential")
 	}
 }
 
@@ -209,6 +260,25 @@ func TestAnthropicStreamCorrelatesToolStartAndArgumentDelta(t *testing.T) {
 	delta, err := stream.Next(context.Background())
 	if err != nil || delta.ItemID != start.ItemID || delta.CallID != start.CallID || delta.Name != start.Name || delta.ArgumentsDelta != `{"city":` {
 		t.Fatalf("delta=%+v start=%+v err=%v", delta, start, err)
+	}
+}
+
+func TestAnthropicThinkingSignatureIsTypedInStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"thought\"}}\n\nevent: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed\"}}\n\n")
+	}))
+	defer server.Close()
+	stream, err := newAnthropic(server.URL).Stream(context.Background(), anthropicModel(), textRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	start, _ := stream.Next(context.Background())
+	thinking, _ := stream.Next(context.Background())
+	signature, _ := stream.Next(context.Background())
+	if start.ItemType != "thinking" || thinking.Thinking != "thought" || signature.Signature != "signed" {
+		t.Fatal("thinking signature not carried in typed events")
 	}
 }
 

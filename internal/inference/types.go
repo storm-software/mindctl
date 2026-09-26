@@ -20,6 +20,25 @@ type Request struct {
 	ParallelToolCalls                           *bool
 	Stream                                      bool
 	MaxOutputTokens                             int64
+	Thinking                                    *ThinkingOptions
+	AnthropicSystem                             []NativeSystemBlock
+	AnthropicToolChoice                         *NativeToolChoice
+}
+
+type ThinkingOptions struct {
+	Type         string `json:"type"`
+	BudgetTokens int64  `json:"budget_tokens,omitempty"`
+}
+
+type NativeSystemBlock struct {
+	Type         string          `json:"type"`
+	Text         string          `json:"text"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+}
+
+type NativeToolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
 }
 
 // ReasoningOptions carries Responses API reasoning controls without coupling
@@ -68,6 +87,7 @@ type Tool struct {
 	ExternalWebAccess       *bool
 	Tools                   []Tool
 	Strict                  bool
+	CacheControl            json.RawMessage
 }
 
 // ToolFormat defines the syntax accepted by a custom freeform tool.
@@ -84,9 +104,9 @@ type JSONSchemaFormat struct {
 
 // Result is the provider-neutral result returned by an adapter.
 type Result struct {
-	ID, Model, ProviderRequestID, Status string
-	Output                               []Item
-	Usage                                Usage
+	ID, Model, ProviderRequestID, Status, StopReason string
+	Output                                           []Item
+	Usage                                            Usage
 }
 
 // Usage is normalized provider token accounting. Known distinguishes absent

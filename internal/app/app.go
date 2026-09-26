@@ -202,11 +202,12 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	if maxBodyBytes == 0 {
 		maxBodyBytes = config.DefaultMaxBodyBytes
 	}
-	responses := api.NewResponsesHandler(a.executor, api.ResponsesConfig{
+	responsesConfig := api.ResponsesConfig{
 		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
 		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
 		ChatGPTOAuthProviders: chatGPTOAuthProviders, ClaudeOAuthProviders: claudeOAuthProviders,
-	})
+	}
+	responses := api.NewResponsesHandler(a.executor, responsesConfig)
 	responses = api.CaptureClaudeOAuth(responses)
 	responses = api.CaptureChatGPTOAuth(responses)
 	mux := http.NewServeMux()
@@ -214,6 +215,10 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	mux.Handle("/healthz", operations)
 	mux.Handle("/readyz", operations)
 	mux.Handle("/v1/responses", api.Authenticate(responses, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}))
+	if cfg.ClaudeMessages.Enabled {
+		messages := api.CaptureNativeClaudeOAuth(api.NewMessagesHandler(a.executor, responsesConfig))
+		mux.Handle("/v1/messages", api.AuthenticateWithError(messages, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}, api.WriteMessagesError))
+	}
 	a.handler = mux
 	return a, nil
 }

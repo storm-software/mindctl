@@ -16,6 +16,7 @@ import (
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 const automaticModel = "mindctl-auto"
@@ -26,6 +27,7 @@ const automaticModel = "mindctl-auto"
 // provider-hosted tool type.
 type Input struct {
 	ClientID                                  string
+	RequiredProvider                          string
 	Request                                   inference.Request
 	Models                                    []domain.Model
 	Features                                  domain.RequestFeatures
@@ -106,6 +108,7 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 	availability := providerAvailability(in.Models, in.ProviderAvailability, s.providers)
 	decisionInput := router.DecisionInput{
 		Features: features, Models: in.Models, MinTier: in.MinTier, MaxTier: in.MaxTier,
+		RequiredProvider:    in.RequiredProvider,
 		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: availability,
 	}
 
@@ -180,7 +183,7 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.Model = decision.ModelID
 	request.PreviousResponseID = ""
 	request.Input = turn.TranscriptFor(decision.Provider)
-	result, err := adapter.Execute(ctx, model, request)
+	result, err := adapter.Execute(providerScopedContext(ctx, decision.Provider), model, providerScopedRequest(request, decision.Provider))
 	if err != nil {
 		attributes := []any{
 			"response_id", turn.ResponseID,
@@ -229,6 +232,26 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	callerResult := result
 	callerResult.ProviderRequestID = ""
 	return Output{Result: callerResult, Decision: decision, AttemptID: attempt.ID}, nil
+}
+
+func providerScopedContext(ctx context.Context, providerID string) context.Context {
+	if providerID != "anthropic" {
+		return upstreamauth.WithoutClaude(ctx)
+	}
+	return ctx
+}
+
+func providerScopedRequest(request inference.Request, providerID string) inference.Request {
+	if providerID != "anthropic" {
+		request.Thinking = nil
+		request.AnthropicSystem = nil
+		request.AnthropicToolChoice = nil
+		request.Tools = append([]inference.Tool(nil), request.Tools...)
+		for index := range request.Tools {
+			request.Tools[index].CacheControl = nil
+		}
+	}
+	return request
 }
 
 func (s *Service) classify(ctx context.Context, request inference.Request, turn conversation.Turn, features domain.RequestFeatures, models []domain.Model) (domain.ClassifierJudgment, error) {

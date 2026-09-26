@@ -56,6 +56,157 @@ func status(a *App, path string) int {
 	return r.Code
 }
 
+func TestMessagesRouteIsOptInAndAuthenticated(t *testing.T) {
+	cfg, env := fixture(t)
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := status(app, "/v1/messages"); got != http.StatusNotFound {
+		t.Fatalf("disabled Messages status=%d", got)
+	}
+	_ = app.Close()
+	cfg.ClaudeMessages.Enabled = true
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Providers = append(cfg.Providers, config.ProviderConfig{ID: "anthropic", BaseURL: "https://api.anthropic.com", Auth: string(config.ProviderAuthClaudeOAuthPassthrough)})
+	app, err = newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"mindctl-auto","max_tokens":4,"messages":[]}`))
+	request.Header.Set("Authorization", "Bearer claude-native")
+	response := httptest.NewRecorder()
+	app.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"type":"error"`) {
+		t.Fatalf("missing gateway auth: %d %s", response.Code, response.Body.String())
+	}
+	request.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+	response = httptest.NewRecorder()
+	app.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"type":"error"`) {
+		t.Fatalf("invalid request: %d %s", response.Code, response.Body.String())
+	}
+	for _, test := range []struct {
+		name         string
+		method       string
+		gatewayToken string
+		duplicate    bool
+		want         int
+	}{
+		{name: "invalid gateway token", method: http.MethodPost, gatewayToken: "wrong", want: http.StatusUnauthorized},
+		{name: "ambiguous gateway token", method: http.MethodPost, gatewayToken: env["TEST_GATEWAY_TOKEN"], duplicate: true, want: http.StatusUnauthorized},
+		{name: "GET not allowed after auth", method: http.MethodGet, gatewayToken: env["TEST_GATEWAY_TOKEN"], want: http.StatusMethodNotAllowed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, "/v1/messages", nil)
+			request.Header.Set("Authorization", "Bearer claude-native")
+			request.Header.Add("X-Mindctl-Token", test.gatewayToken)
+			if test.duplicate {
+				request.Header.Add("X-Mindctl-Token", test.gatewayToken)
+			}
+			response := httptest.NewRecorder()
+			app.Handler().ServeHTTP(response, request)
+			if response.Code != test.want || !strings.Contains(response.Body.String(), `"type":"error"`) || strings.Contains(response.Body.String(), "claude-native") {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestMessagesHandlerCrossProviderCredentialsWithRealAdapters(t *testing.T) {
+	var openAICalls, anthropicCalls atomic.Int32
+	openAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		openAICalls.Add(1)
+		body, _ := io.ReadAll(request.Body)
+		if request.URL.Path != "/v1/responses" || request.Header.Get("Authorization") != "Bearer private-provider-token" || request.Header.Get("anthropic-beta") != "" || request.Header.Get("X-Mindctl-Token") != "" || strings.Contains(string(body), "native-secret") {
+			t.Error("Claude credential or header crossed to separately credentialed provider")
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"first","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"openai-ok"}]}],"usage":{"input_tokens":4,"output_tokens":2}}`)
+	}))
+	defer openAIServer.Close()
+	anthropicServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		anthropicCalls.Add(1)
+		if request.URL.Path != "/v1/messages" || request.Header.Get("Authorization") != "Bearer native-secret" || request.Header.Get("anthropic-beta") != "oauth-2025-04-20,feature-x" || request.Header.Get("X-Mindctl-Token") != "" {
+			t.Error("Anthropic did not receive native request-scoped credential")
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","role":"assistant","content":[{"type":"text","text":"anthropic-ok"}],"stop_reason":"end_turn","usage":{"input_tokens":4,"output_tokens":2}}`)
+	}))
+	defer anthropicServer.Close()
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.ClaudeMessages.Enabled = true
+	cfg.Providers[0].BaseURL = openAIServer.URL
+	cfg.Providers = append(cfg.Providers, config.ProviderConfig{ID: "anthropic", BaseURL: anthropicServer.URL, Auth: string(config.ProviderAuthClaudeOAuthPassthrough)})
+	cfg.Models[0].MaxOutputTokens = 256
+	claude := cfg.Models[0]
+	claude.ID, claude.Provider = "claude", "anthropic"
+	cfg.Models = append(cfg.Models, claude)
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	for _, test := range []struct {
+		name, model, want string
+		status            int
+	}{
+		{name: "separate API key", model: "first", want: "openai-ok", status: http.StatusOK},
+		{name: "subscription", model: "claude", want: "anthropic-ok", status: http.StatusOK},
+		{name: "unknown concrete model", model: "unknown", want: "unknown", status: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"model":"` + test.model + `","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer native-secret")
+			request.Header.Set("anthropic-beta", "oauth-2025-04-20,feature-x")
+			request.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+			response := httptest.NewRecorder()
+			app.Handler().ServeHTTP(response, request)
+			if response.Code != test.status || !strings.Contains(response.Body.String(), test.want) {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	if openAICalls.Load() != 1 || anthropicCalls.Load() != 1 {
+		t.Fatalf("provider calls openai=%d anthropic=%d", openAICalls.Load(), anthropicCalls.Load())
+	}
+}
+
+func TestMessagesHandlerStreamsToolFragmentsWithoutLeakingClaudeHeaders(t *testing.T) {
+	openAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer private-provider-token" || request.Header.Get("anthropic-beta") != "" {
+			t.Error("Claude headers crossed into OpenAI stream")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.output_item.added\ndata: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}\n\n"+
+			"event: response.function_call_arguments.delta\ndata: {\"item_id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"delta\":\"{\\\"q\\\":\"}\n\n"+
+			"event: response.function_call_arguments.delta\ndata: {\"item_id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"lookup\",\"delta\":\"\\\"x\\\"}\"}\n\n"+
+			"event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":3}}}\n\n")
+	}))
+	defer openAIServer.Close()
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.ClaudeMessages.Enabled = true
+	cfg.Providers[0].BaseURL = openAIServer.URL
+	cfg.Providers = append(cfg.Providers, config.ProviderConfig{ID: "anthropic", BaseURL: "https://api.anthropic.com", Auth: string(config.ProviderAuthClaudeOAuthPassthrough)})
+	cfg.Models[0].MaxOutputTokens = 256
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"first","max_tokens":32,"stream":true,"messages":[{"role":"user","content":"hi"}],"tools":[{"name":"lookup","input_schema":{"type":"object"}}]}`))
+	request.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+	request.Header.Set("Authorization", "Bearer native-secret")
+	request.Header.Set("anthropic-beta", "feature-x")
+	response := httptest.NewRecorder()
+	app.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"call_1"`) || !strings.Contains(response.Body.String(), `"partial_json":"{\"q\":"`) || !strings.Contains(response.Body.String(), `"partial_json":"\"x\"}"`) || !strings.Contains(response.Body.String(), "event: message_stop") || strings.Contains(response.Body.String(), "native-secret") {
+		t.Fatalf("status=%d stream=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestNewInitializesStorageKeyringAndStableHandler(t *testing.T) {
 	cfg, env := fixture(t)
 	a, err := newWithLookup(context.Background(), cfg, lookup(env))

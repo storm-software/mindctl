@@ -127,6 +127,81 @@ func TestRunPrefersExplicitConfigOverXDGConfig(t *testing.T) {
 	}
 }
 
+func TestStatusCommand(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		config           string
+		claudeConfig     string
+		claudeUnreadable bool
+		args             []string
+		want             string
+		wantErr          string
+	}{
+		{name: "missing config table", want: "HARNESS  STATUS\ncodex    disconnected\nclaude   disconnected\n"},
+		{name: "connected table", config: "model_provider = \"mindctl\"\n", want: "HARNESS  STATUS\ncodex    connected\nclaude   disconnected\n"},
+		{name: "Claude configured", claudeConfig: `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080"}}`, args: []string{"claude"}, want: "connected\n"},
+		{name: "Claude trailing slash", claudeConfig: `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080/"}}`, args: []string{"claude"}, want: "connected\n"},
+		{name: "Claude disconnected", claudeConfig: `{"env":{"ANTHROPIC_BASE_URL":"https://other.example"}}`, args: []string{"claude"}, want: "disconnected\n"},
+		{name: "Claude nested env ignored", claudeConfig: `{"project":{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080"}}}`, args: []string{"claude"}, want: "disconnected\n"},
+		{name: "both configured", config: "model_provider = \"mindctl\"\n", claudeConfig: `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080"}}`, want: "HARNESS  STATUS\ncodex    connected\nclaude   connected\n"},
+		{name: "malformed Claude", claudeConfig: `{`, args: []string{"claude"}, wantErr: "read Claude settings"},
+		{name: "invalid Claude object", claudeConfig: `null`, args: []string{"claude"}, wantErr: "read Claude settings"},
+		{name: "unreadable Claude", claudeUnreadable: true, args: []string{"claude"}, wantErr: "read Claude settings"},
+		{name: "Codex ignores malformed Claude", config: "model_provider = \"mindctl\"\n", claudeConfig: `{`, args: []string{"codex"}, want: "connected\n"},
+		{name: "connected codex", config: "model_provider = \"mindctl\"\n", args: []string{"codex"}, want: "connected\n"},
+		{name: "different provider", config: "model_provider = \"openai\"\n", args: []string{"codex"}, want: "disconnected\n"},
+		{name: "comment is not connection", config: "# model_provider = \"mindctl\"\n", args: []string{"codex"}, want: "disconnected\n"},
+		{name: "nested setting is not connection", config: "[profile.test]\nmodel_provider = \"mindctl\"\n", args: []string{"codex"}, want: "disconnected\n"},
+		{name: "invalid config", config: "model_provider = \"mindctl\n", args: []string{"codex"}, wantErr: "read Codex config"},
+		{name: "unknown harness", args: []string{"other"}, wantErr: "unknown harness"},
+		{name: "extra argument", args: []string{"codex", "other"}, wantErr: "at most 1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "missing-gateway-config"))
+			if test.config != "" {
+				if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(test.config), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if test.claudeConfig != "" || test.claudeUnreadable {
+				if err := os.Mkdir(filepath.Join(home, ".claude"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(home, ".claude", "settings.json")
+				if test.claudeUnreadable {
+					if err := os.Mkdir(path, 0700); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(path, []byte(test.claudeConfig), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var stdout bytes.Buffer
+			err := run(context.Background(), append([]string{"status"}, test.args...), &stdout, io.Discard)
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("status error = %v; want %q", err, test.wantErr)
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("status wrote stdout on error: %q", stdout.String())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("status: %v", err)
+			}
+			if got := stdout.String(); got != test.want {
+				t.Fatalf("status output = %q; want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestResolveDebugUsesFlagThenEnvironmentThenConfig(t *testing.T) {
 	tests := []struct {
 		name                  string
@@ -564,7 +639,7 @@ func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
 	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
-	for _, want := range []string{"version", "--config", "--debug"} {
+	for _, want := range []string{"version", "status", "--config", "--debug"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
 		}

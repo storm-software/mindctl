@@ -106,6 +106,74 @@ func TestStreamEscalatesExplicitModelAfterPreEmissionFailureWhenAllowed(t *testi
 	}
 }
 
+func TestExecutorRequiredProviderFiltersStreamFallback(t *testing.T) {
+	deps := newStreamDependencies(failingStream(), successfulStream("unexpected"))
+	deps.models[0].Provider = "anthropic"
+	deps.executor = New(&fakeClassifier{Judgment: domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: 1}}, router.NewPolicy(router.PolicyConfig{}), provider.NewRegistry(map[string]provider.Provider{
+		"anthropic": deps.provider, "openai": &scriptedProvider{streams: []provider.Stream{successfulStream("leak")}},
+	}), deps.conversations)
+	input := deps.input()
+	input.Request.Model = "first"
+	input.RequiredProvider = "anthropic"
+	allow := true
+	input.AllowEscalation = &allow
+	if err := deps.executor.Stream(context.Background(), input, deps.writer); err == nil {
+		t.Fatal("failed Anthropic stream unexpectedly succeeded on a different provider")
+	}
+	for _, model := range deps.provider.models {
+		if model != "first" {
+			t.Fatalf("cross-provider fallback: %v", deps.provider.models)
+		}
+	}
+}
+
+type nativeStreamWriter struct{ *streamWriter }
+
+func (*nativeStreamWriter) MessagesEvents() bool { return true }
+
+func TestStreamPersistsSignedThinkingForAnthropicContinuation(t *testing.T) {
+	stream := &scriptedStream{events: []inference.Event{
+		{Type: "message_start", ResponseID: "msg_native", Status: "in_progress"},
+		{Type: "content_block_start", ItemID: "0", ItemType: "thinking"},
+		{Type: "content_block_delta", ItemID: "0", ItemType: "thinking", Thinking: "thought"},
+		{Type: "content_block_delta", ItemID: "0", ItemType: "thinking", Signature: "signed"},
+		{Type: "content_block_stop", ItemID: "0", ItemType: "thinking"},
+		{Type: "content_block_start", ItemID: "1", ItemType: "text"},
+		{Type: "content_block_delta", ItemID: "1", Delta: "answer"},
+		{Type: "message_delta", Status: "completed", StopReason: "end_turn"},
+		{Type: "message_stop", Status: "completed"},
+	}, err: io.EOF}
+	deps := newStreamDependencies(stream)
+	deps.models = deps.models[:1]
+	deps.models[0].Provider = "anthropic"
+	deps.executor = New(&fakeClassifier{Judgment: domain.ClassifierJudgment{MinimumTier: domain.T4, TierConfidence: 1}}, router.NewPolicy(router.PolicyConfig{}), provider.NewRegistry(map[string]provider.Provider{"anthropic": deps.provider}), deps.conversations)
+	if err := deps.executor.Stream(context.Background(), deps.input(), &nativeStreamWriter{deps.writer}); err != nil {
+		t.Fatal(err)
+	}
+	output := deps.conversations.committed.Output
+	if len(output) != 1 || !strings.Contains(string(output[0].ProviderData), `"signature":"signed"`) || output[0].ContinuationProvider != "anthropic" {
+		t.Fatalf("native continuation missing: %+v", output)
+	}
+}
+
+func TestStreamPersistsOmittedSignedThinkingForAnthropicContinuation(t *testing.T) {
+	accumulator := streamAccumulator{model: "claude", text: make(map[string]int)}
+	for _, event := range []inference.Event{
+		{Type: "content_block_start", ItemType: "thinking"},
+		{Type: "content_block_delta", Signature: "signed"},
+		{Type: "content_block_stop"},
+	} {
+		if err := accumulator.observeNative(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	accumulator.appendText(inference.Event{ItemID: "1", Delta: "answer"}, false)
+	output := accumulator.result("msg_1").Output
+	if len(output) != 1 || !strings.Contains(string(output[0].ProviderData), `"thinking":""`) {
+		t.Fatalf("omitted continuation missing: %+v", output)
+	}
+}
+
 func TestStreamStopsAfterEveryExplicitEscalationCandidateFails(t *testing.T) {
 	deps := newStreamDependencies(failingStream(), failingStream())
 	input := deps.input()
