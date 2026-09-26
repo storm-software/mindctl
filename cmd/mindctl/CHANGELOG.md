@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.24](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.24) (09/26/2026)
+
+### Features
+
+- **mindctl:** Enabled explicit only models and auto approval support ([703421b](https://github.com/storm-software/mindctl/commit/703421b))
+
 ## [0.1.23](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.23) (09/25/2026)
 
 ### Features
