@@ -67,6 +67,55 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 	}
 }
 
+func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
+	cfg, err := Read("../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("Read shipped example: %v", err)
+	}
+
+	providers := make(map[string]ProviderConfig, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		providers[provider.ID] = provider
+	}
+	provider, ok := providers["anthropic"]
+	if !ok || provider.BaseURL != "https://api.anthropic.com" || provider.AuthMode() != ProviderAuthClaudeOAuthPassthrough {
+		t.Fatalf("Anthropic provider = %#v, want Claude OAuth provider", provider)
+	}
+
+	wantModels := map[string]struct {
+		tier                       string
+		context, outputLimit       int
+		input, cachedInput, output float64
+	}{
+		"claude-fable-5-1": {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, output: 50},
+		"claude-opus-5-5":  {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, output: 20},
+		"claude-sonnet-5":  {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .2, output: 10},
+		"claude-haiku-4-5": {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, output: 5},
+	}
+	for _, model := range cfg.Models {
+		want, ok := wantModels[model.ID]
+		if !ok {
+			continue
+		}
+		delete(wantModels, model.ID)
+		if model.Provider != "anthropic" || model.Tier != want.tier || !model.Available {
+			t.Errorf("model %s provider/tier/available = %q/%q/%t", model.ID, model.Provider, model.Tier, model.Available)
+		}
+		if model.ContextWindow != want.context || model.MaxOutputTokens != want.outputLimit {
+			t.Errorf("model %s context/output = %d/%d", model.ID, model.ContextWindow, model.MaxOutputTokens)
+		}
+		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
+			t.Errorf("model %s prices = input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice)
+		}
+		if !slices.Equal(model.Capabilities, []string{"chat", "tools", "images", "json_schema"}) {
+			t.Errorf("model %s capabilities = %v", model.ID, model.Capabilities)
+		}
+	}
+	for modelID := range wantModels {
+		t.Errorf("missing shipped Claude model %q", modelID)
+	}
+}
+
 func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
 	cfg, err := Read("../../config.example.yaml")
 	if err != nil {
@@ -384,6 +433,19 @@ func TestValidateAcceptsChatGPTOAuthWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsClaudeOAuthWithoutAPIKey(t *testing.T) {
+	cfg := validConfig()
+	cfg.Providers[0] = ProviderConfig{
+		ID:      "anthropic",
+		BaseURL: "https://api.anthropic.com",
+		Auth:    string(ProviderAuthClaudeOAuthPassthrough),
+	}
+	cfg.Models[0].Provider = "anthropic"
+	if err := cfg.Validate(testEnv); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateRejectsInvalidAuthenticationCombinations(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -399,6 +461,21 @@ func TestValidateRejectsInvalidAuthenticationCombinations(t *testing.T) {
 			c.ClientAuth.Header = "X-Mindctl-Token"
 			c.Providers[0] = ProviderConfig{ID: "anthropic", Auth: string(ProviderAuthChatGPTOAuthPassthrough)}
 		}, "only supported for openai"},
+		{"Claude OAuth on OpenAI", func(c *Config) {
+			c.Providers[0].Auth = string(ProviderAuthClaudeOAuthPassthrough)
+			c.Providers[0].APIKeyEnv = ""
+		}, "only supported for anthropic"},
+		{"Claude OAuth with API key", func(c *Config) {
+			c.Providers[0] = ProviderConfig{
+				ID:        "anthropic",
+				Auth:      string(ProviderAuthClaudeOAuthPassthrough),
+				APIKeyEnv: "ANTHROPIC_API_KEY",
+			}
+		}, "must not configure api_key_env"},
+		{"Claude token header conflict", func(c *Config) {
+			c.ClientAuth.Header = "x-mindctl-claude-token"
+			c.Providers[0] = ProviderConfig{ID: "anthropic", Auth: string(ProviderAuthClaudeOAuthPassthrough)}
+		}, "conflicts with Claude OAuth"},
 		{"authorization conflict", func(c *Config) {
 			c.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
 			c.Providers[0].APIKeyEnv = ""

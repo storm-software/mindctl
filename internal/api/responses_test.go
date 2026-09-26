@@ -192,12 +192,13 @@ func TestResponsesHandlerRejectsWrongMethodBeforeExecution(t *testing.T) {
 
 func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testing.T) {
 	cases := []struct {
-		label, authorization, account string
-		wantOAuth                     bool
+		label, authorization, account, claudeToken string
+		wantOAuth, wantClaude                      bool
 	}{
-		{"first", "Bearer oauth.first", "account-1", true},
-		{"second", "Bearer oauth.second", "account-2", true},
-		{"missing", "Bearer oauth.missing", "", false},
+		{"both", "Bearer oauth.first", "account-1", "claude.first", true, true},
+		{"Claude only", "", "", "claude.second", false, true},
+		{"ChatGPT only", "Bearer oauth.second", "account-2", "", true, false},
+		{"missing", "Bearer oauth.missing", "", "", false, false},
 	}
 	release := make(chan struct{})
 	runner := &concurrentCredentialRecorder{
@@ -210,8 +211,9 @@ func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testi
 		Models:                []domain.Model{{ID: "gpt-test", Provider: "openai", Tier: domain.T4}},
 		ProviderCredentials:   map[string]bool{"openai": true, "anthropic": true},
 		ChatGPTOAuthProviders: map[string]bool{"openai": true},
+		ClaudeOAuthProviders:  map[string]bool{"anthropic": true},
 	})
-	h := Authenticate(CaptureChatGPTOAuth(responses), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}})
+	h := Authenticate(CaptureChatGPTOAuth(CaptureClaudeOAuth(responses)), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}})
 
 	statuses := make(chan int, len(cases))
 	var requests sync.WaitGroup
@@ -222,6 +224,9 @@ func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testi
 			req.Header.Set("Authorization", tc.authorization)
 			if tc.account != "" {
 				req.Header.Set("ChatGPT-Account-Id", tc.account)
+			}
+			if tc.claudeToken != "" {
+				req.Header.Set("X-Mindctl-Claude-Token", tc.claudeToken)
 			}
 			rr := httptest.NewRecorder()
 			h.ServeHTTP(rr, req)
@@ -242,7 +247,7 @@ func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testi
 
 	for _, tc := range cases {
 		got, ok := runner.observation(tc.label)
-		if !ok || got.oauthAvailable != tc.wantOAuth || !got.anthropicAvailable {
+		if !ok || got.oauthAvailable != tc.wantOAuth || got.claudeAvailable != tc.wantClaude {
 			t.Fatalf("label=%s observation=%+v present=%v", tc.label, got, ok)
 		}
 		if tc.wantOAuth && (got.credential.AccessToken != strings.TrimPrefix(tc.authorization, "Bearer ") || got.credential.AccountID != tc.account) {
@@ -251,13 +256,20 @@ func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testi
 		if !tc.wantOAuth && got.hasCredential {
 			t.Fatalf("label=%s unexpectedly captured credential=%+v", tc.label, got.credential)
 		}
+		if tc.wantClaude && (!got.hasClaudeCredential || got.claudeCredential.AccessToken != tc.claudeToken) {
+			t.Fatalf("label=%s Claude credential=%+v present=%v", tc.label, got.claudeCredential, got.hasClaudeCredential)
+		}
+		if !tc.wantClaude && got.hasClaudeCredential {
+			t.Fatalf("label=%s unexpectedly captured Claude credential=%+v", tc.label, got.claudeCredential)
+		}
 	}
 }
 
 type credentialObservation struct {
-	credential                    upstreamauth.ChatGPTCredential
-	hasCredential, oauthAvailable bool
-	anthropicAvailable            bool
+	credential                           upstreamauth.ChatGPTCredential
+	claudeCredential                     upstreamauth.ClaudeCredential
+	hasCredential, oauthAvailable        bool
+	hasClaudeCredential, claudeAvailable bool
 }
 
 type concurrentCredentialRecorder struct {
@@ -271,10 +283,12 @@ func (r *concurrentCredentialRecorder) Execute(ctx context.Context, input execut
 	r.started <- struct{}{}
 	<-r.release
 	credential, ok := upstreamauth.ChatGPT(ctx)
+	claudeCredential, hasClaude := upstreamauth.Claude(ctx)
 	r.mu.Lock()
 	r.observations[input.Request.Instructions] = credentialObservation{
 		credential: credential, hasCredential: ok,
-		oauthAvailable: input.ProviderCredentials["openai"], anthropicAvailable: input.ProviderCredentials["anthropic"],
+		claudeCredential: claudeCredential, hasClaudeCredential: hasClaude,
+		oauthAvailable: input.ProviderCredentials["openai"], claudeAvailable: input.ProviderCredentials["anthropic"],
 	}
 	r.mu.Unlock()
 	return executor.Output{Result: inference.Result{Status: "completed"}}, nil

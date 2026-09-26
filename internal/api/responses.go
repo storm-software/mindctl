@@ -28,6 +28,7 @@ type ResponsesConfig struct {
 	SafeFallbackTier                          domain.Tier
 	ProviderCredentials, ProviderAvailability map[string]bool
 	ChatGPTOAuthProviders                     map[string]bool
+	ClaudeOAuthProviders                      map[string]bool
 }
 
 // NewResponsesHandler exposes the supported OpenAI Responses subset. Caller
@@ -102,6 +103,12 @@ func providerCredentials(ctx context.Context, cfg ResponsesConfig) map[string]bo
 			credentials[providerID] = hasChatGPT
 		}
 	}
+	_, hasClaude := upstreamauth.Claude(ctx)
+	for providerID, enabled := range cfg.ClaudeOAuthProviders {
+		if enabled {
+			credentials[providerID] = hasClaude
+		}
+	}
 	return credentials
 }
 
@@ -131,6 +138,7 @@ func cloneResponsesConfig(cfg ResponsesConfig) ResponsesConfig {
 	cfg.ProviderCredentials = cloneBools(cfg.ProviderCredentials)
 	cfg.ProviderAvailability = cloneBools(cfg.ProviderAvailability)
 	cfg.ChatGPTOAuthProviders = cloneBools(cfg.ChatGPTOAuthProviders)
+	cfg.ClaudeOAuthProviders = cloneBools(cfg.ClaudeOAuthProviders)
 	return cfg
 }
 

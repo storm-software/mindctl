@@ -225,6 +225,42 @@ func TestCaptureChatGPTOAuthRequiresOneCompleteCredential(t *testing.T) {
 	}
 }
 
+func TestCaptureClaudeOAuthRequiresOneValidToken(t *testing.T) {
+	for _, tc := range []struct {
+		name, token string
+		duplicate   bool
+		want        bool
+	}{
+		{name: "valid", token: "oauth-token", want: true},
+		{name: "missing"},
+		{name: "whitespace", token: "oauth token"},
+		{name: "surrounding whitespace", token: " oauth-token"},
+		{name: "duplicate", token: "first", duplicate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got upstreamauth.ClaudeCredential
+			var present bool
+			h := CaptureClaudeOAuth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got, present = upstreamauth.Claude(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			if tc.token != "" {
+				req.Header.Add("X-Mindctl-Claude-Token", tc.token)
+			}
+			if tc.duplicate {
+				req.Header.Add("X-Mindctl-Claude-Token", "second")
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			if present != tc.want {
+				t.Fatalf("present=%v want=%v", present, tc.want)
+			}
+			if tc.want && got.AccessToken != tc.token {
+				t.Fatalf("credential=%+v", got)
+			}
+		})
+	}
+}
+
 func TestDecodeControlsValidatesTierAndEscalationHeaders(t *testing.T) {
 	req := validRequest()
 	req.Header.Set("X-Mindctl-Min-Tier", "T5")

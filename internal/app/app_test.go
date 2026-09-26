@@ -419,6 +419,63 @@ func TestChatGPTOAuthRequestSucceedsWithoutOpenAIAPIKey(t *testing.T) {
 	}
 }
 
+func TestClaudeOAuthRequestSucceedsWithoutAnthropicAPIKey(t *testing.T) {
+	var providerCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/classify":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/v1/messages":
+			providerCalls.Add(1)
+			if r.Header.Get("Authorization") != "Bearer claude.oauth" || r.Header.Get("x-api-key") != "" ||
+				r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
+				t.Fatalf("headers=%v", r.Header)
+			}
+			_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Classifier.Endpoint = server.URL
+	cfg.Providers[0] = config.ProviderConfig{
+		ID:      "anthropic",
+		BaseURL: server.URL,
+		Auth:    string(config.ProviderAuthClaudeOAuthPassthrough),
+	}
+	cfg.Models[0].Provider = "anthropic"
+	delete(env, "TEST_PROVIDER_KEY")
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	request := func(token string) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"mindctl-auto","input":"hello"}`))
+		req.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+		if token != "" {
+			req.Header.Set("X-Mindctl-Claude-Token", token)
+		}
+		return req
+	}
+
+	rr := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, request("claude.oauth"))
+	if rr.Code != http.StatusOK || providerCalls.Load() != 1 || !strings.Contains(rr.Body.String(), `"text":"hello"`) {
+		t.Fatalf("status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	a.Handler().ServeHTTP(rr, request(""))
+	if rr.Code == http.StatusOK || providerCalls.Load() != 1 {
+		t.Fatalf("missing credential status=%d calls=%d body=%s", rr.Code, providerCalls.Load(), rr.Body.String())
+	}
+}
+
 func TestChatGPTStreamReplaysEncryptedReasoningBeforeFunctionResult(t *testing.T) {
 	var providerCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

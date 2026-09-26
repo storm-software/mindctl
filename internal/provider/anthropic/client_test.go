@@ -14,6 +14,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 func TestAnthropicTranslatesInstructionsFunctionsAndToolResults(t *testing.T) {
@@ -34,6 +35,55 @@ func TestAnthropicTranslatesInstructionsFunctionsAndToolResults(t *testing.T) {
 	got, err := newAnthropic(server.URL).Execute(context.Background(), anthropicModel(), functionResultRequest())
 	if err != nil || len(got.Output) != 1 || got.Output[0].Text != "done" || got.Usage.InputTokens != 8 || got.Status != "completed" || got.ProviderRequestID != "anthropic-req" {
 		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestAnthropicClaudeOAuthUsesRequestCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" || r.Header.Get("Authorization") != "Bearer oauth-token" {
+			t.Fatalf("path=%q authorization=%q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("x-api-key") != "" || r.Header.Get("anthropic-version") != anthropicVersion ||
+			r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
+			t.Fatalf("headers=%v", r.Header)
+		}
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":[],"stop_reason":"end_turn"}`)
+	}))
+	defer server.Close()
+
+	ctx := upstreamauth.WithClaude(context.Background(), upstreamauth.ClaudeCredential{AccessToken: "oauth-token"})
+	if _, err := NewClaudeOAuthClient(server.URL, nil).Execute(ctx, anthropicModel(), textRequest()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnthropicClaudeOAuthRejectsMissingRequestCredential(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+	defer server.Close()
+
+	_, err := NewClaudeOAuthClient(server.URL, nil).Execute(context.Background(), anthropicModel(), textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || calls.Load() != 0 {
+		t.Fatalf("err=%v calls=%d", err, calls.Load())
+	}
+}
+
+func TestAnthropicClaudeOAuthDoesNotFollowRedirects(t *testing.T) {
+	var redirectedCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		redirectedCalls.Add(1)
+	}))
+	defer target.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer server.Close()
+
+	ctx := upstreamauth.WithClaude(context.Background(), upstreamauth.ClaudeCredential{AccessToken: "oauth-token"})
+	_, err := NewClaudeOAuthClient(server.URL, nil).Execute(ctx, anthropicModel(), textRequest())
+	if err == nil || redirectedCalls.Load() != 0 {
+		t.Fatalf("err=%v redirected calls=%d", err, redirectedCalls.Load())
 	}
 }
 

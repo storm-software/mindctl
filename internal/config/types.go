@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,6 +24,7 @@ type ProviderAuthMode string
 const (
 	ProviderAuthAPIKey                  ProviderAuthMode = "api_key"
 	ProviderAuthChatGPTOAuthPassthrough ProviderAuthMode = "chatgpt_oauth_passthrough"
+	ProviderAuthClaudeOAuthPassthrough  ProviderAuthMode = "claude_oauth_passthrough"
 )
 
 // Config is the complete gateway configuration loaded from YAML.
@@ -236,6 +238,7 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 
 	chatGPTOAuthConfigured := false
+	claudeOAuthConfigured := false
 	for _, provider := range cfg.Providers {
 		switch provider.AuthMode() {
 		case ProviderAuthAPIKey:
@@ -248,12 +251,23 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			if provider.APIKeyEnv != "" {
 				errs = append(errs, fmt.Errorf("provider %s must not configure api_key_env with ChatGPT OAuth passthrough", provider.ID))
 			}
+		case ProviderAuthClaudeOAuthPassthrough:
+			claudeOAuthConfigured = true
+			if provider.ID != "anthropic" {
+				errs = append(errs, fmt.Errorf("Claude OAuth passthrough is only supported for anthropic provider: %s", provider.ID))
+			}
+			if provider.APIKeyEnv != "" {
+				errs = append(errs, fmt.Errorf("provider %s must not configure api_key_env with Claude OAuth passthrough", provider.ID))
+			}
 		default:
 			errs = append(errs, fmt.Errorf("unknown provider authentication mode for %s: %s", provider.ID, provider.Auth))
 		}
 	}
 	if chatGPTOAuthConfigured && (strings.EqualFold(clientAuthHeader, "Authorization") || strings.EqualFold(clientAuthHeader, "ChatGPT-Account-Id")) {
 		errs = append(errs, fmt.Errorf("client authentication header %s conflicts with ChatGPT OAuth", clientAuthHeader))
+	}
+	if claudeOAuthConfigured && strings.EqualFold(clientAuthHeader, upstreamauth.ClaudeTokenHeader) {
+		errs = append(errs, fmt.Errorf("client authentication header %s conflicts with Claude OAuth", clientAuthHeader))
 	}
 
 	for keyID, envName := range cfg.Encryption.Keys {

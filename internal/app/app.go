@@ -110,7 +110,8 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		fallback = "T4"
 	}
 	a.safeFallbackTier, _ = domain.ParseTier(fallback)
-	oauthProviders := make(map[string]bool)
+	chatGPTOAuthProviders := make(map[string]bool)
+	claudeOAuthProviders := make(map[string]bool)
 	for _, providerConfig := range cfg.Providers {
 		switch providerConfig.AuthMode() {
 		case config.ProviderAuthAPIKey:
@@ -118,7 +119,10 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 			a.providerCredentials[providerConfig.ID] = exists && value != ""
 		case config.ProviderAuthChatGPTOAuthPassthrough:
 			a.providerCredentials[providerConfig.ID] = true
-			oauthProviders[providerConfig.ID] = true
+			chatGPTOAuthProviders[providerConfig.ID] = true
+		case config.ProviderAuthClaudeOAuthPassthrough:
+			a.providerCredentials[providerConfig.ID] = true
+			claudeOAuthProviders[providerConfig.ID] = true
 		}
 		a.providerAvailability[providerConfig.ID] = validEndpoint(providerConfig.BaseURL)
 	}
@@ -200,8 +204,10 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	}
 	responses := api.NewResponsesHandler(a.executor, api.ResponsesConfig{
 		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
-		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability, ChatGPTOAuthProviders: oauthProviders,
+		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
+		ChatGPTOAuthProviders: chatGPTOAuthProviders, ClaudeOAuthProviders: claudeOAuthProviders,
 	})
+	responses = api.CaptureClaudeOAuth(responses)
 	responses = api.CaptureChatGPTOAuth(responses)
 	mux := http.NewServeMux()
 	operations := api.Operations(a.ready)
@@ -234,8 +240,12 @@ func configuredProviders(configs []config.ProviderConfig, getenv func(string) (s
 			key, _ := getenv(cfg.APIKeyEnv)
 			entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
 		case "anthropic":
-			key, _ := getenv(cfg.APIKeyEnv)
-			entries[cfg.ID] = anthropic.NewClient(cfg.BaseURL, key, httpClient)
+			if cfg.AuthMode() == config.ProviderAuthClaudeOAuthPassthrough {
+				entries[cfg.ID] = anthropic.NewClaudeOAuthClient(cfg.BaseURL, httpClient)
+			} else {
+				key, _ := getenv(cfg.APIKeyEnv)
+				entries[cfg.ID] = anthropic.NewClient(cfg.BaseURL, key, httpClient)
+			}
 		case "gemini":
 			key, _ := getenv(cfg.APIKeyEnv)
 			entries[cfg.ID] = gemini.NewClient(cfg.BaseURL, key, httpClient)

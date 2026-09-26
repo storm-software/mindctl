@@ -15,17 +15,27 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 const (
-	maxResponseBytes = 16 << 20
-	anthropicVersion = "2023-06-01"
+	maxResponseBytes      = 16 << 20
+	anthropicVersion      = "2023-06-01"
+	claudeOAuthBetaHeader = "oauth-2025-04-20"
+)
+
+type authMode int
+
+const (
+	authAPIKey authMode = iota
+	authClaudeOAuth
 )
 
 // Client is an Anthropic Messages API adapter. apiKey is a resolved credential.
 type Client struct {
 	baseURL string
 	apiKey  string
+	auth    authMode
 	http    *http.Client
 }
 
@@ -34,12 +44,22 @@ var _ provider.Provider = (*Client)(nil)
 // NewClient snapshots the supplied HTTP client and disables redirects, keeping
 // the API key scoped to the configured endpoint.
 func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
+	return newClientWithAuth(baseURL, apiKey, authAPIKey, httpClient)
+}
+
+// NewClaudeOAuthClient returns an adapter that receives caller-managed Claude
+// subscription credentials exclusively from each request context.
+func NewClaudeOAuthClient(baseURL string, httpClient *http.Client) *Client {
+	return newClientWithAuth(baseURL, "", authClaudeOAuth, httpClient)
+}
+
+func newClientWithAuth(baseURL, apiKey string, auth authMode, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	copy := *httpClient
 	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, http: &copy}
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, auth: auth, http: &copy}
 }
 
 // Execute performs one native non-streaming Messages request.
@@ -82,14 +102,30 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 }
 
 func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Response, string, error) {
-	if strings.TrimSpace(c.baseURL) == "" || c.apiKey == "" {
+	if strings.TrimSpace(c.baseURL) == "" {
+		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
+	}
+	accessToken := c.apiKey
+	if c.auth == authClaudeOAuth {
+		credential, ok := upstreamauth.Claude(ctx)
+		if !ok {
+			return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
+		}
+		accessToken = credential.AccessToken
+	}
+	if accessToken == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid provider endpoint")}
 	}
-	request.Header.Set("x-api-key", c.apiKey)
+	if c.auth == authClaudeOAuth {
+		request.Header.Set("Authorization", "Bearer "+accessToken)
+		request.Header.Set("anthropic-beta", claudeOAuthBetaHeader)
+	} else {
+		request.Header.Set("x-api-key", accessToken)
+	}
 	request.Header.Set("anthropic-version", anthropicVersion)
 	request.Header.Set("Content-Type", "application/json")
 	if stream {

@@ -96,6 +96,20 @@ func CaptureChatGPTOAuth(next http.Handler) http.Handler {
 	})
 }
 
+// CaptureClaudeOAuth attaches one valid caller-managed OAuth credential to
+// the request context. Invalid or ambiguous values fail closed in routing.
+func CaptureClaudeOAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		values := r.Header.Values(upstreamauth.ClaudeTokenHeader)
+		if len(values) != 1 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx := upstreamauth.WithClaude(r.Context(), upstreamauth.ClaudeCredential{AccessToken: values[0]})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func protocolHeader(r *http.Request, name string) string {
 	values := r.Header.Values(name)
 	if len(values) != 1 || strings.TrimSpace(values[0]) != values[0] || strings.ContainsAny(values[0], "\r\n") {

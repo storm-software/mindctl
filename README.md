@@ -60,6 +60,7 @@
   - [Build](#build)
   - [Development Server](#development-server)
   - [ChatGPT subscription routing](#chatgpt-subscription-routing)
+  - [Claude subscription routing](#claude-subscription-routing)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Support](#support)
@@ -332,6 +333,38 @@ ChatGPT Pro catalog includes `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`,
 `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.3-codex`, and the
 Pro-only research preview `gpt-5.3-codex-spark`. GPT-6 model access is
 currently rolling out and may not yet appear for every Pro account.
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
+
+## Claude subscription routing
+
+Mindctl can also route requests through a caller-managed Claude subscription
+credential. Generate a long-lived token with `claude setup-token`, export it as
+`CLAUDE_CODE_OAUTH_TOKEN`, and configure the Anthropic provider with
+`claude_oauth_passthrough` as shown in
+[`config.example.yaml`](config.example.yaml).
+
+Add the Claude credential to the Codex provider's environment-backed headers:
+
+```toml
+[model_providers.mindctl]
+name = "Mindctl"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+requires_openai_auth = true
+env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN", "X-Mindctl-Claude-Token" = "CLAUDE_CODE_OAUTH_TOKEN" }
+```
+
+Codex sends the Claude token to Mindctl on each request. Mindctl keeps it in
+request context only, makes subscription-backed Anthropic models eligible for
+that request, and forwards it to the configured Anthropic endpoint as a bearer
+credential. Mindctl does not store, refresh, or log the token.
+
+The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5, and Haiku
+4.5 with comparable Claude API prices for routing decisions. Actual usage is
+governed by the selected Claude subscription's model access and plan limits,
+not API token billing.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
