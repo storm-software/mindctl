@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.27](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.27) (09/26/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue with large request/response display ([d9a8f73](https://github.com/storm-software/mindctl/commit/d9a8f73))
+
 ## [0.1.25](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.25) (09/26/2026)
 
 ### Bug Fixes
