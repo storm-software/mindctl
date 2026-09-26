@@ -114,6 +114,19 @@ func TestMessagesRouteIsOptInAndAuthenticated(t *testing.T) {
 	}
 }
 
+func TestCatalogPreservesExplicitOnly(t *testing.T) {
+	cfg, env := fixture(t)
+	cfg.Models[0].ExplicitOnly = true
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	if !app.catalog[0].ExplicitOnly {
+		t.Fatal("explicit_only was lost when mapping the catalog")
+	}
+}
+
 func TestMessagesHandlerCrossProviderCredentialsWithRealAdapters(t *testing.T) {
 	var openAICalls, anthropicCalls atomic.Int32
 	openAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

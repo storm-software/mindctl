@@ -91,7 +91,14 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 		return decision, err
 	}
 	models := in.Models
-	if in.ModelID != "" {
+	if in.ModelID == "" {
+		models = make([]domain.Model, 0, len(in.Models))
+		for _, model := range in.Models {
+			if !model.ExplicitOnly {
+				models = append(models, model)
+			}
+		}
+	} else {
 		models = make([]domain.Model, 0, 1)
 		for _, model := range in.Models {
 			if model.ID == in.ModelID {

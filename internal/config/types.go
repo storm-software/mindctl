@@ -145,6 +145,7 @@ type ModelConfig struct {
 	ContextWindow                 int                `yaml:"context_window"`
 	MaxOutputTokens               int                `yaml:"max_output_tokens"`
 	Available                     bool               `yaml:"available"`
+	ExplicitOnly                  bool               `yaml:"explicit_only"`
 	InputPrice                    float64            `yaml:"input_price"`
 	CachedInputPriceUSDPerMillion float64            `yaml:"cached_input_price_usd_per_million"`
 	OutputPrice                   float64            `yaml:"output_price"`

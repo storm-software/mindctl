@@ -275,6 +275,33 @@ func TestLoadGatewayConfigCachesProvidersFileAvailability(t *testing.T) {
 	}
 }
 
+func TestLoadGatewayConfigAddsOAuthReviewer(t *testing.T) {
+	path := mainConfig(t)
+	cfg, err := config.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Providers[0].Auth = string(config.ProviderAuthChatGPTOAuthPassthrough)
+	cfg.Providers[0].APIKeyEnv = ""
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	loaded, err := loadGatewayConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Models) != 2 || loaded.Models[1].ID != "codex-auto-review" || !loaded.Models[1].Available || !loaded.Models[1].ExplicitOnly {
+		t.Fatalf("gateway catalog = %#v", loaded.Models)
+	}
+}
+
 func TestModelListGroupsEnabledModelsAndAllShowsStatuses(t *testing.T) {
 	path := commandCatalogConfig(t)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -293,6 +320,51 @@ func TestModelListGroupsEnabledModelsAndAllShowsStatuses(t *testing.T) {
 	}
 	if got, want := stdout.String(), "openai\n  gpt-alpha (enabled)\n  gpt-beta (disabled)\ndeepseek\n  deepseek-chat (enabled)\n"; got != want {
 		t.Fatalf("model list --all output = %q; want %q", got, want)
+	}
+}
+
+func TestModelListIncludesOAuthReviewerAndRespectsState(t *testing.T) {
+	path := commandCatalogConfig(t)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	if err := yaml.Unmarshal(body, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Providers[0].Auth = string(config.ProviderAuthChatGPTOAuthPassthrough)
+	body, err = yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"--config", path, "model", "list"}, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "  codex-auto-review\n") {
+		t.Fatalf("offline catalog omitted reviewer: %q", stdout.String())
+	}
+
+	statePath := filepath.Join(stateHome, "mindctl", "providers.yaml")
+	if err := os.MkdirAll(filepath.Dir(statePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, []byte("providers:\n  openai:\n    - gpt-alpha\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	if err := run(context.Background(), []string{"--config", path, "model", "list", "--all"}, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "  codex-auto-review (disabled)\n") {
+		t.Fatalf("persisted catalog did not disable reviewer: %q", stdout.String())
 	}
 }
 

@@ -29,6 +29,37 @@ func TestPolicyChoosesLowerExpectedTotalCost(t *testing.T) {
 	}
 }
 
+func TestPolicyExcludesExplicitOnlyModelFromAutomaticSelection(t *testing.T) {
+	reviewer := policyModel("codex-auto-review", domain.T6, 0, 1)
+	reviewer.ExplicitOnly = true
+	general := policyModel("general", domain.T4, 1, 1)
+	got, err := NewPolicy(PolicyConfig{}).Decide(DecisionInput{Models: []domain.Model{reviewer, general}})
+	if err != nil || got.ModelID != "general" || len(got.Candidates) != 1 {
+		t.Fatalf("automatic decision=%+v err=%v", got, err)
+	}
+}
+
+func TestPolicySelectsExplicitOnlyModelWhenRequested(t *testing.T) {
+	reviewer := policyModel("codex-auto-review", domain.T6, 0, 1)
+	reviewer.ExplicitOnly = true
+	got, err := NewPolicy(PolicyConfig{}).Decide(DecisionInput{
+		ModelID: reviewer.ID, Models: []domain.Model{reviewer, policyModel("general", domain.T4, 1, 1)},
+	})
+	if err != nil || got.ModelID != reviewer.ID || len(got.Candidates) != 1 {
+		t.Fatalf("explicit decision=%+v err=%v", got, err)
+	}
+}
+
+func TestPolicyRejectsAutomaticSelectionOfOnlyExplicitModels(t *testing.T) {
+	reviewer := policyModel("codex-auto-review", domain.T6, 0, 1)
+	reviewer.ExplicitOnly = true
+	_, err := NewPolicy(PolicyConfig{}).Decide(DecisionInput{Models: []domain.Model{reviewer}})
+	var noEligible *NoEligibleModelError
+	if !errors.As(err, &noEligible) {
+		t.Fatalf("expected no eligible model, got %v", err)
+	}
+}
+
 func TestPolicyNeverDowngradesPin(t *testing.T) {
 	got, err := NewPolicy(PolicyConfig{}).Decide(DecisionInput{Floor: domain.T2,
 		Pin: &Pin{ModelID: "strong", Floor: domain.T5}, Models: []domain.Model{

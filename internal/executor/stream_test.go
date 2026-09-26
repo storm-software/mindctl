@@ -106,6 +106,36 @@ func TestStreamEscalatesExplicitModelAfterPreEmissionFailureWhenAllowed(t *testi
 	}
 }
 
+func TestStreamDoesNotFallbackToExplicitOnlyModel(t *testing.T) {
+	deps := newStreamDependencies(failingStream(), successfulStream("unexpected"))
+	deps.models[1].ExplicitOnly = true
+	input := deps.input()
+	input.Request.Model = "first"
+	allow := true
+	input.AllowEscalation = &allow
+	if err := deps.executor.Stream(context.Background(), input, deps.writer); err == nil {
+		t.Fatal("stream unexpectedly succeeded")
+	}
+	if len(deps.provider.models) != 1 || deps.provider.models[0] != "first" {
+		t.Fatalf("fallback selected reviewer: %v", deps.provider.models)
+	}
+}
+
+func TestStreamExplicitOnlyModelFailsClosedOnProviderError(t *testing.T) {
+	deps := newStreamDependencies(failingStream(), successfulStream("unexpected"))
+	deps.models[0].ExplicitOnly = true
+	input := deps.input()
+	input.Request.Model = "first"
+	allow := true
+	input.AllowEscalation = &allow
+	if err := deps.executor.Stream(context.Background(), input, deps.writer); err == nil {
+		t.Fatal("stream unexpectedly succeeded")
+	}
+	if len(deps.provider.models) != 1 || deps.provider.models[0] != "first" {
+		t.Fatalf("reviewer fell back to general model: %v", deps.provider.models)
+	}
+}
+
 func TestExecutorRequiredProviderFiltersStreamFallback(t *testing.T) {
 	deps := newStreamDependencies(failingStream(), successfulStream("unexpected"))
 	deps.models[0].Provider = "anthropic"

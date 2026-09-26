@@ -336,6 +336,22 @@ env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
 
 `mindctl-auto` enables Mindctl's automatic routing. A concrete model name is an
 explicit selection and must match a model ID in Mindctl's configured catalog.
+Set `explicit_only: true` on a catalog model reserved for explicit requests,
+such as a dedicated approval reviewer. Mindctl keeps it out of automatic
+routing, classifier choices, and fallback candidates; an explicit request
+still requires normal model availability, capabilities, tier bounds, and
+provider credentials. The default is `false` for existing models. An
+explicit-only model's failed stream does not escalate to a different model.
+
+With `chatgpt_oauth_passthrough`, Mindctl adds `codex-auto-review` to the
+effective OpenAI catalog as an available, explicit-only model; no YAML model
+entry is needed. API-key providers do not get this entry. A manually configured
+`codex-auto-review` entry is retained only when it belongs to `openai` and has
+`explicit_only: true`; otherwise configuration loading fails. Its catalog
+capacity and capabilities are local routing settings, not a guarantee of
+account access or upstream limits. If `providers.yaml` already exists and
+omits it, enable the reviewer with
+`mindctl model enable openai.codex-auto-review` and restart the gateway.
 
 Sign in to Codex with ChatGPT and export `MINDCTL_GATEWAY_TOKEN` with the same
 gateway token supplied to Mindctl. Do not set `OPENAI_API_KEY` for this

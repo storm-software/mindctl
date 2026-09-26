@@ -316,6 +316,9 @@ func (s *Service) explicitStreamCandidates(in Input, turn conversation.Turn, ini
 	if in.Request.Model == automaticModel || !streamEscalationAllowed(in) {
 		return nil, nil
 	}
+	if model, ok := selectedModel(in.Models, initial); ok && model.ExplicitOnly {
+		return nil, nil
+	}
 	features := normalizedFeatures(in.Features, in.Request, turn)
 	floor := initial.Tier
 	if turn.Floor.Valid() && turn.Floor > floor {

@@ -16,6 +16,7 @@ type Model struct {
 	LatencyP95               time.Duration
 	Order                    int
 	Available                bool
+	ExplicitOnly             bool
 }
 
 // Capabilities records portable request features a model supports.

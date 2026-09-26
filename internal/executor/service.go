@@ -260,7 +260,7 @@ func (s *Service) classify(ctx context.Context, request inference.Request, turn 
 	}
 	available := make([]string, 0, len(models))
 	for _, model := range models {
-		if model.Available {
+		if model.Available && !model.ExplicitOnly {
 			available = append(available, model.ID)
 		}
 	}

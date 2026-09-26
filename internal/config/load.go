@@ -36,6 +36,29 @@ func Read(path string) (Config, error) {
 	if cfg.ClientAuth.MaxBodyBytes == 0 {
 		cfg.ClientAuth.MaxBodyBytes = DefaultMaxBodyBytes
 	}
+	for _, provider := range cfg.Providers {
+		if provider.ID != "openai" || provider.AuthMode() != ProviderAuthChatGPTOAuthPassthrough {
+			continue
+		}
+		found := false
+		for _, model := range cfg.Models {
+			if model.ID != "codex-auto-review" {
+				continue
+			}
+			if model.Provider != provider.ID || !model.ExplicitOnly {
+				return Config{}, fmt.Errorf("model codex-auto-review must belong to openai and set explicit_only: true for ChatGPT OAuth")
+			}
+			found = true
+		}
+		if !found {
+			cfg.Models = append(cfg.Models, ModelConfig{
+				ID: "codex-auto-review", Provider: provider.ID, Tier: "T4",
+				Capabilities:  []string{"chat", "tools", "images", "json_schema"},
+				ContextWindow: 272000, MaxOutputTokens: 16384,
+				Available: true, ExplicitOnly: true, SuccessPrior: 1,
+			})
+		}
+	}
 	return cfg, nil
 }
 

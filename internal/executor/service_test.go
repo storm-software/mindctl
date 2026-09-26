@@ -57,6 +57,33 @@ func TestExecuteUsesClassifierForUncertainAutomaticRequest(t *testing.T) {
 	}
 }
 
+func TestAutoRouteDoesNotOfferExplicitOnlyModelToClassifier(t *testing.T) {
+	deps := fakeDeps()
+	reviewer := fakeModel("codex-auto-review", "openai", domain.T6, 0)
+	reviewer.ExplicitOnly = true
+	deps.Models = append([]domain.Model{reviewer}, deps.Models...)
+	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
+	if err != nil || got.Decision.ModelID != "gpt-test" {
+		t.Fatalf("automatic decision=%+v err=%v", got.Decision, err)
+	}
+	for _, modelID := range deps.Classifier.LastInput.AvailableModels {
+		if modelID == reviewer.ID {
+			t.Fatalf("reviewer offered to classifier: %v", deps.Classifier.LastInput.AvailableModels)
+		}
+	}
+}
+
+func TestExecuteExplicitOnlyModelWithoutClassifier(t *testing.T) {
+	deps := fakeDeps()
+	reviewer := fakeModel("codex-auto-review", "openai", domain.T6, 0)
+	reviewer.ExplicitOnly = true
+	deps.Models = append(deps.Models, reviewer)
+	got, err := deps.Executor.Execute(context.Background(), deps.input(concreteModelInput(reviewer.ID)))
+	if err != nil || got.Decision.ModelID != reviewer.ID || deps.Classifier.Calls != 0 {
+		t.Fatalf("explicit decision=%+v classifier_calls=%d err=%v", got.Decision, deps.Classifier.Calls, err)
+	}
+}
+
 func TestExecuteWritesDetailedContentSafeDebugTrace(t *testing.T) {
 	deps := fakeDeps()
 	var logs bytes.Buffer
@@ -342,13 +369,15 @@ func TestNormalizedFeaturesTreatsComputerCallOutputAsNativeFunctionUse(t *testin
 }
 
 type fakeClassifier struct {
-	Calls    int
-	Judgment domain.ClassifierJudgment
-	Err      error
+	Calls     int
+	Judgment  domain.ClassifierJudgment
+	Err       error
+	LastInput classifier.Input
 }
 
-func (f *fakeClassifier) Classify(context.Context, classifier.Input) (domain.ClassifierJudgment, error) {
+func (f *fakeClassifier) Classify(_ context.Context, input classifier.Input) (domain.ClassifierJudgment, error) {
 	f.Calls++
+	f.LastInput = input
 	return f.Judgment, f.Err
 }
 

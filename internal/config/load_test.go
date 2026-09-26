@@ -65,6 +65,18 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 	for modelID := range wantPrices {
 		t.Errorf("missing shipped model %q", modelID)
 	}
+	reviewers := 0
+	for _, model := range cfg.Models {
+		if model.ID == "codex-auto-review" {
+			reviewers++
+			if model.Provider != "openai" || !model.Available || !model.ExplicitOnly {
+				t.Errorf("shipped reviewer = %#v", model)
+			}
+		}
+	}
+	if reviewers != 1 {
+		t.Errorf("shipped reviewer count = %d, want 1", reviewers)
+	}
 }
 
 func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
@@ -268,6 +280,120 @@ func TestReadDecodesCatalogWithoutResolvingSecrets(t *testing.T) {
 	}
 }
 
+func TestReadAddsExplicitOnlyReviewerForChatGPTOAuth(t *testing.T) {
+	cfg := validConfig()
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+	cfg.Providers[0].APIKeyEnv = ""
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeConfig(t, string(body))
+
+	for _, read := range []struct {
+		name string
+		load func() (Config, error)
+	}{
+		{name: "offline", load: func() (Config, error) { return Read(path) }},
+		{name: "gateway", load: func() (Config, error) { return Load(path, testEnv) }},
+	} {
+		t.Run(read.name, func(t *testing.T) {
+			loaded, err := read.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded.Models) != 2 {
+				t.Fatalf("models = %#v, want original and reviewer", loaded.Models)
+			}
+			reviewer := loaded.Models[1]
+			if reviewer.ID != "codex-auto-review" || reviewer.Provider != "openai" || !reviewer.ExplicitOnly || !reviewer.Available {
+				t.Fatalf("reviewer = %#v", reviewer)
+			}
+			if reviewer.Tier == "" || reviewer.ContextWindow <= 0 || reviewer.MaxOutputTokens <= 0 || reviewer.SuccessPrior <= 0 || !slices.Contains(reviewer.Capabilities, "chat") {
+				t.Fatalf("reviewer missing routing attributes: %#v", reviewer)
+			}
+		})
+	}
+}
+
+func TestReadDoesNotAddReviewerForAPIKeyProvider(t *testing.T) {
+	cfg := validConfig()
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Read(writeConfig(t, string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Models) != 1 || loaded.Models[0].ID != cfg.Models[0].ID {
+		t.Fatalf("API-key catalog changed: %#v", loaded.Models)
+	}
+}
+
+func TestReadPreservesExplicitOnlyReviewerAndRejectsConflicts(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		provider  string
+		explicit  bool
+		wantError bool
+	}{
+		{name: "explicit OAuth entry", provider: "openai", explicit: true},
+		{name: "nonexplicit OAuth entry", provider: "openai", wantError: true},
+		{name: "wrong provider entry", provider: "other", explicit: true, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+			cfg.Providers[0].APIKeyEnv = ""
+			cfg.Providers = append(cfg.Providers, ProviderConfig{ID: "other", APIKeyEnv: "OPENAI_API_KEY"})
+			cfg.Models = append(cfg.Models, ModelConfig{ID: "codex-auto-review", Provider: test.provider, Tier: "T3", ExplicitOnly: test.explicit})
+			body, err := yaml.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Read(writeConfig(t, string(body)))
+			if test.wantError {
+				if err == nil || !strings.Contains(err.Error(), "codex-auto-review") {
+					t.Fatalf("Read error = %v; want reviewer conflict", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(loaded.Models) != len(cfg.Models) || loaded.Models[1].ID != "codex-auto-review" || loaded.Models[1].Tier != "T3" || !loaded.Models[1].ExplicitOnly {
+				t.Fatalf("configured reviewer was replaced or duplicated: %#v", loaded.Models)
+			}
+		})
+	}
+}
+
+func TestReadReviewerRespectsPersistedAllowList(t *testing.T) {
+	cfg := validConfig()
+	cfg.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+	cfg.Providers[0].APIKeyEnv = ""
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Read(writeConfig(t, string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(t.TempDir(), "providers.yaml")
+	if err := os.WriteFile(statePath, []byte("providers:\n  openai:\n    - gpt-test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyProvidersFile(statePath, &loaded); err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Models) != 2 || loaded.Models[1].Available {
+		t.Fatalf("persisted allow-list enabled reviewer: %#v", loaded.Models)
+	}
+}
+
 func TestReadDecodesDebugSetting(t *testing.T) {
 	cfg := validConfig()
 	cfg.Debug = true
@@ -282,6 +408,25 @@ func TestReadDecodesDebugSetting(t *testing.T) {
 	}
 	if !loaded.Debug {
 		t.Fatal("debug setting was not decoded")
+	}
+}
+
+func TestModelConfigDecodesExplicitOnly(t *testing.T) {
+	cfg := validConfig()
+	cfg.Models[0].ExplicitOnly = true
+	body, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "explicit_only: true") {
+		t.Fatal("explicit_only setting was not encoded")
+	}
+	loaded, err := Read(writeConfig(t, string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Models[0].ExplicitOnly {
+		t.Fatal("explicit_only setting was not decoded")
 	}
 }
 
