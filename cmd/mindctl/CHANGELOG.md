@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.25](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.25) (09/26/2026)
+
+### Bug Fixes
+
+- **mindctl:** Update `history` to display last 20 by default ([ed91fd0](https://github.com/storm-software/mindctl/commit/ed91fd0))
+
 ## [0.1.24](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.24) (09/26/2026)
 
 ### Features
