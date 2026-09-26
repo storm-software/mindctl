@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -536,6 +537,78 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		if strings.Contains(output, unwanted) {
 			t.Errorf("history output unexpectedly contains %q:\n%s", unwanted, output)
 		}
+	}
+}
+
+func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
+	path := mainConfig(t)
+	cfg, err := config.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := contentcrypto.New("active", map[string][]byte{
+		"active": bytes.Repeat([]byte{4}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sqlite.Open(context.Background(), sqlite.Options{
+		Path: cfg.SQLite.Path, Keyring: keyring,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	svc := conversation.New(db)
+	responseIDs := make([]string, 21)
+	for index := range responseIDs {
+		turn, err := svc.Start(context.Background(), "client", inference.Request{
+			Input: []inference.Item{{Type: "message", Role: "user", Text: strconv.Itoa(index)}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		responseIDs[index] = turn.ResponseID
+		if _, err := db.SQL().Exec(
+			"UPDATE responses SET created_at = ? WHERE id = ?",
+			time.Date(2026, 9, 23, 12, index, 0, 0, time.UTC).UnixNano(),
+			turn.ResponseID,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, test := range []struct {
+		name       string
+		flags      []string
+		wantCount  int
+		wantOldest bool
+	}{
+		{name: "default", wantCount: 20},
+		{name: "unlimited", flags: []string{"--limit", "0"}, wantCount: 21, wantOldest: true},
+		{name: "explicit limit", flags: []string{"--limit", "1"}, wantCount: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"--config", path, "history"}, test.flags...)
+			var stdout bytes.Buffer
+			if err := run(context.Background(), args, &stdout, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			output := stdout.String()
+			if count := strings.Count(output, "  request:"); count != test.wantCount {
+				t.Fatalf("history returned %d requests, want %d", count, test.wantCount)
+			}
+			if !strings.Contains(output, responseIDs[20]) {
+				t.Fatal("history omitted newest request")
+			}
+			if got := strings.Contains(output, responseIDs[0]); got != test.wantOldest {
+				t.Fatalf("oldest request included = %t, want %t", got, test.wantOldest)
+			}
+			if test.name == "default" && !strings.Contains(output, responseIDs[1]) {
+				t.Fatal("history omitted twentieth newest request")
+			}
+		})
 	}
 }
 

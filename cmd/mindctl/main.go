@@ -267,7 +267,7 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().StringVar(&filter.Status, "status", "", "filter by attempt status")
 	command.Flags().StringVar(&since, "since", "", "include requests at or after an RFC3339 timestamp")
 	command.Flags().StringVar(&until, "until", "", "include requests at or before an RFC3339 timestamp")
-	command.Flags().IntVar(&filter.Limit, "limit", 0, "maximum requests to return (0 means all)")
+	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
 	return command
 }
 

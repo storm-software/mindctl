@@ -8,4 +8,6 @@
     ".env.local"
   ];
   dotenv.disableHint = true;
+
+  languages.python.directory = "sidecar/laya";
 }
