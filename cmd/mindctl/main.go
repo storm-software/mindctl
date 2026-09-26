@@ -219,6 +219,7 @@ func codexConnected() (bool, error) {
 func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	var filter storage.HistoryFilter
 	var since, until string
+	var full bool
 	command := &cobra.Command{
 		Use:   "history",
 		Short: "List processed requests, selected models, and responses",
@@ -259,7 +260,7 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeHistory(command.OutOrStdout(), records)
+			return writeHistory(command.OutOrStdout(), records, full)
 		},
 	}
 	command.Flags().StringVar(&filter.Provider, "provider", "", "filter by selected provider")
@@ -268,7 +269,23 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().StringVar(&since, "since", "", "include requests at or after an RFC3339 timestamp")
 	command.Flags().StringVar(&until, "until", "", "include requests at or before an RFC3339 timestamp")
 	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
+	command.Flags().BoolVar(&full, "full", false, "show full request and response content instead of truncating")
 	return command
+}
+
+const (
+	historyTruncateHeadLength = 100
+	historyTruncateTailLength = 200
+	historyTruncateThreshold  = historyTruncateHeadLength + historyTruncateTailLength
+)
+
+func truncateHistoryValue(value string, full bool) string {
+	if full || len(value) <= historyTruncateThreshold {
+		return value
+	}
+	head := value[:historyTruncateHeadLength]
+	tail := value[len(value)-historyTruncateTailLength:]
+	return head + "... [truncated] ..." + tail
 }
 
 func parseHistoryTime(name, value string) (time.Time, error) {
@@ -319,7 +336,7 @@ func openHistoryStorage(
 	return sqlite.Open(ctx, sqlite.Options{Path: cfg.SQLite.Path, Keyring: keyring})
 }
 
-func writeHistory(output io.Writer, records []storage.HistoryRecord) error {
+func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) error {
 	for index, record := range records {
 		if index > 0 {
 			if _, err := fmt.Fprintln(output); err != nil {
@@ -339,7 +356,7 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord) error {
 			if _, err := fmt.Fprintln(output, "  request: [not retained]"); err != nil {
 				return err
 			}
-		} else if err := writeHistoryItems(output, "request", record.Request); err != nil {
+		} else if err := writeHistoryItems(output, "request", record.Request, full); err != nil {
 			return err
 		}
 		for _, attempt := range record.Attempts {
@@ -363,11 +380,11 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord) error {
 					return err
 				}
 			case attempt.Result != nil:
-				if err := writeHistoryItems(output, "response", attempt.Result.Output); err != nil {
+				if err := writeHistoryItems(output, "response", attempt.Result.Output, full); err != nil {
 					return err
 				}
 			default:
-				if err := writeIndentedHistoryValue(output, "error", string(attempt.Error)); err != nil {
+				if err := writeIndentedHistoryValue(output, "error", truncateHistoryValue(string(attempt.Error), full)); err != nil {
 					return err
 				}
 			}
@@ -376,7 +393,7 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord) error {
 	return nil
 }
 
-func writeHistoryItems(output io.Writer, label string, items []inference.Item) error {
+func writeHistoryItems(output io.Writer, label string, items []inference.Item, full bool) error {
 	if len(items) == 0 {
 		_, err := fmt.Fprintf(output, "  %s: [empty]\n", label)
 		return err
@@ -393,7 +410,7 @@ func writeHistoryItems(output io.Writer, label string, items []inference.Item) e
 		}
 		values = append(values, value)
 	}
-	return writeIndentedHistoryValue(output, label, strings.Join(values, "\n"))
+	return writeIndentedHistoryValue(output, label, truncateHistoryValue(strings.Join(values, "\n"), full))
 }
 
 func writeIndentedHistoryValue(output io.Writer, label, value string) error {
