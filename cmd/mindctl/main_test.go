@@ -23,6 +23,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/storage"
 	"github.com/storm-software/mindctl/internal/storage/sqlite"
 	"gopkg.in/yaml.v3"
 )
@@ -523,15 +524,20 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		t.Fatalf("history: %v", err)
 	}
 	output := stdout.String()
-	for _, want := range []string{
-		"2026-09-23T13:00:00Z  " + second.ResponseID + "  completed",
-		"request:\n    visible request",
-		"attempt: openai/gpt-large (T4, succeeded)",
-		"response:\n    visible response",
-	} {
-		if !strings.Contains(output, want) {
-			t.Errorf("history output missing %q:\n%s", want, output)
-		}
+	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("history output has %d lines, want header and one row:\n%s", len(lines), output)
+	}
+	if got, want := strings.Fields(lines[0]), []string{
+		"CREATED", "RESPONSE", "ID", "STATUS", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
+	}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("history header = %q", lines[0])
+	}
+	if got, want := strings.Fields(lines[1]), []string{
+		"2026-09-23T13:00:00Z", second.ResponseID, "completed",
+		"openai/gpt-large", "T4", "succeeded", "visible", "request", "visible", "response",
+	}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("history row = %q", lines[1])
 	}
 	for _, unwanted := range []string{"hidden request", "claude-small"} {
 		if strings.Contains(output, unwanted) {
@@ -596,7 +602,7 @@ func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := stdout.String()
-			if count := strings.Count(output, "  request:"); count != test.wantCount {
+			if count := strings.Count(output, "\n") - 1; count != test.wantCount {
 				t.Fatalf("history returned %d requests, want %d", count, test.wantCount)
 			}
 			if !strings.Contains(output, responseIDs[20]) {
@@ -609,6 +615,53 @@ func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
 				t.Fatal("history omitted twentieth newest request")
 			}
 		})
+	}
+}
+
+func TestWriteHistoryTable(t *testing.T) {
+	created := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	longText := strings.Repeat("a", 40) + "\n" + strings.Repeat("b", 40)
+	var stdout bytes.Buffer
+	if err := writeHistory(&stdout, []storage.HistoryRecord{{
+		ResponseID:             "resp_1",
+		Status:                 "failed",
+		CreatedAt:              created,
+		Request:                []inference.Item{{Type: "message", Role: "user", Text: longText}},
+		RequestContentRetained: true,
+		Attempts: []storage.HistoryAttempt{
+			{Provider: "anthropic", ModelID: "claude-small", Tier: domain.T2, Status: "failed", ContentRetained: true, Error: []byte("timeout")},
+			{Provider: "openai", ModelID: "gpt-large", Tier: domain.T4, Status: "started"},
+		},
+	}}, false); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("history table has %d lines, want 3:\n%s", len(lines), stdout.String())
+	}
+	for _, want := range []string{
+		"resp_1", "anthropic/claude-small", "T2",
+		strings.Repeat("a", 30) + " ... " + strings.Repeat("b", 30), "error: timeout",
+	} {
+		if !strings.Contains(lines[1], want) {
+			t.Errorf("first attempt row missing %q: %q", want, lines[1])
+		}
+	}
+	if got, want := strings.Fields(lines[2]), []string{"openai/gpt-large", "T4", "started", "[pending]"}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("second attempt row = %q", lines[2])
+	}
+	if strings.Index(lines[1], "anthropic/") != strings.Index(lines[2], "openai/") {
+		t.Errorf("attempt rows are not aligned:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	if err := writeHistory(&stdout, []storage.HistoryRecord{{
+		ResponseID: "resp_2", CreatedAt: created, Request: []inference.Item{{Text: longText}}, RequestContentRetained: true,
+	}}, true); err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Repeat("a", 40) + " " + strings.Repeat("b", 40); !strings.Contains(stdout.String(), want) {
+		t.Errorf("full history omitted untruncated request:\n%s", stdout.String())
 	}
 }
 

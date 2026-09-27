@@ -253,20 +253,20 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 				return err
 			}
 
-            filter.Until, err = parseHistoryTime("until", until)
+			filter.Until, err = parseHistoryTime("until", until)
 			if err != nil {
 				return err
 			}
 
-            if filter.Limit < 0 {
+			if filter.Limit < 0 {
 				return errors.New("limit must be nonnegative")
 			}
 
-            if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
+			if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
 				return errors.New("since must not be after until")
 			}
 
-            switch filter.Status {
+			switch filter.Status {
 			case "", "started", "succeeded", "failed":
 			default:
 				return errors.New("status must be started, succeeded, or failed")
@@ -277,7 +277,7 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 				return err
 			}
 
-            db, err := openHistoryStorage(command.Context(), cfg, os.LookupEnv)
+			db, err := openHistoryStorage(command.Context(), cfg, os.LookupEnv)
 			if err != nil {
 				return err
 			}
@@ -301,22 +301,26 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
 	command.Flags().BoolVar(&full, "full", false, "show full request and response content instead of truncating")
 
-    return command
+	return command
 }
 
 const (
-	historyTruncateHeadLength = 50
-	historyTruncateTailLength = 100
+	historyTruncateHeadLength = 30
+	historyTruncateTailLength = 30
 	historyTruncateThreshold  = historyTruncateHeadLength + historyTruncateTailLength
 )
 
+// truncateHistoryValue collapses whitespace so each value fits in one table
+// cell, then keeps its head and tail unless full content was requested.
 func truncateHistoryValue(value string, full bool) string {
-	if full || len(value) <= historyTruncateThreshold {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if full || len(runes) <= historyTruncateThreshold {
 		return value
 	}
-	head := value[:historyTruncateHeadLength]
-	tail := value[len(value)-historyTruncateTailLength:]
-	return head + "... [truncated] ..." + tail
+	head := string(runes[:historyTruncateHeadLength])
+	tail := string(runes[len(runes)-historyTruncateTailLength:])
+	return head + " ... " + tail
 }
 
 func parseHistoryTime(name, value string) (time.Time, error) {
@@ -368,66 +372,73 @@ func openHistoryStorage(
 }
 
 func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) error {
-	for index, record := range records {
-		if index > 0 {
-			if _, err := fmt.Fprintln(output); err != nil {
+	table := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(table, "CREATED\tRESPONSE ID\tSTATUS\tMODEL\tTIER\tATTEMPT\tREQUEST\tRESPONSE"); err != nil {
+		return err
+	}
+	for _, record := range records {
+		request := "[not retained]"
+		if record.RequestContentRetained {
+			var err error
+			request, err = historyItems("request", record.Request, full)
+			if err != nil {
 				return err
 			}
 		}
-		if _, err := fmt.Fprintf(
-			output,
-			"%s  %s  %s\n",
-			record.CreatedAt.Format(time.RFC3339),
-			record.ResponseID,
-			record.Status,
-		); err != nil {
-			return err
-		}
-		if !record.RequestContentRetained {
-			if _, err := fmt.Fprintln(output, "  request: [not retained]"); err != nil {
+		columns := []string{record.CreatedAt.Format(time.RFC3339), record.ResponseID, record.Status}
+		if len(record.Attempts) == 0 {
+			if err := writeHistoryRow(table, columns, "-", "-", "-", request, "-"); err != nil {
 				return err
 			}
-		} else if err := writeHistoryItems(output, "request", record.Request, full); err != nil {
-			return err
+			continue
 		}
-		for _, attempt := range record.Attempts {
-			if _, err := fmt.Fprintf(
-				output,
-				"  attempt: %s/%s (%s, %s)\n",
-				attempt.Provider,
-				attempt.ModelID,
-				attempt.Tier,
+		for index, attempt := range record.Attempts {
+			// Later attempts belong to the same request, so only the first row
+			// repeats the request columns.
+			if index > 0 {
+				columns, request = []string{"", "", ""}, ""
+			}
+			response, err := historyAttemptResponse(attempt, full)
+			if err != nil {
+				return err
+			}
+			if err := writeHistoryRow(
+				table,
+				columns,
+				attempt.Provider+"/"+attempt.ModelID,
+				attempt.Tier.String(),
 				attempt.Status,
+				request,
+				response,
 			); err != nil {
 				return err
 			}
-			switch {
-			case attempt.Status == "started":
-				if _, err := fmt.Fprintln(output, "  response: [pending]"); err != nil {
-					return err
-				}
-			case !attempt.ContentRetained:
-				if _, err := fmt.Fprintln(output, "  response: [not retained]"); err != nil {
-					return err
-				}
-			case attempt.Result != nil:
-				if err := writeHistoryItems(output, "response", attempt.Result.Output, full); err != nil {
-					return err
-				}
-			default:
-				if err := writeIndentedHistoryValue(output, "error", truncateHistoryValue(string(attempt.Error), full)); err != nil {
-					return err
-				}
-			}
 		}
 	}
-	return nil
+	return table.Flush()
 }
 
-func writeHistoryItems(output io.Writer, label string, items []inference.Item, full bool) error {
+func writeHistoryRow(table io.Writer, columns []string, values ...string) error {
+	_, err := fmt.Fprintln(table, strings.Join(append(columns, values...), "\t"))
+	return err
+}
+
+func historyAttemptResponse(attempt storage.HistoryAttempt, full bool) (string, error) {
+	switch {
+	case attempt.Status == "started":
+		return "[pending]", nil
+	case !attempt.ContentRetained:
+		return "[not retained]", nil
+	case attempt.Result != nil:
+		return historyItems("response", attempt.Result.Output, full)
+	default:
+		return "error: " + truncateHistoryValue(string(attempt.Error), full), nil
+	}
+}
+
+func historyItems(label string, items []inference.Item, full bool) (string, error) {
 	if len(items) == 0 {
-		_, err := fmt.Fprintf(output, "  %s: [empty]\n", label)
-		return err
+		return "[empty]", nil
 	}
 	values := make([]string, 0, len(items))
 	for _, item := range items {
@@ -435,25 +446,13 @@ func writeHistoryItems(output io.Writer, label string, items []inference.Item, f
 		if value == "" {
 			encoded, err := json.Marshal(item)
 			if err != nil {
-				return fmt.Errorf("encode history %s: %w", label, err)
+				return "", fmt.Errorf("encode history %s: %w", label, err)
 			}
 			value = string(encoded)
 		}
 		values = append(values, value)
 	}
-	return writeIndentedHistoryValue(output, label, truncateHistoryValue(strings.Join(values, "\n"), full))
-}
-
-func writeIndentedHistoryValue(output io.Writer, label, value string) error {
-	if _, err := fmt.Fprintf(output, "  %s:\n", label); err != nil {
-		return err
-	}
-	for line := range strings.SplitSeq(value, "\n") {
-		if _, err := fmt.Fprintf(output, "    %s\n", line); err != nil {
-			return err
-		}
-	}
-	return nil
+	return truncateHistoryValue(strings.Join(values, " "), full), nil
 }
 
 func selectedConfigPath(command *cobra.Command, settings *viper.Viper) (string, error) {

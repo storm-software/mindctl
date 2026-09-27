@@ -68,11 +68,16 @@ type AccessPrograms struct {
 type Item struct {
 	ID, Type, Role, Text, CallID, Name, Namespace, Input string
 	ContinuationProvider                                 string
-	ImageURL                                             json.RawMessage
-	Arguments, Output, Summary, EncryptedContent         json.RawMessage
-	Content                                              []ContentPart
-	Tools                                                []Tool
-	ProviderData                                         json.RawMessage
+	// Raw JSON fields omit empty values so a JSON copy keeps them absent
+	// instead of turning them into a non-empty null literal.
+	ImageURL         json.RawMessage `json:",omitempty"`
+	Arguments        json.RawMessage `json:",omitempty"`
+	Output           json.RawMessage `json:",omitempty"`
+	Summary          json.RawMessage `json:",omitempty"`
+	EncryptedContent json.RawMessage `json:",omitempty"`
+	Content          []ContentPart
+	Tools            []Tool
+	ProviderData     json.RawMessage `json:",omitempty"`
 }
 
 // ContentPart preserves the ordering and shape of a Responses message's
@@ -80,22 +85,22 @@ type Item struct {
 type ContentPart struct {
 	Type     string
 	Text     string
-	ImageURL json.RawMessage
+	ImageURL json.RawMessage `json:",omitempty"`
 }
 
 // Tool describes a custom function tool.
 type Tool struct {
 	Type, Name, Description string
-	Parameters              json.RawMessage
+	Parameters              json.RawMessage `json:",omitempty"`
 	Format                  *ToolFormat
 	DeferLoading            *bool
 	ExternalWebAccess       *bool
 	Tools                   []Tool
 	Strict                  bool
-	CacheControl            json.RawMessage
+	CacheControl            json.RawMessage `json:",omitempty"`
 	// AnthropicNative is the caller's verbatim Messages tool definition when
 	// it carries fields, such as defer_loading, without a portable meaning.
-	AnthropicNative json.RawMessage
+	AnthropicNative json.RawMessage `json:",omitempty"`
 }
 
 // ToolFormat defines the syntax accepted by a custom freeform tool.
@@ -106,7 +111,7 @@ type ToolFormat struct {
 // JSONSchemaFormat requests JSON Schema structured output.
 type JSONSchemaFormat struct {
 	Type, Name, Description string
-	Schema                  json.RawMessage
+	Schema                  json.RawMessage `json:",omitempty"`
 	Strict                  bool
 }
 
