@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.32](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.32) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve API error in Claude Code using Headroom compression ([3fe7f3b](https://github.com/storm-software/mindctl/commit/3fe7f3b))
+
 ## [0.1.29](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.29) (09/26/2026)
 
 ### Bug Fixes
