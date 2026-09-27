@@ -12,6 +12,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/savings"
 	"github.com/storm-software/mindctl/internal/storage"
 )
 
@@ -803,4 +804,102 @@ func completeAttempt(ctx context.Context, conn *sql.Conn, keyring *contentcrypto
 		return storage.ErrNotFound
 	}
 	return nil
+}
+
+// RecordAttemptSavings stores content-free savings telemetry for an attempt
+// that has already succeeded. Recording is idempotent per attempt.
+func (db *DB) RecordAttemptSavings(ctx context.Context, clientID, responseID, attemptID string, record savings.Record) error {
+	return inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM provider_attempts a JOIN responses r ON r.id = a.response_id
+			JOIN conversations c ON c.id = r.conversation_id WHERE c.client_id = ? AND r.id = ? AND a.id = ? AND a.status = 'succeeded'`,
+			clientID, responseID, attemptID).Scan(&count); err != nil {
+			return failure("read savings attempt", err)
+		}
+		if count == 0 {
+			return storage.ErrNotFound
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO attempt_savings
+			(attempt_id, created_at, input_tokens, cached_input_tokens, output_tokens, actual_cost,
+			baseline_provider, baseline_model_id, baseline_cost, compression_tokens_before, compression_tokens_saved, compression_savings)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (attempt_id) DO NOTHING`,
+			attemptID, time.Now().UTC().UnixNano(), record.InputTokens, record.CachedInputTokens, record.OutputTokens, record.ActualCost,
+			record.BaselineProvider, record.BaselineModelID, record.BaselineCost,
+			record.CompressionTokensBefore, record.CompressionTokensSaved, record.CompressionSavings); err != nil {
+			return failure("insert attempt savings", err)
+		}
+		return nil
+	})
+}
+
+// SummarizeSavings aggregates recorded savings per serving model.
+func (db *DB) SummarizeSavings(ctx context.Context, filter storage.SavingsFilter) (storage.SavingsSummary, error) {
+	if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
+		return storage.SavingsSummary{}, failure("validate savings filter", errors.New("since must not be after until"))
+	}
+	summary := storage.SavingsSummary{Models: []storage.ModelSavings{}}
+	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
+		query := `SELECT a.provider, a.model_id, count(*), COALESCE(SUM(r.explicit_model = 0), 0),
+			SUM(s.input_tokens), SUM(s.cached_input_tokens), SUM(s.output_tokens), SUM(s.actual_cost), SUM(s.baseline_cost),
+			SUM(s.compression_tokens_before), SUM(s.compression_tokens_saved), SUM(s.compression_savings)
+			FROM attempt_savings s JOIN provider_attempts a ON a.id = s.attempt_id JOIN responses r ON r.id = a.response_id
+			WHERE 1 = 1`
+		args := []any{}
+		if filter.Provider != "" {
+			query += " AND a.provider = ?"
+			args = append(args, filter.Provider)
+		}
+		if filter.ModelID != "" {
+			query += " AND a.model_id = ?"
+			args = append(args, filter.ModelID)
+		}
+		if filter.ExplicitModel != nil {
+			query += " AND r.explicit_model = ?"
+			args = append(args, *filter.ExplicitModel)
+		}
+		if !filter.Since.IsZero() {
+			query += " AND s.created_at >= ?"
+			args = append(args, filter.Since.UnixNano())
+		}
+		if !filter.Until.IsZero() {
+			query += " AND s.created_at <= ?"
+			args = append(args, filter.Until.UnixNano())
+		}
+		query += ` GROUP BY a.provider, a.model_id
+			ORDER BY SUM(s.baseline_cost) - SUM(s.actual_cost) + SUM(s.compression_savings) DESC, a.provider, a.model_id`
+		rows, err := conn.QueryContext(ctx, query, args...)
+		if err != nil {
+			return failure("summarize savings", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var model storage.ModelSavings
+			if err := rows.Scan(
+				&model.Provider,
+				&model.ModelID,
+				&model.Attempts,
+				&model.AutomaticAttempts,
+				&model.InputTokens,
+				&model.CachedInputTokens,
+				&model.OutputTokens,
+				&model.ActualCost,
+				&model.BaselineCost,
+				&model.CompressionTokensBefore,
+				&model.CompressionTokensSaved,
+				&model.CompressionSavings,
+			); err != nil {
+				return failure("decode savings", err)
+			}
+			summary.Total.Add(model.SavingsTotals)
+			summary.Models = append(summary.Models, model)
+		}
+		if err := rows.Err(); err != nil {
+			return failure("iterate savings", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return storage.SavingsSummary{}, err
+	}
+	return summary, nil
 }

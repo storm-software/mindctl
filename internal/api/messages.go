@@ -63,6 +63,7 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Models: append([]domain.Model(nil), h.config.Models...), MinTier: minTier, MaxTier: maxTier,
 		SafeFallbackTier:    h.config.SafeFallbackTier,
 		ProviderCredentials: providerCredentials(ctx, h.config), ProviderAvailability: cloneBools(h.config.ProviderAvailability),
+		SavingsBaseline: h.config.SavingsBaseline,
 	}
 	if decoded.Request.Stream {
 		writer := &messagesSSEWriter{response: w}

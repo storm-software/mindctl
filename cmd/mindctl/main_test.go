@@ -26,6 +26,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/savings"
 	"github.com/storm-software/mindctl/internal/storage"
 	"github.com/storm-software/mindctl/internal/storage/sqlite"
 	"gopkg.in/yaml.v3"
@@ -1246,4 +1247,117 @@ func TestBinarySignalsAndContentFreeStartup(t *testing.T) {
 			t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 		}
 	})
+}
+
+func TestSavingsCommandSummarizesRecordedSavings(t *testing.T) {
+	path := mainConfig(t)
+	cfg, err := config.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := contentcrypto.New("active", map[string][]byte{
+		"active": bytes.Repeat([]byte{4}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sqlite.Open(context.Background(), sqlite.Options{
+		Path: cfg.SQLite.Path, Keyring: keyring,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	svc := conversation.New(db)
+
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"--config", path, "savings"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("empty savings: %v", err)
+	}
+	if got := stdout.String(); got != "No savings recorded.\n" {
+		t.Errorf("empty savings output = %q", got)
+	}
+
+	turn, err := svc.Start(context.Background(), "client", inference.Request{
+		Model: inference.AutomaticModel,
+		Input: []inference.Item{{Type: "message", Role: "user", Text: "request"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := svc.BeginAttempt(context.Background(), turn, router.Decision{
+		Provider: "openai", ModelID: "model", Tier: domain.T4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitResult(context.Background(), turn, router.Pin{
+		Provider: "openai", ModelID: "model", Floor: domain.T4,
+	}, inference.Result{Status: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecordSavings(context.Background(), attempt, savings.Record{
+		InputTokens: 1_234_567, CachedInputTokens: 1_000, OutputTokens: 4_321,
+		ActualCost: 0.5, BaselineCost: 12.5, BaselineProvider: "anthropic", BaselineModelID: "large",
+		CompressionTokensBefore: 400, CompressionTokensSaved: 100, CompressionSavings: 0.25,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	if err := run(context.Background(), []string{"--config", path, "savings", "--selection", "auto"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("savings: %v", err)
+	}
+	rows := historyTableRows(stdout.String())
+	want := [][]string{
+		{"SAVINGS", "VALUE"},
+		{"Requests", "1 (1 auto-routed)"},
+		{"Input tokens", "1,234,567 (1,000 cached)"},
+		{"Output tokens", "4,321"},
+		{"Actual cost", "$0.5000"},
+		{"Baseline cost", "$12.50"},
+		{"Routing savings", "$12.00 (96.0% of baseline)"},
+		{"Headroom savings", "$0.2500 · 100 tokens (25.0% of eligible)"},
+		{"Total savings", "$12.25 (96.1%)"},
+		{"MODEL", "REQUESTS", "ACTUAL", "BASELINE", "ROUTING SAVED", "HEADROOM TOKENS", "HEADROOM SAVED", "TOTAL SAVED"},
+		{"openai/model", "1", "$0.5000", "$12.50", "$12.00", "100", "$0.2500", "$12.25"},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("savings rows = %q", rows)
+	}
+	for index := range want {
+		if !slices.Equal(rows[index], want[index]) {
+			t.Errorf("savings row %d = %q, want %q", index, rows[index], want[index])
+		}
+	}
+
+	stdout.Reset()
+	if err := run(context.Background(), []string{"--config", path, "savings", "--selection", "explicit"}, &stdout, io.Discard); err != nil {
+		t.Fatalf("explicit savings: %v", err)
+	}
+	if got := stdout.String(); got != "No savings recorded.\n" {
+		t.Errorf("explicit savings output = %q", got)
+	}
+	if err := run(context.Background(), []string{"--config", path, "savings", "--selection", "other"}, io.Discard, io.Discard); err == nil {
+		t.Error("invalid selection accepted")
+	}
+}
+
+func TestFormatSavingsValues(t *testing.T) {
+	for _, test := range []struct{ got, want string }{
+		{formatUSD(0), "$0.00"},
+		{formatUSD(0.00123), "$0.0012"},
+		{formatUSD(1234.5), "$1234.50"},
+		{formatUSD(-0.5), "-$0.5000"},
+		{formatCount(0), "0"},
+		{formatCount(999), "999"},
+		{formatCount(1000), "1,000"},
+		{formatCount(-1234567), "-1,234,567"},
+		{percentOf(1, 0, ""), ""},
+		{percentOf(-1, 4, " of baseline"), " (-25.0% of baseline)"},
+	} {
+		if test.got != test.want {
+			t.Errorf("got %q, want %q", test.got, test.want)
+		}
+	}
 }

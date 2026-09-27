@@ -466,12 +466,13 @@ func TestValidateCatalogRejectsBrokenIdentitiesWithoutResolvingSecrets(t *testin
 			{ID: "same", Provider: "duplicate"},
 			{ID: "same", Provider: "missing"},
 		},
+		Savings: SavingsConfig{BaselineModel: "absent"},
 	}
 	err := cfg.ValidateCatalog()
 	if err == nil {
 		t.Fatal("ValidateCatalog succeeded")
 	}
-	for _, want := range []string{"duplicate provider ID", "duplicate model ID", "references missing provider"} {
+	for _, want := range []string{"duplicate provider ID", "duplicate model ID", "references missing provider", "savings baseline references missing model absent"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("ValidateCatalog error %q missing %q", err, want)
 		}

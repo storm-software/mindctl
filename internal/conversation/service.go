@@ -12,6 +12,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/savings"
 	"github.com/storm-software/mindctl/internal/storage"
 )
 
@@ -25,6 +26,7 @@ type Service interface {
 	CommitResult(context.Context, Turn, router.Pin, inference.Result) error
 	FailAttempt(context.Context, Attempt, string, error) error
 	RaiseFloor(context.Context, Turn, domain.Tier) error
+	RecordSavings(context.Context, Attempt, savings.Record) error
 }
 
 type service struct {
@@ -162,6 +164,16 @@ func (s *service) BeginAttempt(ctx context.Context, turn Turn, decision router.D
 
 func (s *service) CommitResult(ctx context.Context, turn Turn, pin router.Pin, result inference.Result) error {
 	err := s.store.CommitConversationResult(ctx, turn.ClientID, turn.ResponseID, pin, result)
+	if errors.Is(err, storage.ErrNotFound) {
+		return ErrNotFound
+	}
+	return err
+}
+
+// RecordSavings stores savings telemetry for an attempt whose result has
+// already committed.
+func (s *service) RecordSavings(ctx context.Context, attempt Attempt, record savings.Record) error {
+	err := s.store.RecordAttemptSavings(ctx, attempt.ClientID, attempt.ResponseID, attempt.ID, record)
 	if errors.Is(err, storage.ErrNotFound) {
 		return ErrNotFound
 	}

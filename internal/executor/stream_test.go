@@ -16,6 +16,7 @@ import (
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/savings"
 	"github.com/storm-software/mindctl/internal/storage/sqlite"
 )
 
@@ -24,6 +25,18 @@ func TestStreamRetriesBeforeFirstVisibleEvent(t *testing.T) {
 	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
 	if err != nil || deps.writer.text() != "ok" || deps.provider.calls != 2 || deps.conversations.failCalls != 1 {
 		t.Fatalf("text=%q calls=%d failed=%d err=%v", deps.writer.text(), deps.provider.calls, deps.conversations.failCalls, err)
+	}
+}
+
+func TestStreamRecordsSavingsOnlyForCommittedAttempt(t *testing.T) {
+	deps := newStreamDependencies(failingStream(), successfulStream("ok"))
+	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
+	if err != nil || deps.conversations.failCalls != 1 {
+		t.Fatalf("failed=%d err=%v", deps.conversations.failCalls, err)
+	}
+	// Both models share tier T4, so catalog order makes "first" the baseline.
+	if len(deps.conversations.savings) != 1 || deps.conversations.savings[0].BaselineModelID != "first" {
+		t.Fatalf("savings = %+v", deps.conversations.savings)
 	}
 }
 
@@ -475,6 +488,7 @@ type streamConversations struct {
 	failCalls               int
 	failedProviderRequestID string
 	committed               inference.Result
+	savings                 []savings.Record
 }
 
 func (s *streamConversations) Start(_ context.Context, clientID string, _ inference.Request) (conversation.Turn, error) {
@@ -494,6 +508,11 @@ func (s *streamConversations) BeginAttempt(_ context.Context, turn conversation.
 
 func (s *streamConversations) CommitResult(_ context.Context, _ conversation.Turn, _ router.Pin, result inference.Result) error {
 	s.committed = result
+	return nil
+}
+
+func (s *streamConversations) RecordSavings(_ context.Context, _ conversation.Attempt, record savings.Record) error {
+	s.savings = append(s.savings, record)
 	return nil
 }
 

@@ -128,6 +128,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		newModelCommand(settings),
 		newProviderCommand(settings),
 		newHistoryCommand(settings),
+		newSavingsCommand(settings),
 	)
 
 	return root

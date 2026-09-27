@@ -201,6 +201,28 @@ request. Disable it by setting `headroom.enabled: false` and restarting.
 Do not enable this option when another Headroom proxy already fronts Mindctl,
 or the request may be compressed twice.
 
+## Token usage savings
+
+Mindctl records content-free savings telemetry for every successful provider
+attempt, and `mindctl savings` summarizes it (filter with `--provider`,
+`--model`, `--selection auto|explicit`, `--since`, and `--until`):
+
+- **Routing savings** price the observed token usage at the baseline model's
+  rates and subtract the served model's cost, as Weave Router does. The
+  baseline is the requested model for explicit requests, and
+  `savings.baseline_model` for `mindctl-auto` requests; when that is unset,
+  the highest-tier model eligible for automatic routing is used. Savings are
+  negative when a request was served by a pricier model than its baseline.
+- **Headroom savings** price the tokens removed by compression at the served
+  model's uncached input rate, and are only recorded when Headroom is enabled.
+
+```yaml
+savings:
+  baseline_model: claude-opus # optional configured model ID
+```
+
+Savings rows are kept after content retention deletes the request content.
+
 ## Debug router traces
 
 Set top-level `debug: true`, export `MINDCTL_DEBUG=true`, or start the gateway

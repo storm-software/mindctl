@@ -225,7 +225,8 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
 		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
 		ChatGPTOAuthProviders: chatGPTOAuthProviders, ClaudeOAuthProviders: claudeOAuthProviders,
-		Logger: debugLogger,
+		SavingsBaseline: cfg.Savings.BaselineModel,
+		Logger:          debugLogger,
 	}
 	responses := api.NewResponsesHandler(a.executor, responsesConfig)
 	responses = api.CaptureClaudeOAuth(responses)

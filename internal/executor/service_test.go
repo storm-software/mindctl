@@ -12,9 +12,11 @@ import (
 	"github.com/storm-software/mindctl/internal/classifier"
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/savings"
 	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
@@ -415,6 +417,7 @@ type fakeConversations struct {
 	CommitCalls     int
 	FailCalls       int
 	Committed       inference.Result
+	Savings         []savings.Record
 }
 
 func (f *fakeConversations) Start(_ context.Context, clientID string, request inference.Request) (conversation.Turn, error) {
@@ -441,6 +444,11 @@ func (f *fakeConversations) CommitResult(_ context.Context, _ conversation.Turn,
 	return f.CommitErr
 }
 
+func (f *fakeConversations) RecordSavings(_ context.Context, _ conversation.Attempt, record savings.Record) error {
+	f.Savings = append(f.Savings, record)
+	return nil
+}
+
 func (f *fakeConversations) FailAttempt(context.Context, conversation.Attempt, string, error) error {
 	f.FailCalls++
 	return nil
@@ -448,4 +456,46 @@ func (f *fakeConversations) FailAttempt(context.Context, conversation.Attempt, s
 
 func (f *fakeConversations) RaiseFloor(context.Context, conversation.Turn, domain.Tier) error {
 	return nil
+}
+
+type fakeCompressor struct{ metrics headroom.Metrics }
+
+func (f fakeCompressor) Compress(_ context.Context, _ domain.Model, _, _ string, request inference.Request) (inference.Request, headroom.Metrics, error) {
+	return request, f.metrics, nil
+}
+
+func TestExecuteRecordsRoutingAndCompressionSavings(t *testing.T) {
+	deps := fakeDeps()
+	deps.Models[0].Pricing = domain.Pricing{InputPerMillion: 1, OutputPerMillion: 2}
+	deps.Models[1].Pricing = domain.Pricing{InputPerMillion: 10, OutputPerMillion: 20}
+	deps.OpenAI.Result.Usage = inference.Usage{InputTokens: 1_000_000, OutputTokens: 500_000, Known: true}
+	deps.Executor = NewWithCompressor(deps.Classifier, router.NewPolicy(router.PolicyConfig{}),
+		provider.NewRegistry(map[string]provider.Provider{"openai": deps.OpenAI, "anthropic": deps.Anthropic}), deps.Conversations,
+		fakeCompressor{metrics: headroom.Metrics{TokensBefore: 3_000_000, TokensAfter: 1_000_000, TokensSaved: 2_000_000}}, nil)
+	in := deps.input(newAutomaticInput())
+	in.SavingsBaseline = "claude-test"
+
+	got, err := deps.Executor.Execute(context.Background(), in)
+	if err != nil || got.Decision.ModelID != "gpt-test" {
+		t.Fatalf("decision=%+v err=%v", got.Decision, err)
+	}
+	if len(deps.Conversations.Savings) != 1 {
+		t.Fatalf("savings records = %d", len(deps.Conversations.Savings))
+	}
+	record := deps.Conversations.Savings[0]
+	if record.BaselineModelID != "claude-test" || record.ActualCost != 2 || record.BaselineCost != 20 ||
+		record.RoutingSavings() != 18 || record.CompressionTokensSaved != 2_000_000 || record.CompressionSavings != 2 {
+		t.Fatalf("savings record = %+v", record)
+	}
+}
+
+func TestExecuteRecordsNoSavingsForFailedAttempt(t *testing.T) {
+	deps := fakeDeps()
+	deps.OpenAI.Result.Status = "failed"
+	if _, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput())); err == nil {
+		t.Fatal("failed provider status succeeded")
+	}
+	if len(deps.Conversations.Savings) != 0 {
+		t.Fatalf("savings recorded for failed attempt: %+v", deps.Conversations.Savings)
+	}
 }

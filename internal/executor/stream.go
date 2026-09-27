@@ -13,6 +13,7 @@ import (
 
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
@@ -94,15 +95,16 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		request.ID, request.Model, request.PreviousResponseID = turn.ResponseID, candidate.ModelID, ""
 		request.Input = turn.TranscriptFor(candidate.Provider)
 		request = providerScopedRequest(request, candidate.Provider)
+		var compression headroom.Metrics
 		if s.compressor != nil {
-			compressed, _, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, candidate.Provider, request)
+			compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, candidate.Provider, request)
 			if compressErr != nil {
 				if failErr := s.failStreamAttempt(ctx, attempt, "", compressErr); failErr != nil {
 					return errors.Join(compressErr, failErr)
 				}
 				return compressErr
 			}
-			request = compressed
+			request, compression = compressed, metrics
 		}
 		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, Provider: candidate.Provider, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
 			return s.failStreamAttempt(ctx, attempt, "", err)
@@ -122,6 +124,9 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 				pin := router.Pin{ModelID: candidate.ModelID, Provider: candidate.Provider, Floor: candidate.Tier}
 				persistCtx, cancel := persistenceContext(ctx)
 				err = s.conversations.CommitResult(persistCtx, turn, pin, result)
+				if err == nil {
+					s.recordSavings(persistCtx, in, attempt, model, result.Usage, compression)
+				}
 				cancel()
 				if err == nil {
 					completion.ResponseID = turn.ResponseID

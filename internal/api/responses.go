@@ -30,6 +30,9 @@ type ResponsesConfig struct {
 	ProviderCredentials, ProviderAvailability map[string]bool
 	ChatGPTOAuthProviders                     map[string]bool
 	ClaudeOAuthProviders                      map[string]bool
+	// SavingsBaseline is the model ID automatically routed requests are
+	// priced against when estimating savings.
+	SavingsBaseline string
 	// Logger receives debug diagnostics such as rejected requests. Nil disables them.
 	Logger *slog.Logger
 }
@@ -95,6 +98,7 @@ func (h *responsesHandler) input(ctx context.Context, clientID string, request i
 		MinTier: minTier, MaxTier: maxTier, SafeFallbackTier: h.config.SafeFallbackTier,
 		AllowEscalation:     controls.AllowEscalation,
 		ProviderCredentials: providerCredentials(ctx, h.config), ProviderAvailability: cloneBools(h.config.ProviderAvailability),
+		SavingsBaseline: h.config.SavingsBaseline,
 	}, nil
 }
 

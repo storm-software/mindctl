@@ -18,6 +18,12 @@ headroom:
   enabled: false
   mode: cache
 
+# Token usage savings reported by `mindctl savings`. Automatically routed
+# requests are priced against baseline_model using the same observed tokens;
+# empty compares against the highest-tier model eligible for automatic routing.
+savings:
+  baseline_model: ""
+
 classifier:
   # Points to either the optional local Laya sidecar or an operator-managed
   # compatible endpoint. The sidecar pins convaiinnovations/laya internally.

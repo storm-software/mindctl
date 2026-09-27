@@ -36,6 +36,9 @@ type Input struct {
 	SafeFallbackTier                          domain.Tier
 	AllowEscalation                           *bool
 	ProviderCredentials, ProviderAvailability map[string]bool
+	// SavingsBaseline is the configured model ID automatically routed
+	// requests are priced against; empty uses the savings package default.
+	SavingsBaseline string
 }
 
 // Service owns no provider or storage state; its dependencies are injected so
@@ -199,15 +202,16 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.PreviousResponseID = ""
 	request.Input = turn.TranscriptFor(decision.Provider)
 	request = providerScopedRequest(request, decision.Provider)
+	var compression headroom.Metrics
 	if s.compressor != nil {
-		compressed, _, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, decision.Provider, request)
+		compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, decision.Provider, request)
 		if compressErr != nil {
 			if failErr := s.conversations.FailAttempt(ctx, attempt, "", compressErr); failErr != nil {
 				return Output{}, errors.Join(compressErr, failErr)
 			}
 			return Output{}, compressErr
 		}
-		request = compressed
+		request, compression = compressed, metrics
 	}
 	result, err := adapter.Execute(providerScopedContext(ctx, decision.Provider), model, request)
 	if err != nil {
@@ -255,6 +259,7 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 		"cached_input_tokens", result.Usage.CachedInputTokens,
 		"output_tokens", result.Usage.OutputTokens,
 	)
+	s.recordSavings(ctx, in, attempt, model, result.Usage, compression)
 	callerResult := result
 	callerResult.ProviderRequestID = ""
 	return Output{Result: callerResult, Decision: decision, AttemptID: attempt.ID}, nil

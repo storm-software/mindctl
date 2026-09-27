@@ -9,6 +9,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/router"
+	"github.com/storm-software/mindctl/internal/savings"
 )
 
 var ErrNotFound = errors.New("storage: request not found")
@@ -144,6 +145,57 @@ type HistoryRecord struct {
 	Attempts                           []HistoryAttempt
 }
 
+// SavingsFilter selects recorded savings by the model that served each attempt.
+// A non-nil ExplicitModel matches only requests with that recorded selection.
+// Zero times leave those bounds open.
+type SavingsFilter struct {
+	Provider, ModelID string
+	ExplicitModel     *bool
+	Since, Until      time.Time
+}
+
+// SavingsTotals aggregates savings records. Costs are USD.
+type SavingsTotals struct {
+	Attempts, AutomaticAttempts                     int64
+	InputTokens, CachedInputTokens, OutputTokens    int64
+	ActualCost, BaselineCost                        float64
+	CompressionTokensBefore, CompressionTokensSaved int64
+	CompressionSavings                              float64
+}
+
+// RoutingSavings is negative when served models cost more than baselines.
+func (t SavingsTotals) RoutingSavings() float64 { return t.BaselineCost - t.ActualCost }
+
+// TotalSavings adds routing and compression savings.
+func (t SavingsTotals) TotalSavings() float64 { return t.RoutingSavings() + t.CompressionSavings }
+
+// Add accumulates other into t.
+func (t *SavingsTotals) Add(other SavingsTotals) {
+	t.Attempts += other.Attempts
+	t.AutomaticAttempts += other.AutomaticAttempts
+	t.InputTokens += other.InputTokens
+	t.CachedInputTokens += other.CachedInputTokens
+	t.OutputTokens += other.OutputTokens
+	t.ActualCost += other.ActualCost
+	t.BaselineCost += other.BaselineCost
+	t.CompressionTokensBefore += other.CompressionTokensBefore
+	t.CompressionTokensSaved += other.CompressionTokensSaved
+	t.CompressionSavings += other.CompressionSavings
+}
+
+// ModelSavings is the savings total for one serving model.
+type ModelSavings struct {
+	Provider, ModelID string
+	SavingsTotals
+}
+
+// SavingsSummary is the overall total and its per-model breakdown, ordered by
+// total savings, largest first.
+type SavingsSummary struct {
+	Total  SavingsTotals
+	Models []ModelSavings
+}
+
 // ConversationRepository adds the transactional persistence needed by the
 // gateway-owned conversation service.
 type ConversationRepository interface {
@@ -153,12 +205,15 @@ type ConversationRepository interface {
 	CommitConversationResult(context.Context, string, string, router.Pin, inference.Result) error
 	FailProviderAttempt(context.Context, string, string, string, string, []byte) error
 	RaiseConversationFloor(context.Context, string, string, domain.Tier) error
+	// RecordAttemptSavings stores telemetry for a succeeded attempt.
+	RecordAttemptSavings(context.Context, string, string, string, savings.Record) error
 }
 
 type Repository interface {
 	WithTx(context.Context, func(Tx) error) error
 	GetRequest(context.Context, string) (RequestRecord, error)
 	ListHistory(context.Context, HistoryFilter) ([]HistoryRecord, error)
+	SummarizeSavings(context.Context, SavingsFilter) (SavingsSummary, error)
 	// DeleteExpiredContent deletes blobs strictly older than now-retention and
 	// returns the blob count. Zero retention is unlimited and performs no work.
 	DeleteExpiredContent(context.Context, time.Duration, time.Time) (int64, error)

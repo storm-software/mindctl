@@ -34,6 +34,7 @@ type Config struct {
 	ClientAuth     ClientAuthConfig     `yaml:"client_auth"`
 	ClaudeMessages ClaudeMessagesConfig `yaml:"claude_messages"`
 	Headroom       HeadroomConfig       `yaml:"headroom"`
+	Savings        SavingsConfig        `yaml:"savings"`
 	Classifier     ClassifierConfig     `yaml:"classifier"`
 	SQLite         SQLiteConfig         `yaml:"sqlite"`
 	Encryption     EncryptionConfig     `yaml:"encryption"`
@@ -55,6 +56,13 @@ func (c HeadroomConfig) ModeValue() string {
 		return "cache"
 	}
 	return c.Mode
+}
+
+// SavingsConfig controls how token usage savings are estimated. BaselineModel
+// is the configured model ID that automatically routed requests are compared
+// against; empty uses the highest-tier model eligible for automatic routing.
+type SavingsConfig struct {
+	BaselineModel string `yaml:"baseline_model"`
 }
 
 // ClientAuthConfig configures gateway authentication using a referenced secret.
@@ -228,6 +236,11 @@ func (cfg Config) ValidateCatalog() error {
 		}
 		if _, ok := providerIDs[model.Provider]; !ok {
 			errs = append(errs, fmt.Errorf("model %s references missing provider %s", model.ID, model.Provider))
+		}
+	}
+	if baseline := cfg.Savings.BaselineModel; baseline != "" {
+		if _, ok := modelIDs[baseline]; !ok {
+			errs = append(errs, fmt.Errorf("savings baseline references missing model %s", baseline))
 		}
 	}
 	return errors.Join(errs...)
