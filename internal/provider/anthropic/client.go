@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -20,9 +21,12 @@ import (
 
 const (
 	maxResponseBytes      = 16 << 20
+	maxErrorBytes         = 64 << 10
 	anthropicVersion      = "2023-06-01"
 	claudeOAuthBetaHeader = "oauth-2025-04-20"
 )
+
+var safeDiagnosticCode = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 type authMode int
 
@@ -72,7 +76,7 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 	if err != nil {
 		return inference.Result{}, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, requestID, err := c.post(ctx, encoded, false)
+	response, requestID, err := c.post(ctx, encoded, false, errorSensitiveValues(request))
 	if err != nil {
 		return inference.Result{}, err
 	}
@@ -94,14 +98,14 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 	if err != nil {
 		return nil, &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("cannot encode provider request")}
 	}
-	response, requestID, err := c.post(ctx, encoded, true)
+	response, requestID, err := c.post(ctx, encoded, true, errorSensitiveValues(request))
 	if err != nil {
 		return nil, err
 	}
 	return &stream{body: response.Body, reader: provider.NewSSEReader(response.Body), requestID: requestID}, nil
 }
 
-func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Response, string, error) {
+func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveValues []string) (*http.Response, string, error) {
 	if strings.TrimSpace(c.baseURL) == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
@@ -150,10 +154,58 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Resp
 	}
 	requestID := response.Header.Get("request-id")
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		diagnostic := decodeErrorDiagnostic(response.Body, append(sensitiveValues, accessToken))
 		response.Body.Close()
-		return nil, requestID, &provider.Error{Kind: errorKind(response.StatusCode), Status: response.StatusCode, RequestID: requestID, Err: errors.New("provider returned an error status")}
+		return nil, requestID, &provider.Error{
+			Kind:            errorKind(response.StatusCode),
+			Status:          response.StatusCode,
+			RequestID:       requestID,
+			UpstreamCode:    diagnostic.UpstreamCode,
+			UpstreamMessage: diagnostic.UpstreamMessage,
+			Err:             errors.New("provider returned an error status"),
+		}
 	}
 	return response, requestID, nil
+}
+
+type errorDiagnostic struct {
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// decodeErrorDiagnostic keeps Anthropic's error type and message, which name
+// the offending request path, unless the message echoes request content.
+func decodeErrorDiagnostic(body io.Reader, sensitiveValues []string) provider.Error {
+	var diagnostic errorDiagnostic
+	if err := json.NewDecoder(io.LimitReader(body, maxErrorBytes)).Decode(&diagnostic); err != nil {
+		return provider.Error{}
+	}
+	code := diagnostic.Error.Type
+	if !safeDiagnosticCode.MatchString(code) {
+		code = ""
+	}
+	message := strings.TrimSpace(diagnostic.Error.Message)
+	lower := strings.ToLower(message)
+	for _, sensitive := range sensitiveValues {
+		if sensitive != "" && strings.Contains(lower, strings.ToLower(sensitive)) {
+			message = ""
+			break
+		}
+	}
+	return provider.Error{UpstreamCode: code, UpstreamMessage: message}
+}
+
+func errorSensitiveValues(request inference.Request) []string {
+	values := []string{request.Instructions}
+	for _, item := range request.Input {
+		values = append(values, item.Text, item.Input, string(item.Arguments), string(item.Output))
+		for _, content := range item.Content {
+			values = append(values, content.Text)
+		}
+	}
+	return values
 }
 
 // apiKeyBeta drops OAuth-only flags from a caller's anthropic-beta header,

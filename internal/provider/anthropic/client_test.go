@@ -368,3 +368,31 @@ func hostedToolRequest(kind string) inference.Request {
 }
 
 func newAnthropic(baseURL string) *Client { return NewClient(baseURL, "secret", nil) }
+
+func TestAnthropicErrorStatusKeepsUpstreamDiagnostic(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: unexpected tool_use_id found in tool_result blocks"}}`)
+	}))
+	defer server.Close()
+	_, err := newAnthropic(server.URL).Stream(context.Background(), anthropicModel(), textRequest())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorInvalidRequest || normalized.Status != http.StatusBadRequest ||
+		normalized.UpstreamCode != "invalid_request_error" || !strings.HasPrefix(normalized.UpstreamMessage, "messages.1.content.0:") {
+		t.Fatalf("err=%#v", normalized)
+	}
+}
+
+func TestAnthropicErrorStatusDropsMessageEchoingRequestContent(t *testing.T) {
+	request := textRequest()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"invalid_request_error","message":"bad text: `+request.Input[0].Text+`"}}`)
+	}))
+	defer server.Close()
+	_, err := newAnthropic(server.URL).Execute(context.Background(), anthropicModel(), request)
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.UpstreamCode != "invalid_request_error" || normalized.UpstreamMessage != "" {
+		t.Fatalf("err=%#v", normalized)
+	}
+}
