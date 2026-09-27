@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ func TestListHistoryReturnsNewestRequestsWithAttemptsAndDecryptedContent(t *test
 	ctx := context.Background()
 
 	first, err := svc.Start(ctx, "client-a", inference.Request{
+		Model: inference.AutomaticModel,
 		Input: []inference.Item{{Type: "message", Role: "user", Text: "first request"}},
 	})
 	if err != nil {
@@ -56,6 +58,7 @@ func TestListHistoryReturnsNewestRequestsWithAttemptsAndDecryptedContent(t *test
 	}
 
 	second, err := svc.Start(ctx, "client-b", inference.Request{
+		Model: "gpt-large",
 		Input: []inference.Item{{Type: "message", Role: "user", Text: "second request"}},
 	})
 	if err != nil {
@@ -121,6 +124,47 @@ func TestListHistoryReturnsNewestRequestsWithAttemptsAndDecryptedContent(t *test
 	if got := records[0].Attempts[0]; got.ID != secondAttempt.ID || got.Result == nil ||
 		got.Result.Output[0].Text != "second response" {
 		t.Fatalf("second attempt = %#v", got)
+	}
+	if got := records[0].ExplicitModel; got == nil || !*got {
+		t.Fatalf("explicit request selection = %v; want explicit", got)
+	}
+	if got := records[1].ExplicitModel; got == nil || *got {
+		t.Fatalf("automatic request selection = %v; want automatic", got)
+	}
+
+	selectionIDs := func(explicit bool) []string {
+		t.Helper()
+		records, err := db.ListHistory(ctx, storage.HistoryFilter{ExplicitModel: &explicit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, record := range records {
+			ids = append(ids, record.ResponseID)
+		}
+		return ids
+	}
+	if got := selectionIDs(true); !slices.Equal(got, []string{second.ResponseID}) {
+		t.Fatalf("explicit selection filter = %q", got)
+	}
+	if got := selectionIDs(false); !slices.Equal(got, []string{first.ResponseID}) {
+		t.Fatalf("automatic selection filter = %q", got)
+	}
+
+	// Rows written before selection was tracked have no recorded value and
+	// match neither selection filter.
+	if _, err := db.SQL().Exec("UPDATE responses SET explicit_model = NULL WHERE id = ?", first.ResponseID); err != nil {
+		t.Fatal(err)
+	}
+	records, err = db.ListHistory(ctx, storage.HistoryFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := records[1].ExplicitModel; got != nil {
+		t.Fatalf("untracked request selection = %v; want nil", *got)
+	}
+	if got := selectionIDs(false); len(got) != 0 {
+		t.Fatalf("automatic selection filter included untracked requests: %q", got)
 	}
 }
 

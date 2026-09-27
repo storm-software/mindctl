@@ -200,7 +200,7 @@ func (db *DB) ListHistory(ctx context.Context, filter storage.HistoryFilter) ([]
 
 	records := []storage.HistoryRecord{}
 	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
-		query := `SELECT r.id, r.conversation_id, r.status, r.created_at
+		query := `SELECT r.id, r.conversation_id, r.status, r.created_at, r.explicit_model
 			FROM responses r WHERE 1 = 1`
 		args := []any{}
 		if filter.Provider != "" || filter.ModelID != "" || filter.Status != "" {
@@ -218,6 +218,10 @@ func (db *DB) ListHistory(ctx context.Context, filter storage.HistoryFilter) ([]
 				args = append(args, filter.Status)
 			}
 			query += ")"
+		}
+		if filter.ExplicitModel != nil {
+			query += " AND r.explicit_model = ?"
+			args = append(args, *filter.ExplicitModel)
 		}
 		if !filter.Since.IsZero() {
 			query += " AND r.created_at >= ?"
@@ -240,16 +244,21 @@ func (db *DB) ListHistory(ctx context.Context, filter storage.HistoryFilter) ([]
 		for rows.Next() {
 			var record storage.HistoryRecord
 			var createdAt int64
+			var explicitModel sql.NullBool
 			if err := rows.Scan(
 				&record.ResponseID,
 				&record.ConversationID,
 				&record.Status,
 				&createdAt,
+				&explicitModel,
 			); err != nil {
 				rows.Close()
 				return failure("decode history", err)
 			}
 			record.CreatedAt = time.Unix(0, createdAt).UTC()
+			if explicitModel.Valid {
+				record.ExplicitModel = &explicitModel.Bool
+			}
 			record.Request = []inference.Item{}
 			record.Attempts = []storage.HistoryAttempt{}
 			records = append(records, record)
@@ -513,8 +522,8 @@ func (db *DB) CreateTurn(ctx context.Context, turn storage.NewTurn) error {
 		if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence) + 1, 0) FROM responses WHERE conversation_id = ?", turn.Conversation.ID).Scan(&sequence); err != nil {
 			return failure("allocate response sequence", err)
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO responses (id, conversation_id, sequence, created_at, status)
-			VALUES (?, ?, ?, ?, 'pending')`, turn.Response.ID, turn.Conversation.ID, sequence, created.UnixNano()); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO responses (id, conversation_id, sequence, created_at, status, explicit_model)
+			VALUES (?, ?, ?, ?, 'pending', ?)`, turn.Response.ID, turn.Conversation.ID, sequence, created.UnixNano(), turn.Response.ExplicitModel); err != nil {
 			return failure("insert response", err)
 		}
 		return insertTranscriptItems(ctx, conn, db.keyring, turn.Response.ID, "", turn.Input, created)

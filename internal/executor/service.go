@@ -20,7 +20,7 @@ import (
 	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
-const automaticModel = "mindctl-auto"
+const automaticModel = inference.AutomaticModel
 
 // Input is the fully authenticated, canonical request plus the immutable
 // routing snapshot supplied by application wiring. Features may add gateway

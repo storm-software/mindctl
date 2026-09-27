@@ -44,7 +44,7 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.reject(w, err)
 		return
 	}
-	if decoded.Request.Model != "mindctl-auto" {
+	if decoded.Request.Model != inference.AutomaticModel {
 		matched := false
 		for _, model := range h.config.Models {
 			if model.ID == decoded.Request.Model && (decoded.RequiredProvider == "" || model.Provider == decoded.RequiredProvider) {

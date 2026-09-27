@@ -15,11 +15,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -239,7 +241,7 @@ func codexConnected() (bool, error) {
 
 func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	var filter storage.HistoryFilter
-	var since, until string
+	var since, until, selection string
 	var full bool
 	command := &cobra.Command{
 		Use:   "history",
@@ -272,6 +274,15 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 				return errors.New("status must be started, succeeded, or failed")
 			}
 
+			switch selection {
+			case "":
+			case "explicit", "auto":
+				explicit := selection == "explicit"
+				filter.ExplicitModel = &explicit
+			default:
+				return errors.New("selection must be explicit or auto")
+			}
+
 			cfg, err := readHistoryConfig(command, settings)
 			if err != nil {
 				return err
@@ -296,6 +307,7 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().StringVar(&filter.Provider, "provider", "", "filter by selected provider")
 	command.Flags().StringVar(&filter.ModelID, "model", "", "filter by selected model")
 	command.Flags().StringVar(&filter.Status, "status", "", "filter by attempt status")
+	command.Flags().StringVar(&selection, "selection", "", "filter by model selection (explicit or auto)")
 	command.Flags().StringVar(&since, "since", "", "include requests at or after an RFC3339 timestamp")
 	command.Flags().StringVar(&until, "until", "", "include requests at or before an RFC3339 timestamp")
 	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
@@ -371,11 +383,10 @@ func openHistoryStorage(
 	return sqlite.Open(ctx, sqlite.Options{Path: cfg.SQLite.Path, Keyring: keyring})
 }
 
+var historyHeader = []string{"CREATED", "RESPONSE ID", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE"}
+
 func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) error {
-	table := tabwriter.NewWriter(output, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "CREATED\tRESPONSE ID\tSTATUS\tMODEL\tTIER\tATTEMPT\tREQUEST\tRESPONSE"); err != nil {
-		return err
-	}
+	groups := make([][][]string, 0, len(records))
 	for _, record := range records {
 		request := "[not retained]"
 		if record.RequestContentRetained {
@@ -385,42 +396,103 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) 
 				return err
 			}
 		}
-		columns := []string{record.CreatedAt.Format(time.RFC3339), record.ResponseID, record.Status}
+		columns := []string{
+			record.CreatedAt.Format(time.RFC3339),
+			record.ResponseID,
+			record.Status,
+			historySelection(record.ExplicitModel),
+		}
 		if len(record.Attempts) == 0 {
-			if err := writeHistoryRow(table, columns, "-", "-", "-", request, "-"); err != nil {
-				return err
-			}
+			groups = append(groups, [][]string{append(columns, "-", "-", "-", request, "-")})
 			continue
 		}
+		rows := make([][]string, 0, len(record.Attempts))
 		for index, attempt := range record.Attempts {
 			// Later attempts belong to the same request, so only the first row
 			// repeats the request columns.
 			if index > 0 {
-				columns, request = []string{"", "", ""}, ""
+				columns, request = make([]string, len(columns)), ""
 			}
 			response, err := historyAttemptResponse(attempt, full)
 			if err != nil {
 				return err
 			}
-			if err := writeHistoryRow(
-				table,
-				columns,
+			rows = append(rows, append(
+				slices.Clone(columns),
 				attempt.Provider+"/"+attempt.ModelID,
 				attempt.Tier.String(),
 				attempt.Status,
 				request,
 				response,
-			); err != nil {
-				return err
-			}
+			))
 		}
+		groups = append(groups, rows)
 	}
-	return table.Flush()
+	return writeBoxTable(output, historyHeader, groups)
 }
 
-func writeHistoryRow(table io.Writer, columns []string, values ...string) error {
-	_, err := fmt.Fprintln(table, strings.Join(append(columns, values...), "\t"))
+// writeBoxTable renders a bordered table. Each group is a set of rows that
+// belong together; groups are separated by a horizontal rule.
+func writeBoxTable(output io.Writer, header []string, groups [][][]string) error {
+	widths := make([]int, len(header))
+	measure := func(row []string) {
+		for index, cell := range row {
+			widths[index] = max(widths[index], utf8.RuneCountInString(cell))
+		}
+	}
+	measure(header)
+	for _, rows := range groups {
+		for _, row := range rows {
+			measure(row)
+		}
+	}
+
+	var buffer strings.Builder
+	rule := func(left, middle, right string) {
+		buffer.WriteString(left)
+		for index, width := range widths {
+			if index > 0 {
+				buffer.WriteString(middle)
+			}
+			buffer.WriteString(strings.Repeat("─", width+2))
+		}
+		buffer.WriteString(right + "\n")
+	}
+	line := func(row []string) {
+		for index, width := range widths {
+			buffer.WriteString("│ ")
+			buffer.WriteString(row[index])
+			buffer.WriteString(strings.Repeat(" ", width-utf8.RuneCountInString(row[index])+1))
+		}
+		buffer.WriteString("│\n")
+	}
+
+	rule("┌", "┬", "┐")
+	line(header)
+	for _, rows := range groups {
+		rule("├", "┼", "┤")
+		for _, row := range rows {
+			line(row)
+		}
+	}
+	rule("└", "┴", "┘")
+
+	_, err := io.WriteString(output, buffer.String())
 	return err
+}
+
+// historySelection reports whether the client named the model ("explicit") or
+// let the gateway route ("auto"). Requests recorded before selection was
+// tracked show "-".
+func historySelection(explicit *bool) string {
+	switch {
+	case explicit == nil:
+		return "-"
+	case *explicit:
+		return "explicit"
+	default:
+		return "auto"
+	}
 }
 
 func historyAttemptResponse(attempt storage.HistoryAttempt, full bool) (string, error) {

@@ -4,6 +4,10 @@ package inference
 
 import "encoding/json"
 
+// AutomaticModel is the request model that asks the gateway to route; any
+// other model is an explicit selection by the client.
+const AutomaticModel = "mindctl-auto"
+
 // Request is the portable Responses subset accepted by the gateway.
 type Request struct {
 	ID, Model, Instructions, PreviousResponseID string

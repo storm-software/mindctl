@@ -67,10 +67,13 @@ type ConversationRecord struct {
 }
 
 // ResponseRecord is a gateway-owned response identifier within a conversation.
+// ExplicitModel records whether the client named a concrete model instead of
+// asking the gateway to route.
 type ResponseRecord struct {
 	ID, ConversationID, Status string
 	Sequence                   int
 	CreatedAt                  time.Time
+	ExplicitModel              bool
 }
 
 // TranscriptItem is canonical content plus the provider that is allowed to
@@ -108,8 +111,11 @@ type ProviderAttempt struct {
 
 // HistoryFilter selects response history. Attempt filters must all match the
 // same provider attempt. Zero times and a zero limit leave those bounds open.
+// A non-nil ExplicitModel matches only requests with that recorded selection,
+// so it excludes requests recorded before selection was tracked.
 type HistoryFilter struct {
 	Provider, ModelID, Status string
+	ExplicitModel             *bool
 	Since, Until              time.Time
 	Limit                     int
 }
@@ -128,9 +134,11 @@ type HistoryAttempt struct {
 }
 
 // HistoryRecord is one client request and every model attempt made for it.
+// ExplicitModel is nil for requests recorded before selection was tracked.
 type HistoryRecord struct {
 	ResponseID, ConversationID, Status string
 	CreatedAt                          time.Time
+	ExplicitModel                      *bool
 	Request                            []inference.Item
 	RequestContentRetained             bool
 	Attempts                           []HistoryAttempt

@@ -11,11 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/contentcrypto"
@@ -471,6 +473,7 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 	}
 
 	second, err := svc.Start(context.Background(), "client-b", inference.Request{
+		Model: "gpt-large",
 		Input: []inference.Item{{Type: "message", Role: "user", Text: "visible request"}},
 	})
 	if err != nil {
@@ -516,6 +519,7 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		"--provider", "openai",
 		"--model", "gpt-large",
 		"--status", "succeeded",
+		"--selection", "explicit",
 		"--since", "2026-09-23T12:30:00Z",
 		"--until", "2026-09-23T14:00:00Z",
 		"--limit", "1",
@@ -524,20 +528,20 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		t.Fatalf("history: %v", err)
 	}
 	output := stdout.String()
-	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("history output has %d lines, want header and one row:\n%s", len(lines), output)
+	rows := historyTableRows(output)
+	if len(rows) != 2 {
+		t.Fatalf("history output has %d rows, want header and one row:\n%s", len(rows), output)
 	}
-	if got, want := strings.Fields(lines[0]), []string{
-		"CREATED", "RESPONSE", "ID", "STATUS", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
-	}; strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("history header = %q", lines[0])
+	if got, want := rows[0], []string{
+		"CREATED", "RESPONSE ID", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
+	}; !slices.Equal(got, want) {
+		t.Errorf("history header = %q", got)
 	}
-	if got, want := strings.Fields(lines[1]), []string{
-		"2026-09-23T13:00:00Z", second.ResponseID, "completed",
-		"openai/gpt-large", "T4", "succeeded", "visible", "request", "visible", "response",
-	}; strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("history row = %q", lines[1])
+	if got, want := rows[1], []string{
+		"2026-09-23T13:00:00Z", second.ResponseID, "completed", "explicit",
+		"openai/gpt-large", "T4", "succeeded", "visible request", "visible response",
+	}; !slices.Equal(got, want) {
+		t.Errorf("history row = %q", got)
 	}
 	for _, unwanted := range []string{"hidden request", "claude-small"} {
 		if strings.Contains(output, unwanted) {
@@ -602,7 +606,7 @@ func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
 				t.Fatal(err)
 			}
 			output := stdout.String()
-			if count := strings.Count(output, "\n") - 1; count != test.wantCount {
+			if count := len(historyTableRows(output)) - 1; count != test.wantCount {
 				t.Fatalf("history returned %d requests, want %d", count, test.wantCount)
 			}
 			if !strings.Contains(output, responseIDs[20]) {
@@ -626,6 +630,7 @@ func TestWriteHistoryTable(t *testing.T) {
 		ResponseID:             "resp_1",
 		Status:                 "failed",
 		CreatedAt:              created,
+		ExplicitModel:          new(bool),
 		Request:                []inference.Item{{Type: "message", Role: "user", Text: longText}},
 		RequestContentRetained: true,
 		Attempts: []storage.HistoryAttempt{
@@ -636,22 +641,29 @@ func TestWriteHistoryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("history table has %d lines, want 3:\n%s", len(lines), stdout.String())
+	if len(lines) != 6 {
+		t.Fatalf("history table has %d lines, want 6:\n%s", len(lines), stdout.String())
 	}
-	for _, want := range []string{
-		"resp_1", "anthropic/claude-small", "T2",
-		strings.Repeat("a", 30) + " ... " + strings.Repeat("b", 30), "error: timeout",
-	} {
-		if !strings.Contains(lines[1], want) {
-			t.Errorf("first attempt row missing %q: %q", want, lines[1])
+	for index, prefix := range []string{"┌", "│", "├", "│", "│", "└"} {
+		if !strings.HasPrefix(lines[index], prefix) {
+			t.Errorf("line %d = %q, want prefix %q", index, lines[index], prefix)
 		}
 	}
-	if got, want := strings.Fields(lines[2]), []string{"openai/gpt-large", "T4", "started", "[pending]"}; strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Errorf("second attempt row = %q", lines[2])
+	width := utf8.RuneCountInString(lines[0])
+	for index, line := range lines {
+		if got := utf8.RuneCountInString(line); got != width {
+			t.Errorf("line %d has width %d, want %d:\n%s", index, got, width, stdout.String())
+		}
 	}
-	if strings.Index(lines[1], "anthropic/") != strings.Index(lines[2], "openai/") {
-		t.Errorf("attempt rows are not aligned:\n%s", stdout.String())
+	rows := historyTableRows(stdout.String())
+	if got, want := rows[1], []string{
+		"2026-09-23T12:00:00Z", "resp_1", "failed", "auto", "anthropic/claude-small", "T2", "failed",
+		strings.Repeat("a", 30) + " ... " + strings.Repeat("b", 30), "error: timeout",
+	}; !slices.Equal(got, want) {
+		t.Errorf("first attempt row = %q", got)
+	}
+	if got, want := rows[2], []string{"", "", "", "", "openai/gpt-large", "T4", "started", "", "[pending]"}; !slices.Equal(got, want) {
+		t.Errorf("second attempt row = %q", got)
 	}
 
 	stdout.Reset()
@@ -663,6 +675,26 @@ func TestWriteHistoryTable(t *testing.T) {
 	if want := strings.Repeat("a", 40) + " " + strings.Repeat("b", 40); !strings.Contains(stdout.String(), want) {
 		t.Errorf("full history omitted untruncated request:\n%s", stdout.String())
 	}
+	if got := historyTableRows(stdout.String())[1][3]; got != "-" {
+		t.Errorf("untracked selection = %q, want -", got)
+	}
+}
+
+// historyTableRows returns the trimmed cells of each header and data row in a
+// bordered history table.
+func historyTableRows(output string) [][]string {
+	var rows [][]string
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.HasPrefix(line, "│") {
+			continue
+		}
+		cells := strings.Split(strings.Trim(line, "│"), "│")
+		for index, cell := range cells {
+			cells[index] = strings.TrimSpace(cell)
+		}
+		rows = append(rows, cells)
+	}
+	return rows
 }
 
 func TestHistoryCommandRejectsInvalidFilters(t *testing.T) {
@@ -674,6 +706,7 @@ func TestHistoryCommandRejectsInvalidFilters(t *testing.T) {
 	}{
 		{"negative limit", []string{"history", "--limit", "-1"}, "limit must be nonnegative"},
 		{"invalid since", []string{"history", "--since", "yesterday"}, "parse --since"},
+		{"invalid selection", []string{"history", "--selection", "manual"}, "selection must be explicit or auto"},
 		{
 			"reversed range",
 			[]string{"history", "--since", "2026-09-24T00:00:00Z", "--until", "2026-09-23T00:00:00Z"},

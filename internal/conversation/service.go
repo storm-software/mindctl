@@ -107,8 +107,11 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 
 	if err := s.store.CreateTurn(ctx, storage.NewTurn{
 		Conversation: storage.ConversationRecord{ID: conversationID, ClientID: clientID, CreatedAt: now},
-		Response:     storage.ResponseRecord{ID: responseID, ConversationID: conversationID, CreatedAt: now, Status: "pending"},
-		Input:        input,
+		Response: storage.ResponseRecord{
+			ID: responseID, ConversationID: conversationID, CreatedAt: now, Status: "pending",
+			ExplicitModel: request.Model != "" && request.Model != inference.AutomaticModel,
+		},
+		Input: input,
 	}); err != nil {
 		return Turn{}, err
 	}
