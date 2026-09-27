@@ -523,6 +523,7 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		"--since", "2026-09-23T12:30:00Z",
 		"--until", "2026-09-23T14:00:00Z",
 		"--limit", "1",
+		"--response-id",
 	}, &stdout, io.Discard)
 	if err != nil {
 		t.Fatalf("history: %v", err)
@@ -538,7 +539,7 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		t.Errorf("history header = %q", got)
 	}
 	if got, want := rows[1], []string{
-		"2026-09-23T13:00:00Z", second.ResponseID, "completed", "explicit",
+		secondCreated.Local().Format(historyCreatedLayout), second.ResponseID, "completed", "explicit",
 		"openai/gpt-large", "T4", "succeeded", "visible request", "visible response",
 	}; !slices.Equal(got, want) {
 		t.Errorf("history row = %q", got)
@@ -600,7 +601,7 @@ func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
 		{name: "explicit limit", flags: []string{"--limit", "1"}, wantCount: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			args := append([]string{"--config", path, "history"}, test.flags...)
+			args := append([]string{"--config", path, "history", "--response-id"}, test.flags...)
 			var stdout bytes.Buffer
 			if err := run(context.Background(), args, &stdout, io.Discard); err != nil {
 				t.Fatal(err)
@@ -637,14 +638,14 @@ func TestWriteHistoryTable(t *testing.T) {
 			{Provider: "anthropic", ModelID: "claude-small", Tier: domain.T2, Status: "failed", ContentRetained: true, Error: []byte("timeout")},
 			{Provider: "openai", ModelID: "gpt-large", Tier: domain.T4, Status: "started"},
 		},
-	}}, false); err != nil {
+	}}, historyOptions{ResponseID: true}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
-	if len(lines) != 6 {
-		t.Fatalf("history table has %d lines, want 6:\n%s", len(lines), stdout.String())
+	if len(lines) != 8 {
+		t.Fatalf("history table has %d lines, want 8:\n%s", len(lines), stdout.String())
 	}
-	for index, prefix := range []string{"┌", "│", "├", "│", "│", "└"} {
+	for index, prefix := range []string{"┌", "│", "├", "│", "│", "│", "│", "└"} {
 		if !strings.HasPrefix(lines[index], prefix) {
 			t.Errorf("line %d = %q, want prefix %q", index, lines[index], prefix)
 		}
@@ -656,27 +657,63 @@ func TestWriteHistoryTable(t *testing.T) {
 		}
 	}
 	rows := historyTableRows(stdout.String())
-	if got, want := rows[1], []string{
-		"2026-09-23T12:00:00Z", "resp_1", "failed", "auto", "anthropic/claude-small", "T2", "failed",
-		strings.Repeat("a", 40) + " ... " + strings.Repeat("b", 40), "error: timeout",
-	}; !slices.Equal(got, want) {
-		t.Errorf("first attempt row = %q", got)
-	}
-	if got, want := rows[2], []string{"", "", "", "", "openai/gpt-large", "T4", "started", "", "[pending]"}; !slices.Equal(got, want) {
-		t.Errorf("second attempt row = %q", got)
+	for index, want := range [][]string{
+		{"CREATED", "RESPONSE ID", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE"},
+		{
+			created.Local().Format(historyCreatedLayout), "resp_1", "failed", "auto", "anthropic/claude-small", "T2", "failed",
+			strings.Repeat("a", 40), "error: timeout",
+		},
+		{"", "", "", "", "", "", "", "...", ""},
+		{"", "", "", "", "", "", "", strings.Repeat("b", 40), ""},
+		{"", "", "", "", "openai/gpt-large", "T4", "started", "", "[pending]"},
+	} {
+		if got := rows[index]; !slices.Equal(got, want) {
+			t.Errorf("table line %d = %q, want %q", index, got, want)
+		}
 	}
 
 	stdout.Reset()
 	if err := writeHistory(&stdout, []storage.HistoryRecord{{
 		ResponseID: "resp_2", CreatedAt: created, Request: []inference.Item{{Text: longText}}, RequestContentRetained: true,
-	}}, true); err != nil {
+	}}, historyOptions{Full: true}); err != nil {
 		t.Fatal(err)
 	}
-	if want := strings.Repeat("a", 40) + " middle " + strings.Repeat("b", 40); !strings.Contains(stdout.String(), want) {
-		t.Errorf("full history omitted untruncated request:\n%s", stdout.String())
+	rows = historyTableRows(stdout.String())
+	if got, want := rows[0], []string{
+		"CREATED", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
+	}; !slices.Equal(got, want) {
+		t.Errorf("history header without response ID = %q", got)
 	}
-	if got := historyTableRows(stdout.String())[1][3]; got != "-" {
-		t.Errorf("untracked selection = %q, want -", got)
+	if strings.Contains(stdout.String(), "resp_2") {
+		t.Errorf("history showed response ID without --response-id:\n%s", stdout.String())
+	}
+	var request []string
+	for _, row := range rows[1:] {
+		request = append(request, row[6])
+	}
+	if want := []string{strings.Repeat("a", 40), "middle", strings.Repeat("b", 40)}; !slices.Equal(request, want) {
+		t.Errorf("full history request lines = %q, want %q", request, want)
+	}
+	if got := rows[1][2]; got != "N/A" {
+		t.Errorf("untracked selection = %q, want N/A", got)
+	}
+}
+
+func TestWrapHistoryValue(t *testing.T) {
+	for _, test := range []struct {
+		name, value, want string
+	}{
+		{"empty", "", ""},
+		{"fits", "ab cd", "ab cd"},
+		{"wraps at spaces", "aaaa bbbb cccc", "aaaa\nbbbb\ncccc"},
+		{"packs words per line", "aa bb cc dd", "aa bb\ncc dd"},
+		{"breaks long words", "abcdefghijkl xy", "abcde\nfghij\nkl xy"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := wrapHistoryValue(test.value, 5); got != test.want {
+				t.Errorf("wrapHistoryValue() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

@@ -242,7 +242,7 @@ func codexConnected() (bool, error) {
 func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	var filter storage.HistoryFilter
 	var since, until, selection string
-	var full bool
+	var options historyOptions
 	command := &cobra.Command{
 		Use:   "history",
 		Short: "List processed requests, selected models, and responses",
@@ -300,7 +300,7 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 				return err
 			}
 
-			return writeHistory(command.OutOrStdout(), records, full)
+			return writeHistory(command.OutOrStdout(), records, options)
 		},
 	}
 
@@ -311,15 +311,24 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().StringVar(&since, "since", "", "include requests at or after an RFC3339 timestamp")
 	command.Flags().StringVar(&until, "until", "", "include requests at or before an RFC3339 timestamp")
 	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
-	command.Flags().BoolVar(&full, "full", false, "show full request and response content instead of truncating")
+	command.Flags().BoolVar(&options.Full, "full", false, "show full request and response content instead of truncating")
+	command.Flags().BoolVar(&options.ResponseID, "response-id", false, "show the response ID column")
 
 	return command
+}
+
+// historyOptions controls how the history table is rendered.
+type historyOptions struct {
+	Full       bool
+	ResponseID bool
 }
 
 const (
 	historyTruncateHeadLength = 30
 	historyTruncateTailLength = 30
 	historyTruncateThreshold  = historyTruncateHeadLength + historyTruncateTailLength
+	historyWrapWidth          = 40
+	historyCreatedLayout      = "01-02-2006 03:04:05 PM"
 )
 
 // truncateHistoryValue collapses whitespace so each value fits in one table
@@ -346,6 +355,31 @@ func truncateHistoryValue(value string, full bool) string {
 	head := strings.TrimRight(string(runes[:headEnd]), " ")
 	tail := strings.TrimLeft(string(runes[tailStart:]), " ")
 	return head + " ... " + tail
+}
+
+// wrapHistoryValue breaks a single-line value into lines of at most width
+// runes, splitting at spaces and only breaking words longer than width.
+func wrapHistoryValue(value string, width int) string {
+	var lines []string
+	var line []rune
+	for _, word := range strings.Fields(value) {
+		runes := []rune(word)
+		for len(runes) > 0 {
+			if len(line) > 0 && len(line)+1+len(runes) <= width {
+				line = append(append(line, ' '), runes...)
+				break
+			}
+			if len(line) > 0 {
+				lines = append(lines, string(line))
+			}
+			size := min(len(runes), width)
+			line, runes = slices.Clone(runes[:size]), runes[size:]
+		}
+	}
+	if len(line) > 0 {
+		lines = append(lines, string(line))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func parseHistoryTime(name, value string) (time.Time, error) {
@@ -396,25 +430,31 @@ func openHistoryStorage(
 	return sqlite.Open(ctx, sqlite.Options{Path: cfg.SQLite.Path, Keyring: keyring})
 }
 
-var historyHeader = []string{"CREATED", "RESPONSE ID", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE"}
+func writeHistory(output io.Writer, records []storage.HistoryRecord, options historyOptions) error {
+	header := []string{"CREATED"}
+	if options.ResponseID {
+		header = append(header, "RESPONSE ID")
+	}
+	header = append(header, "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE")
 
-func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) error {
 	groups := make([][][]string, 0, len(records))
 	for _, record := range records {
 		request := "[not retained]"
 		if record.RequestContentRetained {
 			var err error
-			request, err = historyItems("request", record.Request, full)
+			request, err = historyItems("request", record.Request, options.Full)
 			if err != nil {
 				return err
 			}
 		}
-		columns := []string{
-			record.CreatedAt.Format(time.RFC3339),
-			record.ResponseID,
-			record.Status,
-			historySelection(record.ExplicitModel),
+		request = wrapHistoryValue(request, historyWrapWidth)
+		// Timestamps are stored in UTC; the display layout carries no zone,
+		// so show them in local time.
+		columns := []string{record.CreatedAt.Local().Format(historyCreatedLayout)}
+		if options.ResponseID {
+			columns = append(columns, record.ResponseID)
 		}
+		columns = append(columns, record.Status, historySelection(record.ExplicitModel))
 		if len(record.Attempts) == 0 {
 			groups = append(groups, [][]string{append(columns, "-", "-", "-", request, "-")})
 			continue
@@ -426,7 +466,7 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) 
 			if index > 0 {
 				columns, request = make([]string, len(columns)), ""
 			}
-			response, err := historyAttemptResponse(attempt, full)
+			response, err := historyAttemptResponse(attempt, options.Full)
 			if err != nil {
 				return err
 			}
@@ -436,21 +476,24 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, full bool) 
 				attempt.Tier.String(),
 				attempt.Status,
 				request,
-				response,
+				wrapHistoryValue(response, historyWrapWidth),
 			))
 		}
 		groups = append(groups, rows)
 	}
-	return writeBoxTable(output, historyHeader, groups)
+	return writeBoxTable(output, header, groups)
 }
 
 // writeBoxTable renders a bordered table. Each group is a set of rows that
-// belong together; groups are separated by a horizontal rule.
+// belong together; groups are separated by a horizontal rule. Cells containing
+// newlines span multiple lines, and the row grows to its tallest cell.
 func writeBoxTable(output io.Writer, header []string, groups [][][]string) error {
 	widths := make([]int, len(header))
 	measure := func(row []string) {
 		for index, cell := range row {
-			widths[index] = max(widths[index], utf8.RuneCountInString(cell))
+			for _, cellLine := range strings.Split(cell, "\n") {
+				widths[index] = max(widths[index], utf8.RuneCountInString(cellLine))
+			}
 		}
 	}
 	measure(header)
@@ -472,12 +515,24 @@ func writeBoxTable(output io.Writer, header []string, groups [][][]string) error
 		buffer.WriteString(right + "\n")
 	}
 	line := func(row []string) {
-		for index, width := range widths {
-			buffer.WriteString("│ ")
-			buffer.WriteString(row[index])
-			buffer.WriteString(strings.Repeat(" ", width-utf8.RuneCountInString(row[index])+1))
+		cells := make([][]string, len(row))
+		height := 1
+		for index, cell := range row {
+			cells[index] = strings.Split(cell, "\n")
+			height = max(height, len(cells[index]))
 		}
-		buffer.WriteString("│\n")
+		for lineIndex := range height {
+			for index, width := range widths {
+				var cellLine string
+				if lineIndex < len(cells[index]) {
+					cellLine = cells[index][lineIndex]
+				}
+				buffer.WriteString("│ ")
+				buffer.WriteString(cellLine)
+				buffer.WriteString(strings.Repeat(" ", width-utf8.RuneCountInString(cellLine)+1))
+			}
+			buffer.WriteString("│\n")
+		}
 	}
 
 	rule("┌", "┬", "┐")
@@ -496,11 +551,11 @@ func writeBoxTable(output io.Writer, header []string, groups [][][]string) error
 
 // historySelection reports whether the client named the model ("explicit") or
 // let the gateway route ("auto"). Requests recorded before selection was
-// tracked show "-".
+// tracked show "N/A".
 func historySelection(explicit *bool) string {
 	switch {
 	case explicit == nil:
-		return "-"
+		return "N/A"
 	case *explicit:
 		return "explicit"
 	default:
