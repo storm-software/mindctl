@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/storm-software/mindctl/internal/app"
@@ -87,10 +88,12 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 			if err != nil {
 				return err
 			}
+
 			settings.SetConfigFile(path)
 			if err := settings.ReadInConfig(); err != nil {
 				return fmt.Errorf("read config: %w", err)
 			}
+
 			return runGateway(
 				ctx,
 				settings.ConfigFileUsed(),
@@ -332,29 +335,84 @@ const (
 )
 
 // truncateHistoryValue collapses whitespace so each value fits in one table
-// cell, then keeps its head and tail unless full content was requested. The
-// head and tail are extended to word boundaries so no word is cut off.
+// cell, then keeps its head and tail unless full content was requested. JSON
+// is cut only after "," or "{" or before "}"; other text is cut only between
+// sentences, so the head and tail may run past their lengths to keep whole
+// sentences.
 func truncateHistoryValue(value string, full bool) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
 	if full || len(runes) <= historyTruncateThreshold {
 		return value
 	}
+
+	boundary := sentenceBoundary
+	if isJSONValue(value) {
+		boundary = jsonBoundary
+	}
+
 	headEnd := historyTruncateHeadLength
-	for headEnd < len(runes) && runes[headEnd-1] != ' ' && runes[headEnd] != ' ' {
+	for headEnd < len(runes) && !boundary(runes, headEnd) {
 		headEnd++
 	}
+
 	tailStart := len(runes) - historyTruncateTailLength
-	for tailStart > 0 && runes[tailStart] != ' ' && runes[tailStart-1] != ' ' {
+	for tailStart > 0 && !boundary(runes, tailStart) {
 		tailStart--
 	}
-	// Nothing but the separating space would be omitted.
-	if headEnd+1 >= tailStart {
+
+	// Nothing but whitespace would be omitted.
+	if headEnd >= tailStart || strings.TrimSpace(string(runes[headEnd:tailStart])) == "" {
 		return value
 	}
+
 	head := strings.TrimRight(string(runes[:headEnd]), " ")
 	tail := strings.TrimLeft(string(runes[tailStart:]), " ")
+
 	return head + " ... " + tail
+}
+
+// sentenceBoundary reports whether index falls between two sentences, either
+// just after a terminator or just after the space that follows one.
+func sentenceBoundary(runes []rune, index int) bool {
+	if index == 0 || index == len(runes) {
+		return true
+	}
+
+	terminator := func(r rune) bool { return r == '.' || r == '!' || r == '?' }
+	if terminator(runes[index-1]) && runes[index] == ' ' {
+		return true
+	}
+
+	return index >= 2 && runes[index-1] == ' ' && terminator(runes[index-2])
+}
+
+// jsonBoundary reports whether index falls just after "," or "{", or just
+// before "}".
+func jsonBoundary(runes []rune, index int) bool {
+	if index == 0 || index == len(runes) {
+		return true
+	}
+
+	return runes[index-1] == ',' || runes[index-1] == '{' || runes[index] == '}'
+}
+
+// isJSONValue reports whether value is one or more JSON objects or arrays, as
+// produced when several encoded history items are joined.
+func isJSONValue(value string) bool {
+	if !strings.HasPrefix(value, "{") && !strings.HasPrefix(value, "[") {
+		return false
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(value))
+	for {
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err == io.EOF {
+			return true
+		} else if err != nil {
+			return false
+		}
+	}
 }
 
 // wrapHistoryValue breaks a single-line value into lines of at most width
@@ -369,16 +427,20 @@ func wrapHistoryValue(value string, width int) string {
 				line = append(append(line, ' '), runes...)
 				break
 			}
+
 			if len(line) > 0 {
 				lines = append(lines, string(line))
 			}
+
 			size := min(len(runes), width)
 			line, runes = slices.Clone(runes[:size]), runes[size:]
 		}
 	}
+
 	if len(line) > 0 {
 		lines = append(lines, string(line))
 	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -386,10 +448,12 @@ func parseHistoryTime(name, value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
+
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse --%s as RFC3339: %w", name, err)
 	}
+
 	return parsed, nil
 }
 
@@ -398,6 +462,7 @@ func readHistoryConfig(command *cobra.Command, settings *viper.Viper) (config.Co
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	return config.Read(path)
 }
 
@@ -417,16 +482,20 @@ func openHistoryStorage(
 		if !exists || value == "" {
 			return nil, fmt.Errorf("encryption key environment variable %s is not set", environmentName)
 		}
+
 		decoded, err := base64.StdEncoding.DecodeString(value)
 		if err != nil || len(decoded) != 32 {
 			return nil, errors.New("invalid encryption key")
 		}
+
 		keys[id] = decoded
 	}
+
 	keyring, err := contentcrypto.New(cfg.Encryption.ActiveKeyID, keys)
 	if err != nil {
 		return nil, err
 	}
+
 	return sqlite.Open(ctx, sqlite.Options{Path: cfg.SQLite.Path, Keyring: keyring})
 }
 
@@ -435,6 +504,7 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 	if options.ResponseID {
 		header = append(header, "RESPONSE ID")
 	}
+
 	header = append(header, "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE")
 
 	groups := make([][][]string, 0, len(records))
@@ -454,11 +524,13 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 		if options.ResponseID {
 			columns = append(columns, record.ResponseID)
 		}
+
 		columns = append(columns, record.Status, historyUserSpecified(record.ExplicitModel))
 		if len(record.Attempts) == 0 {
 			groups = append(groups, [][]string{append(columns, "-", "-", "-", request, "-")})
 			continue
 		}
+
 		rows := make([][]string, 0, len(record.Attempts))
 		for index, attempt := range record.Attempts {
 			// Later attempts belong to the same request, so only the first row
@@ -466,10 +538,12 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 			if index > 0 {
 				columns, request = make([]string, len(columns)), ""
 			}
+
 			response, err := historyAttemptResponse(attempt, options.Full)
 			if err != nil {
 				return err
 			}
+
 			rows = append(rows, append(
 				slices.Clone(columns),
 				attempt.Provider+"/"+attempt.ModelID,
@@ -481,24 +555,34 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 		}
 		groups = append(groups, rows)
 	}
-	return writeBoxTable(output, header, groups)
+
+	return writeBoxTable(output, header, groups, "USER-SPECIFIED")
 }
 
 // writeBoxTable renders a bordered table. Each group is a set of rows that
 // belong together; groups are separated by a horizontal rule. Cells containing
-// newlines span multiple lines, and the row grows to its tallest cell.
-func writeBoxTable(output io.Writer, header []string, groups [][][]string) error {
+// newlines span multiple lines, and the row grows to its tallest cell. Headers
+// are centered, as are the cells of any column named in centered.
+func writeBoxTable(output io.Writer, header []string, groups [][][]string, centered ...string) error {
 	writer := table.NewWriter()
 	writer.SetStyle(table.StyleLight)
 	headerRow := make(table.Row, len(header))
+	columns := make([]table.ColumnConfig, len(header))
 	for index, cell := range header {
 		headerRow[index] = cell
+		columns[index] = table.ColumnConfig{Number: index + 1, AlignHeader: text.AlignCenter}
+		if slices.Contains(centered, cell) {
+			columns[index].Align = text.AlignCenter
+		}
 	}
+
 	writer.AppendHeader(headerRow)
+	writer.SetColumnConfigs(columns)
 	for index, rows := range groups {
 		if index > 0 {
 			writer.AppendSeparator()
 		}
+
 		for _, row := range rows {
 			cells := make(table.Row, len(row))
 			for cellIndex, cell := range row {
@@ -507,6 +591,7 @@ func writeBoxTable(output io.Writer, header []string, groups [][][]string) error
 			writer.AppendRow(cells)
 		}
 	}
+
 	_, err := io.WriteString(output, writer.Render()+"\n")
 	return err
 }
@@ -538,6 +623,7 @@ func historyItems(label string, items []inference.Item, full bool) (string, erro
 	if len(items) == 0 {
 		return "[empty]", nil
 	}
+
 	values := make([]string, 0, len(items))
 	for _, item := range items {
 		value := item.Text
@@ -546,11 +632,65 @@ func historyItems(label string, items []inference.Item, full bool) (string, erro
 			if err != nil {
 				return "", fmt.Errorf("encode history %s: %w", label, err)
 			}
-			value = string(encoded)
+
+			value, err = stripHistorySignatures(encoded)
+			if err != nil {
+				return "", fmt.Errorf("encode history %s: %w", label, err)
+			}
 		}
+
 		values = append(values, value)
 	}
+
 	return truncateHistoryValue(strings.Join(values, " "), full), nil
+}
+
+// stripHistorySignatures removes signature fields, such as an Anthropic
+// thinking block's "signature" or a Gemini part's "thoughtSignature", at any
+// depth of an encoded item. They are opaque provider tokens that only crowd
+// the history table. Values without a signature are returned unchanged.
+func stripHistorySignatures(encoded []byte) (string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+
+	if !removeHistorySignatures(value) {
+		return string(encoded), nil
+	}
+
+	stripped, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+
+	return string(stripped), nil
+}
+
+// removeHistorySignatures deletes signature keys from value in place and
+// reports whether any were removed.
+func removeHistorySignatures(value any) bool {
+	removed := false
+	switch value := value.(type) {
+	case map[string]any:
+		for key, child := range value {
+			if strings.HasSuffix(strings.ToLower(key), "signature") {
+				delete(value, key)
+				removed = true
+				continue
+			}
+
+			removed = removeHistorySignatures(child) || removed
+		}
+	case []any:
+		for _, child := range value {
+			removed = removeHistorySignatures(child) || removed
+		}
+	}
+
+	return removed
 }
 
 func selectedConfigPath(command *cobra.Command, settings *viper.Viper) (string, error) {
@@ -558,15 +698,18 @@ func selectedConfigPath(command *cobra.Command, settings *viper.Viper) (string, 
 	if command.Root().PersistentFlags().Changed("config") {
 		return path, nil
 	}
+
 	candidate, err := userConfigPath()
 	if err != nil {
 		return "", err
 	}
+
 	if _, err := os.Stat(candidate); err == nil {
 		return candidate, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("inspect user config: %w", err)
 	}
+
 	return path, nil
 }
 
@@ -576,6 +719,7 @@ func newModelCommand(settings *viper.Viper) *cobra.Command {
 		Short: "List and update routable models",
 		Args:  noArgs("unexpected arguments for model"),
 	}
+
 	var all bool
 	listCommand := &cobra.Command{
 		Use:   "list",
@@ -589,6 +733,7 @@ func newModelCommand(settings *viper.Viper) *cobra.Command {
 			return writeModelList(command.OutOrStdout(), cfg, all)
 		},
 	}
+
 	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled models")
 	modelCommand.AddCommand(
 		listCommand,
@@ -596,6 +741,7 @@ func newModelCommand(settings *viper.Viper) *cobra.Command {
 		newModelToggleCommand(settings, "disable", false),
 	)
 	modelCommand.RunE = listCommand.RunE
+
 	return modelCommand
 }
 
@@ -609,17 +755,21 @@ func newModelToggleCommand(settings *viper.Viper, action string, enabled bool) *
 			if err != nil {
 				return err
 			}
+
 			statePath, err := config.ProvidersPath()
 			if err != nil {
 				return err
 			}
+
 			providerID, modelID, hasModel := strings.Cut(args[0], ".")
 			if providerID == "" || (hasModel && modelID == "") {
 				return errors.New("model target must use provider or provider.model form")
 			}
+
 			if hasModel {
 				return config.SetModelEnabled(statePath, cfg, providerID, modelID, enabled)
 			}
+
 			return config.SetProviderEnabled(statePath, cfg, providerID, enabled)
 		},
 	}
@@ -636,11 +786,14 @@ func newProviderListCommand(settings *viper.Viper) *cobra.Command {
 			if err != nil {
 				return err
 			}
+
 			return writeProviderList(command.OutOrStdout(), cfg, all)
 		},
 	}
-	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
-	return listCommand
+
+    listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
+
+    return listCommand
 }
 
 func newProviderCommand(settings *viper.Viper) *cobra.Command {
@@ -665,14 +818,17 @@ func newProviderCommand(settings *viper.Viper) *cobra.Command {
 				if err != nil {
 					return err
 				}
+
 				statePath, err := config.ProvidersPath()
 				if err != nil {
 					return err
 				}
+
 				return config.SetProviderEnabled(statePath, cfg, args[0], enabled)
 			},
 		})
 	}
+
 	providerCommand.RunE = listCommand.RunE
 	return providerCommand
 }
@@ -682,13 +838,16 @@ func readCatalog(command *cobra.Command, settings *viper.Viper) (config.Config, 
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	cfg, err := config.Read(path)
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	if err := cfg.ValidateCatalog(); err != nil {
 		return config.Config{}, err
 	}
+
 	return cfg, nil
 }
 
@@ -697,13 +856,16 @@ func readCommandCatalog(command *cobra.Command, settings *viper.Viper) (config.C
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	statePath, err := config.ProvidersPath()
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	if err := config.ApplyProvidersFile(statePath, &cfg); err != nil {
 		return config.Config{}, err
 	}
+
 	return cfg, nil
 }
 
@@ -715,12 +877,15 @@ func writeModelList(output io.Writer, cfg config.Config, all bool) error {
 				models = append(models, model)
 			}
 		}
+
 		if len(models) == 0 {
 			continue
 		}
+
 		if _, err := fmt.Fprintln(output, provider.ID); err != nil {
 			return err
 		}
+
 		for _, model := range models {
 			status := ""
 			if all {
@@ -729,11 +894,13 @@ func writeModelList(output io.Writer, cfg config.Config, all bool) error {
 					status = " (enabled)"
 				}
 			}
+
 			if _, err := fmt.Fprintf(output, "  %s%s\n", model.ID, status); err != nil {
 				return err
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -746,9 +913,11 @@ func writeProviderList(output io.Writer, cfg config.Config, all bool) error {
 				break
 			}
 		}
+
 		if !all && !enabled {
 			continue
 		}
+
 		status := ""
 		if all {
 			status = " (disabled)"
@@ -756,6 +925,7 @@ func writeProviderList(output io.Writer, cfg config.Config, all bool) error {
 				status = " (enabled)"
 			}
 		}
+
 		if _, err := fmt.Fprintf(output, "%s%s\n", provider.ID, status); err != nil {
 			return err
 		}
@@ -797,14 +967,17 @@ func newConfigCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
+
 				value, err := configValue(document, args[0])
 				if err != nil {
 					return err
 				}
+
 				body, err := marshalConfig(value)
 				if err != nil {
 					return fmt.Errorf("format config value: %w", err)
 				}
+
 				_, err = command.OutOrStdout().Write(body)
 				return err
 			},
@@ -818,21 +991,26 @@ func newConfigCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
+
 				document, err := readConfig(path)
 				if err != nil {
 					return err
 				}
+
 				value, err := parseConfigValue(args[1])
 				if err != nil {
 					return err
 				}
+
 				if err := setConfigValue(document, args[0], value); err != nil {
 					return err
 				}
+
 				return writeConfig(path, document)
 			},
 		},
 	)
+
 	configCommand.RunE = listCommand.RunE
 	return configCommand
 }
@@ -842,6 +1020,7 @@ func userConfigPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve user config directory: %w", err)
 	}
+
 	return filepath.Join(configHome, "mindctl", "config.yaml"), nil
 }
 
@@ -850,6 +1029,7 @@ func readUserConfig() (*yaml.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return readConfig(path)
 }
 
@@ -865,6 +1045,7 @@ func readConfig(path string) (*yaml.Node, error) {
 	if err := decoder.Decode(&document); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
+
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err != nil {
@@ -872,6 +1053,7 @@ func readConfig(path string) (*yaml.Node, error) {
 		}
 		return nil, errors.New("decode config: multiple YAML documents are not allowed")
 	}
+
 	return &document, nil
 }
 
@@ -880,14 +1062,17 @@ func configValue(document *yaml.Node, dottedPath string) (*yaml.Node, error) {
 	if len(parts) < 2 || strings.Contains(dottedPath, "..") || strings.HasPrefix(dottedPath, ".") || strings.HasSuffix(dottedPath, ".") {
 		return nil, errors.New("config key must use group.name form")
 	}
+
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
 		return nil, errors.New("config root must be a mapping")
 	}
+
 	current := document.Content[0]
 	for _, part := range parts {
 		if current.Kind != yaml.MappingNode {
 			return nil, fmt.Errorf("config key %q is not a group", strings.Join(parts[:len(parts)-1], "."))
 		}
+
 		var next *yaml.Node
 		for index := 0; index < len(current.Content); index += 2 {
 			if current.Content[index].Value == part {
@@ -895,11 +1080,13 @@ func configValue(document *yaml.Node, dottedPath string) (*yaml.Node, error) {
 				break
 			}
 		}
+
 		if next == nil {
 			return nil, fmt.Errorf("config key %q was not found", dottedPath)
 		}
 		current = next
 	}
+
 	return current, nil
 }
 
@@ -908,9 +1095,15 @@ func parseConfigValue(raw string) (*yaml.Node, error) {
 	if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
 		return nil, fmt.Errorf("parse config value: %w", err)
 	}
-	if len(document.Content) != 1 || document.Content[0].Kind != yaml.ScalarNode {
+
+	if len(document.Content) != 1 {
+		return nil, errors.New("parse config value: must be a single YAML document")
+	}
+
+	if document.Content[0].Kind != yaml.ScalarNode {
 		return nil, errors.New("config value must be a YAML scalar")
 	}
+
 	return document.Content[0], nil
 }
 
@@ -919,9 +1112,11 @@ func setConfigValue(document *yaml.Node, dottedPath string, value *yaml.Node) er
 	if len(parts) < 2 || strings.Contains(dottedPath, "..") || strings.HasPrefix(dottedPath, ".") || strings.HasSuffix(dottedPath, ".") {
 		return errors.New("config key must use group.name form")
 	}
+
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
 		return errors.New("config root must be a mapping")
 	}
+
 	current := document.Content[0]
 	for _, part := range parts[:len(parts)-1] {
 		var next *yaml.Node
@@ -931,15 +1126,19 @@ func setConfigValue(document *yaml.Node, dottedPath string, value *yaml.Node) er
 				break
 			}
 		}
+
 		if next == nil {
 			next = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 			current.Content = append(current.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: part}, next)
 		}
+
 		if next.Kind != yaml.MappingNode {
 			return fmt.Errorf("config key %q is not a group", part)
 		}
+
 		current = next
 	}
+
 	name := parts[len(parts)-1]
 	for index := 0; index < len(current.Content); index += 2 {
 		if current.Content[index].Value == name {
@@ -947,6 +1146,7 @@ func setConfigValue(document *yaml.Node, dottedPath string, value *yaml.Node) er
 			return nil
 		}
 	}
+
 	current.Content = append(current.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: name}, value)
 	return nil
 }
@@ -956,30 +1156,37 @@ func writeConfig(path string, document *yaml.Node) error {
 	if err != nil {
 		return fmt.Errorf("inspect config: %w", err)
 	}
+
 	body, err := marshalConfig(document)
 	if err != nil {
 		return fmt.Errorf("format config: %w", err)
 	}
+
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".config-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create temporary config: %w", err)
 	}
+
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	if err := temporary.Chmod(info.Mode().Perm()); err != nil {
 		temporary.Close()
 		return fmt.Errorf("set temporary config permissions: %w", err)
 	}
+
 	if _, err := temporary.Write(body); err != nil {
 		temporary.Close()
 		return fmt.Errorf("write temporary config: %w", err)
 	}
+
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close temporary config: %w", err)
 	}
+
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("replace config: %w", err)
 	}
+
 	return nil
 }
 
@@ -990,9 +1197,11 @@ func marshalConfig(value any) ([]byte, error) {
 	if err := encoder.Encode(value); err != nil {
 		return nil, err
 	}
+
 	if err := encoder.Close(); err != nil {
 		return nil, err
 	}
+
 	return []byte(body.String()), nil
 }
 
@@ -1001,6 +1210,7 @@ func noArgs(message string) cobra.PositionalArgs {
 		if len(args) == 0 {
 			return nil
 		}
+
 		return errors.New(message)
 	}
 }
@@ -1010,36 +1220,44 @@ func runGateway(ctx context.Context, path string, stderr io.Writer, debugChanged
 	if err != nil {
 		return err
 	}
+
 	cfg.Debug, err = resolveDebug(cfg.Debug, debugChanged, debugFlag, os.LookupEnv)
 	if err != nil {
 		return err
 	}
+
 	application, err := app.New(ctx, cfg)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
 		if closeErr := application.Close(); closeErr != nil {
 			err = errors.Join(err, errors.New("close application resources failed"))
 		}
 	}()
+
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
 		return errors.New("listen on configured address failed")
 	}
+
 	defer listener.Close()
+
 	logger := log.New(stderr, "mindctl: ", 0)
 	if cfg.SQLite.Retention == 0 {
 		logger.Print("raw-content retention=unlimited; disk usage can grow without bound; review storage and governance requirements")
 	} else {
 		logger.Printf("raw-content retention=%s", cfg.SQLite.Retention)
 	}
+
 	logger.Printf("listening on %s", listener.Addr())
 	server := &http.Server{
 		Handler: application.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute,
 		// HTTP internals can include peer-controlled data in diagnostics.
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
+
 	return serve(ctx, server, listener, 5*time.Second)
 }
 
@@ -1052,14 +1270,17 @@ func resolveDebug(
 	if flagChanged {
 		return flagValue, nil
 	}
+
 	value, exists := getenv("MINDCTL_DEBUG")
 	if !exists {
 		return configured, nil
 	}
+
 	enabled, err := strconv.ParseBool(value)
 	if err != nil {
 		return false, fmt.Errorf("parse MINDCTL_DEBUG: %w", err)
 	}
+
 	return enabled, nil
 }
 
@@ -1068,13 +1289,16 @@ func loadGatewayConfig(path string) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	statePath, err := config.ProvidersPath()
 	if err != nil {
 		return config.Config{}, err
 	}
+
 	if err := config.ApplyProvidersFile(statePath, &cfg); err != nil {
 		return config.Config{}, err
 	}
+
 	return cfg, nil
 }
 

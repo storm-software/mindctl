@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -625,7 +626,7 @@ func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
 
 func TestWriteHistoryTable(t *testing.T) {
 	created := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	longText := strings.Repeat("a", 40) + "\nmiddle\n" + strings.Repeat("b", 40)
+	longText := strings.Repeat("a", 39) + ".\nmiddle.\n" + strings.Repeat("b", 39) + "."
 	var stdout bytes.Buffer
 	if err := writeHistory(&stdout, []storage.HistoryRecord{{
 		ResponseID:             "resp_1",
@@ -661,10 +662,10 @@ func TestWriteHistoryTable(t *testing.T) {
 		{"CREATED", "RESPONSE ID", "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE"},
 		{
 			created.Local().Format(historyCreatedLayout), "resp_1", "failed", "", "anthropic/claude-small", "T2", "failed",
-			strings.Repeat("a", 40), "error: timeout",
+			strings.Repeat("a", 39) + ".", "error: timeout",
 		},
 		{"", "", "", "", "", "", "", "...", ""},
-		{"", "", "", "", "", "", "", strings.Repeat("b", 40), ""},
+		{"", "", "", "", "", "", "", strings.Repeat("b", 39) + ".", ""},
 		{"", "", "", "", "openai/gpt-large", "T4", "started", "", "[pending]"},
 	} {
 		if got := rows[index]; !slices.Equal(got, want) {
@@ -691,7 +692,7 @@ func TestWriteHistoryTable(t *testing.T) {
 	for _, row := range rows[1:] {
 		request = append(request, row[6])
 	}
-	if want := []string{strings.Repeat("a", 40), "middle", strings.Repeat("b", 40)}; !slices.Equal(request, want) {
+	if want := []string{strings.Repeat("a", 39) + ".", "middle.", strings.Repeat("b", 39) + "."}; !slices.Equal(request, want) {
 		t.Errorf("full history request lines = %q, want %q", request, want)
 	}
 	if got := rows[1][2]; got != "" {
@@ -717,6 +718,33 @@ func TestWrapHistoryValue(t *testing.T) {
 	}
 }
 
+func TestHistoryItemsOmitsSignatures(t *testing.T) {
+	items := []inference.Item{
+		{
+			Type:         "reasoning",
+			ProviderData: json.RawMessage(`{"native":[{"type":"thinking","thinking":"plan","signature":"c2lnbmF0dXJl"}]}`),
+		},
+		{
+			Type:         "function_call",
+			Name:         "lookup",
+			ProviderData: json.RawMessage(`{"part":{"thoughtSignature":"dGhvdWdodA=="}}`),
+		},
+	}
+
+	got, err := historyItems("response", items, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(strings.ToLower(got), "signature") {
+		t.Errorf("historyItems() = %q, want signatures removed", got)
+	}
+
+	if !strings.Contains(got, `"thinking":"plan"`) || !strings.Contains(got, `"Name":"lookup"`) {
+		t.Errorf("historyItems() = %q, want other fields kept", got)
+	}
+}
+
 // historyTableRows returns the trimmed cells of each header and data row in a
 // bordered history table.
 func historyTableRows(output string) [][]string {
@@ -734,33 +762,47 @@ func historyTableRows(output string) [][]string {
 	return rows
 }
 
-func TestTruncateHistoryValueKeepsWholeWords(t *testing.T) {
+func TestTruncateHistoryValueKeepsWholeSentencesAndJSONMembers(t *testing.T) {
+	first := "This first sentence runs well past thirty runes."
+	last := "This last sentence also runs past thirty runes!"
+	exactFirst := strings.Repeat("a", 29) + "."
+	exactLast := strings.Repeat("b", 29) + "?"
 	for _, test := range []struct {
 		name, value, want string
 	}{
 		{"short", "hello world", "hello world"},
 		{"collapses whitespace", "hello\n\t world", "hello world"},
 		{
-			"keeps cut at existing word boundaries",
-			strings.Repeat("word ", 28) + "end",
-			"word word word word word word ... word word word word word word end",
+			"extends cuts to whole sentences",
+			first + " Omitted middle. " + last,
+			first + " ... " + last,
 		},
 		{
-			"extends mid-word cuts to whole words",
-			strings.Repeat("a", 28) + " extended middle omitted middle extended " + strings.Repeat("b", 28),
-			strings.Repeat("a", 28) + " extended ... extended " + strings.Repeat("b", 28),
+			"exact sentence boundaries",
+			exactFirst + " Middle. " + exactLast,
+			exactFirst + " ... " + exactLast,
 		},
 		{
-			"exact boundaries",
-			strings.Repeat("a", 30) + " middle " + strings.Repeat("b", 30),
-			strings.Repeat("a", 30) + " ... " + strings.Repeat("b", 30),
+			"keeps a single sentence",
+			strings.Repeat("word ", 28) + "end.",
+			strings.Repeat("word ", 28) + "end.",
 		},
 		{
 			"keeps value when only a space would be omitted",
-			strings.Repeat("a", 40) + " " + strings.Repeat("b", 40),
-			strings.Repeat("a", 40) + " " + strings.Repeat("b", 40),
+			strings.Repeat("a", 39) + ". " + strings.Repeat("b", 40),
+			strings.Repeat("a", 39) + ". " + strings.Repeat("b", 40),
 		},
 		{"keeps single long word", strings.Repeat("x", 100), strings.Repeat("x", 100)},
+		{
+			"cuts JSON after commas and braces",
+			`{"alpha":"` + strings.Repeat("a", 20) + `","beta":"` + strings.Repeat("b", 20) + `","gamma":"` + strings.Repeat("c", 20) + `"}`,
+			`{"alpha":"` + strings.Repeat("a", 20) + `", ... "gamma":"` + strings.Repeat("c", 20) + `"}`,
+		},
+		{
+			"cuts joined JSON items before closing braces",
+			`{"type":"one","value":"` + strings.Repeat("a", 30) + `"} {"type":"two","value":"` + strings.Repeat("b", 30) + `"}`,
+			`{"type":"one","value":"` + strings.Repeat("a", 30) + `" ... "value":"` + strings.Repeat("b", 30) + `"}`,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := truncateHistoryValue(test.value, false); got != test.want {
