@@ -325,6 +325,23 @@ func TestStreamMergesFunctionArgumentDeltasWithCompletedItem(t *testing.T) {
 	}
 }
 
+func TestStreamCommitsIncompleteCompletionAtOutputLimit(t *testing.T) {
+	stream := &scriptedStream{events: []inference.Event{
+		{Type: "response.output_text.delta", ItemID: "item_1", Delta: "partial"},
+		{Type: "response.completed", Status: "incomplete", ProviderRequestID: "anthropic-request"},
+	}, err: io.EOF}
+	deps := newStreamDependencies(stream)
+	deps.models = deps.models[:1]
+
+	if err := deps.executor.Stream(context.Background(), deps.input(), deps.writer); err != nil {
+		t.Fatal(err)
+	}
+	committed := deps.conversations.committed
+	if committed.Status != "incomplete" || committed.ProviderRequestID != "anthropic-request" || deps.conversations.failCalls != 0 {
+		t.Fatalf("committed=%+v failCalls=%d", committed, deps.conversations.failCalls)
+	}
+}
+
 func TestStreamPreservesOpenAIItemIDsAndReasoningOutput(t *testing.T) {
 	stream := &scriptedStream{events: []inference.Event{
 		{Type: "response.output_item.done", ItemID: "msg_1", ItemType: "message", Role: "assistant", ItemText: "hello"},

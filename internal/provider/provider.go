@@ -50,9 +50,13 @@ type Error struct {
 func (e *Error) Error() string { return fmt.Sprintf("provider request failed (%s)", e.Kind) }
 func (e *Error) Unwrap() error { return e.Err }
 
-// IsSuccessfulCompletion reports the only provider terminal state that may be
-// committed as a completed gateway response.
-func IsSuccessfulCompletion(status string) bool { return status == "completed" }
+// IsSuccessfulCompletion reports the provider terminal states that may be
+// committed as a gateway response. An incomplete response stopped at the
+// caller's output limit; it is returned as-is because a retry or a different
+// model would stop at the same limit.
+func IsSuccessfulCompletion(status string) bool {
+	return status == "completed" || status == "incomplete"
+}
 
 // UnsuccessfulCompletionError keeps an unacceptable terminal state safe for
 // callers while leaving it retryable until stream output becomes visible.

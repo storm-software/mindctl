@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol
 
@@ -7,6 +8,8 @@ from fastapi.concurrency import run_in_threadpool
 from huggingface_hub import snapshot_download
 
 from .questions import native_questions
+
+logger = logging.getLogger(__name__)
 
 
 class Agent(Protocol):
@@ -32,6 +35,9 @@ class LayaService:
             loaded = await asyncio.to_thread(self._load_agent)
             self._agent = await loaded if inspect.isawaitable(loaded) else loaded
         except Exception:
+            # The service stays unavailable until restart; the cause must reach
+            # the container log or the failure is indistinguishable from a slow load.
+            logger.exception("laya: model load failed; classifier stays unavailable")
             self._load_failed = True
 
     async def close(self) -> None:

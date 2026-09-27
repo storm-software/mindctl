@@ -36,3 +36,18 @@ async def test_synchronous_loading_does_not_block_health_checks():
             assert (await client.get("/healthz")).status_code == 200
             assert (await client.get("/readyz")).status_code == 503
             loader.release.set(); await wait_until_ready(client)
+
+
+@pytest.mark.anyio
+async def test_model_load_failure_is_logged(caplog):
+    def failing_loader() -> FakeAgent: raise RuntimeError("snapshot_download: permission denied")
+    app = create_app(Settings(token="test-token"), failing_loader)
+    with caplog.at_level("ERROR", logger="mindctl_laya.service"):
+        async with app.router.lifespan_context(app):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                for _ in range(50):
+                    if any("model load failed" in r.message for r in caplog.records): break
+                    await asyncio.sleep(.01)
+                assert (await client.get("/readyz")).status_code == 503
+    record = next(r for r in caplog.records if "model load failed" in r.message)
+    assert record.exc_info and "permission denied" in caplog.text

@@ -176,7 +176,7 @@ func toResponsesRequestWithCustomToolContinuation(model domain.Model, request in
 		result.Input = append(result.Input, encoded)
 	}
 	for _, tool := range request.Tools {
-		result.Tools = append(result.Tools, encodeTool(tool))
+		result.Tools = append(result.Tools, encodeTool(providerCompatibleTool(model, tool)))
 	}
 	if request.TextVerbosity != "" || request.TextFormat != nil {
 		result.Text = &responseText{Verbosity: request.TextVerbosity}

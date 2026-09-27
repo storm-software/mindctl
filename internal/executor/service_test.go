@@ -257,6 +257,15 @@ func TestExecuteRejectsUnacceptableProviderStatusBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestExecuteCommitsIncompleteProviderStatus(t *testing.T) {
+	deps := fakeDeps()
+	deps.OpenAI.Result = inference.Result{ID: "provider-response", ProviderRequestID: "upstream-1", Status: "incomplete"}
+	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
+	if err != nil || got.Result.Status != "incomplete" || deps.Conversations.CommitCalls != 1 || deps.Conversations.FailCalls != 0 {
+		t.Fatalf("status=%q commit=%d failed=%d err=%v", got.Result.Status, deps.Conversations.CommitCalls, deps.Conversations.FailCalls, err)
+	}
+}
+
 type fakeDependencies struct {
 	Executor      *Service
 	Classifier    *fakeClassifier
