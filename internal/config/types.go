@@ -131,6 +131,82 @@ type RoutingConfig struct {
 	CodingFloors               []SignalFloorConfig `yaml:"coding_floors"`
 	RiskFloors                 []SignalFloorConfig `yaml:"risk_floors"`
 	UnderspecificationFloors   []SignalFloorConfig `yaml:"underspecification_floors"`
+	// ExpectedOutputTokens ranks candidates by this output size when no
+	// session usage has been observed. Zero keeps the legacy max_tokens estimate.
+	ExpectedOutputTokens int64         `yaml:"expected_output_tokens"`
+	Session              SessionConfig `yaml:"session"`
+}
+
+// Session defaults. MaxSessionHorizonTurns bounds how far ahead a sticky
+// model is priced.
+const (
+	DefaultSessionIdleTTL       = time.Hour
+	DefaultSessionHorizonTurns  = 3
+	DefaultSessionCacheHitRatio = .8
+	MaxSessionHorizonTurns      = 20
+)
+
+// SessionConfig controls routing affinity for stateless clients that identify
+// their session, such as Claude Code and Codex. An omitted field uses its
+// default, while an explicit zero is honored: a zero IdleTTL never expires.
+type SessionConfig struct {
+	Enabled              *bool         `yaml:"enabled"`
+	IdleTTL              time.Duration `yaml:"idle_ttl"`
+	HorizonTurns         int           `yaml:"horizon_turns"`
+	DefaultCacheHitRatio float64       `yaml:"default_cache_hit_ratio"`
+	idleTTLConfigured    bool
+	horizonConfigured    bool
+	hitRatioConfigured   bool
+}
+
+// UnmarshalYAML records which optional fields were present so explicit zeros
+// are distinguishable from omitted defaults.
+func (s *SessionConfig) UnmarshalYAML(value *yaml.Node) error {
+	type plain SessionConfig
+	var decoded plain
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = SessionConfig(decoded)
+	for index := 0; index+1 < len(value.Content); index += 2 {
+		switch value.Content[index].Value {
+		case "idle_ttl":
+			s.idleTTLConfigured = true
+		case "horizon_turns":
+			s.horizonConfigured = true
+		case "default_cache_hit_ratio":
+			s.hitRatioConfigured = true
+		}
+	}
+	return nil
+}
+
+// EnabledValue reports whether session affinity is enabled; it defaults to true.
+func (s SessionConfig) EnabledValue() bool { return s.Enabled == nil || *s.Enabled }
+
+// IdleTTLValue returns how long an idle session keeps its pin and floor.
+func (s SessionConfig) IdleTTLValue() time.Duration {
+	if s.idleTTLConfigured || s.IdleTTL != 0 {
+		return s.IdleTTL
+	}
+	return DefaultSessionIdleTTL
+}
+
+// HorizonTurnsValue returns how many future turns a sticky model is priced for.
+func (s SessionConfig) HorizonTurnsValue() int {
+	if s.horizonConfigured || s.HorizonTurns != 0 {
+		return s.HorizonTurns
+	}
+	return DefaultSessionHorizonTurns
+}
+
+// DefaultCacheHitRatioValue returns the cache hit ratio assumed before a
+// session has observed usage.
+func (s SessionConfig) DefaultCacheHitRatioValue() float64 {
+	if s.hitRatioConfigured || s.DefaultCacheHitRatio != 0 {
+		return s.DefaultCacheHitRatio
+	}
+	return DefaultSessionCacheHitRatio
 }
 
 // SignalFloorConfig raises, but never lowers, the deterministic policy floor
@@ -411,6 +487,19 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		}
 		if cfg.Routing.MaxLatency < 0 {
 			errs = append(errs, errors.New("maximum latency must not be negative"))
+		}
+		if cfg.Routing.ExpectedOutputTokens < 0 {
+			errs = append(errs, errors.New("routing expected_output_tokens must not be negative"))
+		}
+		session := cfg.Routing.Session
+		if session.IdleTTL < 0 {
+			errs = append(errs, errors.New("routing session idle_ttl must not be negative"))
+		}
+		if session.HorizonTurns < 0 || session.HorizonTurns > MaxSessionHorizonTurns {
+			errs = append(errs, fmt.Errorf("routing session horizon_turns must be in [0, %d]", MaxSessionHorizonTurns))
+		}
+		if !probability(session.DefaultCacheHitRatio) {
+			errs = append(errs, errors.New("routing session default_cache_hit_ratio must be finite and in [0, 1]"))
 		}
 		for _, rules := range []struct {
 			name  string

@@ -201,6 +201,53 @@ request. Disable it by setting `headroom.enabled: false` and restarting.
 Do not enable this option when another Headroom proxy already fronts Mindctl,
 or the request may be compressed twice.
 
+## Session affinity
+
+Claude Code and Codex resend their whole conversation on every request. If a
+session moves to a different model, the new provider has none of that
+conversation in its prompt cache, so the next request pays full price for its
+entire history. Mindctl therefore keeps each client session on one model:
+
+- **Sessions are identified by the client.** A session is identified by the
+  client's own session ID: Claude Code's `metadata.user_id` session or
+  `X-Claude-Code-Session-Id` header, Codex's `Session-Id` header, or
+  `X-Mindctl-Session-Id` for any other client. The ID must be 16 to 128
+  printable characters. The session key also covers the conversation's first
+  user message, so sub-agents that share a session ID are routed separately.
+- **Only automatically routed requests take part.** Only `mindctl-auto`
+  requests without `previous_response_id` join a session. Requests for a
+  specific model, such as Claude Code's Haiku background calls, never read or
+  change session state.
+- **Tool results keep the session's model.** A request that returns tool
+  results stays on the session's model without calling the classifier. A new
+  user message is classified again and can move the session to a higher tier,
+  never a lower one.
+- **Idle sessions start fresh.** A session idle longer than `idle_ttl` is
+  forgotten, because its provider cache has expired. Its next request is
+  routed afresh and may use a lower tier.
+- **Nothing identifying is stored.** Mindctl stores only a SHA-256 digest of
+  the session ID and first message, plus the session's model, tier, and last
+  token counts.
+
+When Mindctl chooses the model a session will stay on, it prices each
+candidate over `horizon_turns` further turns. Those turns are priced at the
+candidate's cache-read rate for the session's observed cache hit ratio, or
+`default_cache_hit_ratio` before one is observed. `expected_output_tokens`
+ranks candidates by a typical response size rather than the request's full
+`max_tokens`. After the first response, a session uses its own last output
+size instead. The per-request `max_direct_cost_usd` budget still applies to
+the full `max_tokens`.
+
+```yaml
+routing:
+  expected_output_tokens: 0 # 0 ranks by max_tokens
+  session:
+    enabled: true
+    idle_ttl: 1h # 0s never expires sessions
+    horizon_turns: 3
+    default_cache_hit_ratio: 0.8
+```
+
 ## Token usage savings
 
 Mindctl records content-free savings telemetry for every successful provider

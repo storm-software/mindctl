@@ -33,6 +33,12 @@ type ResponsesConfig struct {
 	// SavingsBaseline is the model ID automatically routed requests are
 	// priced against when estimating savings.
 	SavingsBaseline string
+	// SessionEnabled derives routing-session keys for automatic requests from
+	// stateless clients that identify their session.
+	SessionEnabled bool
+	// ExpectedOutputTokens and Session configure candidate cost estimates.
+	ExpectedOutputTokens int64
+	Session              executor.SessionSettings
 	// Logger receives debug diagnostics such as rejected requests. Nil disables them.
 	Logger *slog.Logger
 }
@@ -68,6 +74,7 @@ func (h *responsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
+	request.SessionKey = requestSessionKey(h.config, r, clientID, request, "")
 	input, err := h.input(r.Context(), clientID, request, controls)
 	if err != nil {
 		WriteError(w, err)
@@ -98,7 +105,8 @@ func (h *responsesHandler) input(ctx context.Context, clientID string, request i
 		MinTier: minTier, MaxTier: maxTier, SafeFallbackTier: h.config.SafeFallbackTier,
 		AllowEscalation:     controls.AllowEscalation,
 		ProviderCredentials: providerCredentials(ctx, h.config), ProviderAvailability: cloneBools(h.config.ProviderAvailability),
-		SavingsBaseline: h.config.SavingsBaseline,
+		SavingsBaseline:      h.config.SavingsBaseline,
+		ExpectedOutputTokens: h.config.ExpectedOutputTokens, Session: h.config.Session,
 	}, nil
 }
 

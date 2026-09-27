@@ -18,5 +18,6 @@ func FuzzPolicyNeverSelectsBelowFloor(f *testing.F) {
 		if modelTier >= floor && err != nil {
 			t.Fatalf("eligible tier %s rejected: %v", modelTier, err)
 		}
+		assertLegacyScores(t, got)
 	})
 }

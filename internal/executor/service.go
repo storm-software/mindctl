@@ -39,6 +39,18 @@ type Input struct {
 	// SavingsBaseline is the configured model ID automatically routed
 	// requests are priced against; empty uses the savings package default.
 	SavingsBaseline string
+	// ExpectedOutputTokens ranks candidates by this output size until a
+	// session has observed one; zero keeps the max_tokens worst case.
+	ExpectedOutputTokens int64
+	// Session prices a session-bound request's model over future turns.
+	Session SessionSettings
+}
+
+// SessionSettings configures how session-bound requests are priced.
+// DefaultCacheHitRatio applies until a session has observed usage.
+type SessionSettings struct {
+	HorizonTurns         int
+	DefaultCacheHitRatio float64
 }
 
 // Service owns no provider or storage state; its dependencies are injected so
@@ -118,16 +130,19 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 		"client_id", in.ClientID,
 		"response_id", turn.ResponseID,
 		"conversation_id", turn.ConversationID,
+		"session_bound", turn.SessionKey != "",
+		"session_key_prefix", sessionKeyPrefix(turn),
 		"requested_model", in.Request.Model,
 		"stream", false,
 	)
-	features := normalizedFeatures(in.Features, in.Request, turn)
+	features, session := sessionFeatures(in, turn)
 	s.traceFeatures(turn.ResponseID, features)
 	availability := providerAvailability(in.Models, in.ProviderAvailability, s.providers)
 	decisionInput := router.DecisionInput{
 		Features: features, Models: in.Models, MinTier: in.MinTier, MaxTier: in.MaxTier,
 		RequiredProvider:    in.RequiredProvider,
 		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: availability,
+		Session: session,
 	}
 
 	automatic := in.Request.Model == automaticModel
@@ -148,11 +163,14 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 			decisionInput.Pin = pin
 			decisionInput.Floor = pin.Floor
 			// A policy-confirmed compatible pin is deterministic and does not
-			// need a classifier call.
-			decision, err = s.policy.Decide(decisionInput)
-			if err == nil && decision.ModelID == pin.ModelID && decision.Provider == pin.Provider {
-				s.traceDecision(turn.ResponseID, decision, true)
-				return s.executeDecision(ctx, in, turn, decision)
+			// need a classifier call, except on a session's new user request.
+			if reason, skip := classifierSkipReason(turn, in.Request); skip {
+				decision, err = s.policy.Decide(decisionInput)
+				if err == nil && decision.ModelID == pin.ModelID && decision.Provider == pin.Provider {
+					s.trace("route.classifier.skipped", "response_id", turn.ResponseID, "reason", reason)
+					s.traceDecision(turn.ResponseID, decision, true)
+					return s.executeDecision(ctx, in, turn, decision)
+				}
 			}
 		}
 
@@ -204,7 +222,7 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request = providerScopedRequest(request, decision.Provider)
 	var compression headroom.Metrics
 	if s.compressor != nil {
-		compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, decision.Provider, request)
+		compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.AffinityID(), decision.Provider, request)
 		if compressErr != nil {
 			if failErr := s.conversations.FailAttempt(ctx, attempt, "", compressErr); failErr != nil {
 				return Output{}, errors.Join(compressErr, failErr)
@@ -443,6 +461,11 @@ func classifierPrompt(request inference.Request, turn conversation.Turn) string 
 	items := turn.Transcript
 	if len(items) == 0 {
 		items = request.Input
+	}
+	if turn.SessionKey != "" {
+		// The client resends its whole history each turn; the classifier
+		// judges only the request that opened this turn.
+		items = currentUserTurn(items)
 	}
 	for _, item := range items {
 		if item.Role == "user" && item.Text != "" {

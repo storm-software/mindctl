@@ -97,7 +97,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		request = providerScopedRequest(request, candidate.Provider)
 		var compression headroom.Metrics
 		if s.compressor != nil {
-			compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.ConversationID, candidate.Provider, request)
+			compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.AffinityID(), candidate.Provider, request)
 			if compressErr != nil {
 				if failErr := s.failStreamAttempt(ctx, attempt, "", compressErr); failErr != nil {
 					return errors.Join(compressErr, failErr)
@@ -233,15 +233,18 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 		"client_id", in.ClientID,
 		"response_id", turn.ResponseID,
 		"conversation_id", turn.ConversationID,
+		"session_bound", turn.SessionKey != "",
+		"session_key_prefix", sessionKeyPrefix(turn),
 		"requested_model", in.Request.Model,
 		"stream", true,
 	)
-	features := normalizedFeatures(in.Features, in.Request, turn)
+	features, session := sessionFeatures(in, turn)
 	s.traceFeatures(turn.ResponseID, features)
 	decisionInput := router.DecisionInput{
 		Features: features, Models: in.Models, MinTier: in.MinTier, MaxTier: in.MaxTier,
 		RequiredProvider:    in.RequiredProvider,
 		ProviderCredentials: in.ProviderCredentials, ProviderAvailability: providerAvailability(in.Models, in.ProviderAvailability, s.providers),
+		Session: session,
 	}
 	if in.Request.Model != automaticModel {
 		decisionInput.ModelID, decisionInput.Floor = in.Request.Model, turn.Floor
@@ -255,10 +258,13 @@ func (s *Service) streamDecision(ctx context.Context, in Input) (conversation.Tu
 	}
 	if pin := turnPin(turn); pin != nil {
 		decisionInput.Pin, decisionInput.Floor = pin, pin.Floor
-		decision, err := s.policy.Decide(decisionInput)
-		if err == nil && decision.ModelID == pin.ModelID && decision.Provider == pin.Provider {
-			s.traceDecision(turn.ResponseID, decision, true)
-			return turn, decision, nil
+		if reason, skip := classifierSkipReason(turn, in.Request); skip {
+			decision, err := s.policy.Decide(decisionInput)
+			if err == nil && decision.ModelID == pin.ModelID && decision.Provider == pin.Provider {
+				s.trace("route.classifier.skipped", "response_id", turn.ResponseID, "reason", reason)
+				s.traceDecision(turn.ResponseID, decision, true)
+				return turn, decision, nil
+			}
 		}
 	}
 	judgment, classifyErr := s.classify(ctx, in.Request, turn, features, in.Models)

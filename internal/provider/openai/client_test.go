@@ -796,3 +796,20 @@ func executeFixture(t *testing.T, response string) inference.Result {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }
+
+func TestAdaptersNeverForwardSessionKey(t *testing.T) {
+	const marker = "session-key-marker-0123456789abcdef"
+	request := inference.Request{Model: "m", SessionKey: marker, Input: []inference.Item{{Type: "message", Role: "user", Text: "hi"}}}
+	for name, encode := range map[string]func(domain.Model, inference.Request, bool) (responsesRequest, error){
+		"responses": toResponsesRequest, "codex": toCodexResponsesRequest,
+	} {
+		encoded, err := encode(openAIModel(), request, false)
+		if err != nil {
+			t.Fatalf("%s encode error = %v", name, err)
+		}
+		body, err := json.Marshal(encoded)
+		if err != nil || strings.Contains(string(body), marker) {
+			t.Fatalf("%s outbound body leaks the session key: %s (err=%v)", name, body, err)
+		}
+	}
+}

@@ -25,6 +25,7 @@ func (s *Service) traceFeatures(responseID string, features domain.RequestFeatur
 		"cached_input_tokens", features.CachedInputTokens,
 		"context_tokens", features.ContextTokens,
 		"max_output_tokens", features.MaxOutputTokens,
+		"expected_output_tokens", features.ExpectedOutputTokens,
 		"needs_text", features.NeedsText,
 		"needs_images", features.NeedsImages,
 		"needs_functions", features.NeedsFunctions,

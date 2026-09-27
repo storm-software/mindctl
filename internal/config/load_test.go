@@ -722,6 +722,61 @@ func TestValidateRejectsInvalidConfiguredPolicyValues(t *testing.T) {
 	}
 }
 
+func TestRoutingSessionConfigDefaultsAndValidation(t *testing.T) {
+	defaults, err := Read(writeConfig(t, "debug: false\n"))
+	if err != nil {
+		t.Fatalf("Read default config: %v", err)
+	}
+	session := defaults.Routing.Session
+	if !session.EnabledValue() || session.IdleTTLValue() != time.Hour || session.HorizonTurnsValue() != 3 ||
+		session.DefaultCacheHitRatioValue() != .8 || defaults.Routing.ExpectedOutputTokens != 0 {
+		t.Fatalf("default session config = enabled:%v ttl:%v horizon:%d ratio:%v expected output:%d",
+			session.EnabledValue(), session.IdleTTLValue(), session.HorizonTurnsValue(),
+			session.DefaultCacheHitRatioValue(), defaults.Routing.ExpectedOutputTokens)
+	}
+
+	explicit, err := Read(writeConfig(t, `routing:
+  expected_output_tokens: 4096
+  session:
+    enabled: false
+    idle_ttl: 0s
+    horizon_turns: 0
+    default_cache_hit_ratio: 0
+`))
+	if err != nil {
+		t.Fatalf("Read explicit config: %v", err)
+	}
+	session = explicit.Routing.Session
+	if session.EnabledValue() || session.IdleTTLValue() != 0 || session.HorizonTurnsValue() != 0 ||
+		session.DefaultCacheHitRatioValue() != 0 || explicit.Routing.ExpectedOutputTokens != 4096 {
+		t.Fatalf("explicit zero session config was replaced by defaults: %+v", explicit.Routing)
+	}
+
+	for _, tc := range []struct {
+		name, field string
+		mutate      func(*RoutingConfig)
+	}{
+		{"negative idle ttl", "idle_ttl", func(r *RoutingConfig) { r.Session.IdleTTL = -time.Second }},
+		{"negative horizon", "horizon_turns", func(r *RoutingConfig) { r.Session.HorizonTurns = -1 }},
+		{"horizon above maximum", "horizon_turns", func(r *RoutingConfig) { r.Session.HorizonTurns = 21 }},
+		{"negative hit ratio", "default_cache_hit_ratio", func(r *RoutingConfig) { r.Session.DefaultCacheHitRatio = -.1 }},
+		{"hit ratio above one", "default_cache_hit_ratio", func(r *RoutingConfig) { r.Session.DefaultCacheHitRatio = 1.1 }},
+		{"nonfinite hit ratio", "default_cache_hit_ratio", func(r *RoutingConfig) { r.Session.DefaultCacheHitRatio = math.NaN() }},
+		{"negative expected output", "expected_output_tokens", func(r *RoutingConfig) { r.ExpectedOutputTokens = -1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(&cfg.Routing)
+			if err := cfg.Validate(testEnv); err == nil || !strings.Contains(err.Error(), tc.field) {
+				t.Fatalf("Validate() error = %v; want %s error", err, tc.field)
+			}
+		})
+	}
+	if _, err := Read("../../config.example.yaml"); err != nil {
+		t.Fatalf("shipped example is not readable: %v", err)
+	}
+}
+
 func TestClaudeMessagesRequiresSeparateClientHeaderAndOAuthProvider(t *testing.T) {
 	for _, test := range []struct {
 		name      string

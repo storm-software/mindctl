@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/conversation"
@@ -226,5 +227,67 @@ func TestCommitAndResumePreservesCanonicalTranscriptAndPin(t *testing.T) {
 	resumed, err := svc.Resume(context.Background(), "client-a", started.ResponseID)
 	if err != nil || resumed.Pin.ModelID != "gpt-test" || transcriptText(resumed.Transcript) != "hello\nhi" {
 		t.Fatalf("resumed=%+v err=%v", resumed, err)
+	}
+}
+
+func TestStartSeedsSessionTurn(t *testing.T) {
+	keys, err := contentcrypto.New("test", map[string][]byte{"test": bytes.Repeat([]byte{1}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sqlite.Open(context.Background(), sqlite.Options{Path: filepath.Join(t.TempDir(), "sessions.db"), Keyring: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	svc := conversation.NewWithOptions(db, conversation.Options{SessionIdleTTL: time.Hour})
+	ctx := context.Background()
+
+	first := requestWithText("hi")
+	first.SessionKey = "session-digest"
+	turn, err := svc.Start(ctx, "client", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.SessionKey != "session-digest" || turn.SessionUsage != nil || turn.AffinityID() != "session-digest" {
+		t.Fatalf("first session turn key=%q usage=%+v affinity=%q", turn.SessionKey, turn.SessionUsage, turn.AffinityID())
+	}
+	pin := router.Pin{Provider: "anthropic", ModelID: "claude-sonnet", Floor: domain.T2}
+	if _, err := svc.BeginAttempt(ctx, turn, router.Decision{Provider: pin.Provider, ModelID: pin.ModelID, Tier: pin.Floor}); err != nil {
+		t.Fatal(err)
+	}
+	result := resultWithText("hello")
+	result.Usage = inference.Usage{Known: true, InputTokens: 10, CachedInputTokens: 90, OutputTokens: 7}
+	if err := svc.CommitResult(ctx, turn, pin, result); err != nil {
+		t.Fatal(err)
+	}
+
+	second := requestWithText("hi")
+	second.Input = append(second.Input, result.Output[0], inference.Item{Type: "message", Role: "user", Text: "more"})
+	second.SessionKey = "session-digest"
+	next, err := svc.Start(ctx, "client", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Pin != pin || next.SessionUsage == nil || next.SessionUsage.CacheRead != 90 || next.SessionUsage.Output != 7 {
+		t.Fatalf("seeded turn pin=%+v usage=%+v", next.Pin, next.SessionUsage)
+	}
+	if len(next.Transcript) != len(second.Input) || next.ConversationID == turn.ConversationID {
+		t.Fatalf("seeded turn reused the prior transcript: conversation=%s items=%d", next.ConversationID, len(next.Transcript))
+	}
+
+	unbound, err := svc.Start(ctx, "client", requestWithText("unbound"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	continued := requestWithText("again")
+	continued.PreviousResponseID = unbound.ResponseID
+	continued.SessionKey = "session-digest"
+	resumed, err := svc.Start(ctx, "client", continued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.SessionKey != "" || resumed.Pin != (router.Pin{}) || resumed.AffinityID() != resumed.ConversationID {
+		t.Fatalf("previous_response_id turn joined a session: key=%q pin=%+v", resumed.SessionKey, resumed.Pin)
 	}
 }

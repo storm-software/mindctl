@@ -345,3 +345,15 @@ func executeGeminiErrorFixture(t *testing.T, response string) error {
 	_, err := newGemini(server.URL).Execute(context.Background(), geminiModel(), textRequest())
 	return err
 }
+
+func TestAdaptersNeverForwardSessionKey(t *testing.T) {
+	const marker = "session-key-marker-0123456789abcdef"
+	request, err := toGenerateRequest(geminiModel(), inference.Request{Model: "m", SessionKey: marker, Input: []inference.Item{{Type: "message", Role: "user", Text: "hi"}}})
+	if err != nil {
+		t.Fatalf("toGenerateRequest() error = %v", err)
+	}
+	body, err := json.Marshal(request)
+	if err != nil || strings.Contains(string(body), marker) {
+		t.Fatalf("outbound body leaks the session key: %s (err=%v)", body, err)
+	}
+}

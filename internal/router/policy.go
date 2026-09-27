@@ -58,6 +58,23 @@ type DecisionInput struct {
 	MinTier, MaxTier                          *domain.Tier
 	Judgment                                  *domain.ClassifierJudgment
 	ProviderCredentials, ProviderAvailability map[string]bool
+	// Session prices candidates as the sticky model of a routing session.
+	// Nil scores a single turn.
+	Session *SessionEstimate
+}
+
+// MaxSessionHorizonTurns bounds SessionEstimate.HorizonTurns.
+const MaxSessionHorizonTurns = 20
+
+// SessionEstimate describes a routing session a newly selected model will be
+// pinned to. The selected model pays a cold cache write on this turn and is
+// then priced for HorizonTurns further turns at CacheHitRatio, the fraction
+// of input read from the provider's prompt cache. Observed reports whether the
+// ratio came from session usage rather than a configured default.
+type SessionEstimate struct {
+	HorizonTurns  int
+	CacheHitRatio float64
+	Observed      bool
 }
 
 type Pin struct {
@@ -109,6 +126,14 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 	}
 	floor := in.Floor
 	decision.Reasons = append(decision.Reasons, fmt.Sprintf("request floor: %s", floor))
+	if in.Session != nil {
+		source := "default"
+		if in.Session.Observed {
+			source = "observed"
+		}
+		decision.Reasons = append(decision.Reasons, fmt.Sprintf("session horizon: turns=%d cache_hit_ratio=%.2f", in.Session.HorizonTurns, in.Session.CacheHitRatio),
+			"session cache hit ratio source: "+source)
+	}
 	raise := func(next domain.Tier, source string) {
 		if next > floor {
 			decision.Reasons = append(decision.Reasons, fmt.Sprintf("%s raised floor from %s to %s", source, floor, next))
@@ -159,7 +184,7 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 	}
 	candidates := make([]candidate, 0, len(eligible))
 	for _, model := range eligible {
-		score, err := scoreCandidate(model, in.Features, in.TaskType, p.config)
+		score, err := scoreCandidate(model, in.Features, in.TaskType, p.config, in.Session)
 		if err != nil {
 			decision.Rejections = append(decision.Rejections, Rejection{ModelID: model.ID, Code: RejectEstimate, Codes: []RejectionCode{RejectEstimate}, Reasons: []string{err.Error()}})
 			continue
@@ -175,7 +200,8 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 		if p.config.MaxDirectCost > 0 && score.DirectCost > p.config.MaxDirectCost {
 			add(RejectDirectCost, "direct cost exceeds the configured maximum")
 		}
-		if p.config.MaxExpectedCost > 0 && score.ExpectedTotalCost > p.config.MaxExpectedCost {
+		// The expected-cost budget is per request, so it excludes future turns.
+		if p.config.MaxExpectedCost > 0 && score.ExpectedTotalCost-score.HorizonCost > p.config.MaxExpectedCost {
 			add(RejectExpectedCost, "expected total cost exceeds the configured maximum")
 		}
 		if p.config.MaxLatency > 0 && score.Latency > p.config.MaxLatency {
@@ -258,8 +284,11 @@ func (p *Policy) validate(in DecisionInput) error {
 		}
 	}
 	f := in.Features
-	if f.InputTokens < 0 || f.CachedInputTokens < 0 || f.ContextTokens < 0 || f.MaxOutputTokens < 0 {
+	if f.InputTokens < 0 || f.CachedInputTokens < 0 || f.ContextTokens < 0 || f.MaxOutputTokens < 0 || f.ExpectedOutputTokens < 0 {
 		return fmt.Errorf("request token counts must be nonnegative")
+	}
+	if s := in.Session; s != nil && (s.HorizonTurns < 0 || s.HorizonTurns > MaxSessionHorizonTurns || !probability(s.CacheHitRatio)) {
+		return fmt.Errorf("invalid session horizon or cache hit ratio")
 	}
 	if in.Pin != nil && !in.Pin.Floor.Valid() {
 		return fmt.Errorf("invalid conversation pin floor")

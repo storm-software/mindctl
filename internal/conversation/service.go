@@ -30,7 +30,14 @@ type Service interface {
 }
 
 type service struct {
-	store storage.ConversationRepository
+	store   storage.ConversationRepository
+	options Options
+}
+
+// Options configures routing sessions. SessionIdleTTL is how long an idle
+// session keeps its pin and floor; zero never expires.
+type Options struct {
+	SessionIdleTTL time.Duration
 }
 
 type trustedNativeInputKey struct{}
@@ -42,15 +49,34 @@ func WithTrustedNativeInput(ctx context.Context) context.Context {
 }
 
 // New creates a service over the encrypted durable storage boundary.
-func New(store storage.ConversationRepository) Service { return &service{store: store} }
+func New(store storage.ConversationRepository) Service { return NewWithOptions(store, Options{}) }
 
+// NewWithOptions creates a service with routing-session settings.
+func NewWithOptions(store storage.ConversationRepository, options Options) Service {
+	return &service{store: store, options: options}
+}
+
+// Turn is one response in a conversation. SessionKey is set when the
+// conversation is bound to a routing session, whose last observed usage is
+// SessionUsage.
 type Turn struct {
 	ConversationID, ResponseID, ClientID string
+	SessionKey                           string
 	Pin                                  router.Pin
 	Floor                                domain.Tier
 	Transcript                           []inference.Item
+	SessionUsage                         *storage.SessionUsage
 	origins                              []string
 	replay                               []inference.Item
+}
+
+// AffinityID identifies the turn's cache affinity scope: its routing session
+// when bound, otherwise its conversation.
+func (t Turn) AffinityID() string {
+	if t.SessionKey != "" {
+		return t.SessionKey
+	}
+	return t.ConversationID
 }
 
 // TranscriptFor returns portable canonical content. Opaque continuation data
@@ -84,7 +110,11 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 	}
 
 	conversationID := randomID("conv_")
+	sessionKey := request.SessionKey
 	if request.PreviousResponseID != "" {
+		// Gateway-owned continuation keeps its conversation; a session key
+		// never rebinds it.
+		sessionKey = ""
 		previous, err := s.Resume(ctx, clientID, request.PreviousResponseID)
 		if err != nil {
 			return Turn{}, err
@@ -113,7 +143,8 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 			ID: responseID, ConversationID: conversationID, CreatedAt: now, Status: "pending",
 			ExplicitModel: request.Model != "" && request.Model != inference.AutomaticModel,
 		},
-		Input: input,
+		Input:      input,
+		SessionKey: sessionKey, SessionIdleTTL: s.options.SessionIdleTTL,
 	}); err != nil {
 		return Turn{}, err
 	}
@@ -136,7 +167,10 @@ func (s *service) resume(ctx context.Context, clientID, responseID string) (Turn
 	if err != nil {
 		return Turn{}, err
 	}
-	turn := Turn{ConversationID: record.Conversation.ID, ResponseID: record.Response.ID, ClientID: clientID, Floor: record.Conversation.Floor}
+	turn := Turn{
+		ConversationID: record.Conversation.ID, ResponseID: record.Response.ID, ClientID: clientID,
+		SessionKey: record.Conversation.SessionKey, Floor: record.Conversation.Floor, SessionUsage: record.SessionUsage,
+	}
 	if record.Conversation.Pin != nil {
 		turn.Pin = *record.Conversation.Pin
 	}

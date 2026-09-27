@@ -30,6 +30,9 @@ type Request struct {
 	// AnthropicExtra holds caller Messages fields without a portable meaning.
 	// They are forwarded verbatim and only to Anthropic.
 	AnthropicExtra map[string]json.RawMessage
+	// SessionKey is the gateway-internal routing-session digest. It is never
+	// serialized, so no provider or sidecar receives it.
+	SessionKey string `json:"-"`
 }
 
 type ThinkingOptions struct {

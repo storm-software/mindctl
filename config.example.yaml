@@ -35,9 +35,10 @@ classifier:
 sqlite:
   path: mindctl.db
   # A finite duration enables app-owned deletion of encrypted content only.
-  # Set this to 0s for unlimited retention, which starts no maintenance task.
+  # Set this to 0s for unlimited retention, which never deletes content.
   retention: 720h
-  # Used only for finite retention; 0s uses the bounded one-minute default.
+  # Used for finite retention and routing session expiry; 0s uses the bounded
+  # one-minute default.
   retention_maintenance_interval: 15m
 
 encryption:
@@ -62,6 +63,21 @@ routing:
   coding_floors: []
   risk_floors: []
   underspecification_floors: []
+  # Output tokens used to rank candidates before a session has observed usage.
+  # 0 keeps the legacy estimate of the request's full max_tokens.
+  expected_output_tokens: 0
+  # Session affinity keeps a Claude Code or Codex session on one model so the
+  # provider prompt cache stays warm. Sessions are keyed by a digest of the
+  # client's session ID and first user message; neither is stored.
+  session:
+    enabled: true
+    # An idle session is forgotten, so its next turn is routed afresh and may
+    # use a lower tier. 0s never expires sessions.
+    idle_ttl: 1h
+    # Future turns a newly pinned model is priced for, with cache reads.
+    horizon_turns: 3
+    # Cache hit ratio assumed until the session's first response is observed.
+    default_cache_hit_ratio: 0.8
 
 providers:
   # Supported provider IDs are openai, anthropic, gemini, deepseek, and meta. Authentication

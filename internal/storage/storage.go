@@ -60,11 +60,20 @@ type Tx interface {
 // ConversationRecord contains durable, non-content conversation state.
 // Pin and Floor deliberately remain outside encrypted payloads so routing can
 // resume safely without decrypting captured content.
+// SessionKey is the routing session the conversation was seeded from, if any.
 type ConversationRecord struct {
 	ID, ClientID string
 	CreatedAt    time.Time
 	Pin          *router.Pin
 	Floor        domain.Tier
+	SessionKey   string
+}
+
+// SessionUsage is the last committed turn's token usage in a routing session,
+// split into disjoint classes as reported by Provider.
+type SessionUsage struct {
+	Provider                                     string
+	UncachedInput, CacheRead, CacheWrite, Output int64
 }
 
 // ResponseRecord is a gateway-owned response identifier within a conversation.
@@ -87,16 +96,23 @@ type TranscriptItem struct {
 }
 
 // ConversationTurn is the complete portable transcript available at a response.
+// SessionUsage is the bound routing session's last observed usage, if any.
 type ConversationTurn struct {
 	Conversation ConversationRecord
 	Response     ResponseRecord
 	Transcript   []TranscriptItem
+	SessionUsage *SessionUsage
 }
 
+// NewTurn creates a response in a conversation. A non-empty SessionKey binds a
+// new conversation to that routing session and seeds its pin and floor unless
+// the session has been idle longer than SessionIdleTTL; zero never expires.
 type NewTurn struct {
-	Conversation ConversationRecord
-	Response     ResponseRecord
-	Input        []inference.Item
+	Conversation   ConversationRecord
+	Response       ResponseRecord
+	Input          []inference.Item
+	SessionKey     string
+	SessionIdleTTL time.Duration
 }
 
 // ProviderAttempt is written before any provider I/O. Decision is telemetry;
@@ -219,5 +235,8 @@ type Repository interface {
 	// DeleteExpiredContent deletes blobs strictly older than now-retention and
 	// returns the blob count. Zero retention is unlimited and performs no work.
 	DeleteExpiredContent(context.Context, time.Duration, time.Time) (int64, error)
+	// DeleteExpiredSessions deletes routing sessions idle strictly longer than
+	// idleTTL at now and returns the count. Zero idleTTL performs no work.
+	DeleteExpiredSessions(context.Context, time.Duration, time.Time) (int64, error)
 	Ready(context.Context) error
 }

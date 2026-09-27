@@ -121,3 +121,28 @@ func TestBaselineSelection(t *testing.T) {
 		t.Error("empty catalog produced a baseline")
 	}
 }
+
+func TestTokenClassesMatchSavingsPricing(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider                     string
+		usage                              inference.Usage
+		uncached, read, write, outputCount int64
+	}{
+		{"anthropic reports disjoint counts", "anthropic", inference.Usage{Known: true, InputTokens: 10, CachedInputTokens: 900, CacheWriteInputTokens: 90, OutputTokens: 5}, 10, 900, 90, 5},
+		{"openai reports cached as a subset", "openai", inference.Usage{Known: true, InputTokens: 1000, CachedInputTokens: 900, OutputTokens: 5}, 100, 900, 0, 5},
+		{"gemini caps cached at input", "gemini", inference.Usage{Known: true, InputTokens: 100, CachedInputTokens: 900, OutputTokens: 5}, 0, 100, 0, 5},
+		{"negative counts are zero", "openai", inference.Usage{Known: true, InputTokens: -1, CachedInputTokens: -1, OutputTokens: -1}, 0, 0, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			uncached, read, write, output := TokenClasses(tc.provider, tc.usage)
+			if uncached != tc.uncached || read != tc.read || write != tc.write || output != tc.outputCount {
+				t.Fatalf("TokenClasses() = %d, %d, %d, %d; want %d, %d, %d, %d", uncached, read, write, output, tc.uncached, tc.read, tc.write, tc.outputCount)
+			}
+			pricing := domain.Pricing{InputPerMillion: 1e6, CachedInputPerMillion: 1e5, CacheWriteInputPerMillion: 1e7, OutputPerMillion: 1e8}
+			want := float64(uncached) + float64(read)*.1 + float64(write)*10 + float64(output)*100
+			if got := Cost(pricing, tc.usage, tc.provider); math.Abs(got-want) > 1e-9 {
+				t.Fatalf("Cost() = %v; want %v from token classes", got, want)
+			}
+		})
+	}
+}

@@ -89,21 +89,29 @@ func Cost(pricing domain.Pricing, usage inference.Usage, provider string) float6
 	if !usage.Known {
 		return 0
 	}
-	input := max(usage.InputTokens, 0)
-	cached := max(usage.CachedInputTokens, 0)
-	written := max(usage.CacheWriteInputTokens, 0)
-	uncached := input
-	if provider != "anthropic" {
-		cached = min(cached, input)
-		written = min(written, input-cached)
-		uncached = input - cached - written
-	}
+	uncached, cached, written, output := TokenClasses(provider, usage)
 	cost := float64(uncached)/1e6*pricing.InputPerMillion +
 		float64(cached)/1e6*pricing.CachedInputPerMillion +
 		float64(written)/1e6*pricing.CacheWriteInputPerMillion +
-		float64(max(usage.OutputTokens, 0))/1e6*pricing.OutputPerMillion +
+		float64(output)/1e6*pricing.OutputPerMillion +
 		pricing.PerRequestUSD
 	return finite(cost)
+}
+
+// TokenClasses splits usage as reported by provider into disjoint uncached
+// input, cache-read, cache-write, and output token counts. Negative counts are
+// treated as zero.
+func TokenClasses(provider string, usage inference.Usage) (uncached, cacheRead, cacheWrite, output int64) {
+	input := max(usage.InputTokens, 0)
+	cacheRead = max(usage.CachedInputTokens, 0)
+	cacheWrite = max(usage.CacheWriteInputTokens, 0)
+	uncached = input
+	if provider != "anthropic" {
+		cacheRead = min(cacheRead, input)
+		cacheWrite = min(cacheWrite, input-cacheRead)
+		uncached = input - cacheRead - cacheWrite
+	}
+	return uncached, cacheRead, cacheWrite, max(usage.OutputTokens, 0)
 }
 
 // Baseline selects the model a request is compared against. An explicitly

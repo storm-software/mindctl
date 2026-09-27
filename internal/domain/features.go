@@ -9,7 +9,10 @@ import (
 type RequestFeatures struct {
 	InputTokens, ContextTokens, MaxOutputTokens int64
 	// CachedInputTokens is a subset of InputTokens, capped at InputTokens for pricing.
-	CachedInputTokens                      int64
+	CachedInputTokens int64
+	// ExpectedOutputTokens estimates the response size for ranking candidates.
+	// Zero ranks by the worst case, MaxOutputTokens.
+	ExpectedOutputTokens                   int64
 	NeedsText, NeedsImages, NeedsFunctions bool
 	NeedsJSONSchema, NeedsHostedTools      bool
 	NeedsNativeTools                       bool
@@ -22,6 +25,9 @@ type RequestFeatures struct {
 func (f RequestFeatures) Normalize() RequestFeatures {
 	if f.InputTokens >= 0 && f.CachedInputTokens > f.InputTokens {
 		f.CachedInputTokens = f.InputTokens
+	}
+	if f.MaxOutputTokens > 0 && f.ExpectedOutputTokens > f.MaxOutputTokens {
+		f.ExpectedOutputTokens = f.MaxOutputTokens
 	}
 	tools := append([]string(nil), f.HostedToolTypes...)
 	sort.Strings(tools)

@@ -234,7 +234,7 @@ func TestNewInitializesStorageKeyringAndStableHandler(t *testing.T) {
 		t.Fatal("web_search capability was not mapped")
 	}
 	var migrations int
-	if err := a.store.SQL().QueryRow("SELECT count(*) FROM schema_migrations").Scan(&migrations); err != nil || migrations != 6 {
+	if err := a.store.SQL().QueryRow("SELECT count(*) FROM schema_migrations").Scan(&migrations); err != nil || migrations != 7 {
 		t.Fatalf("migrations=%d err=%v", migrations, err)
 	}
 	old, err := contentcrypto.New("old", map[string][]byte{"old": bytes.Repeat([]byte{2}, 32)})
@@ -836,6 +836,8 @@ func TestFiniteRetentionMaintenanceDeletesOnlyEncryptedContent(t *testing.T) {
 
 func TestZeroRetentionDoesNotStartMaintenance(t *testing.T) {
 	cfg, env := fixture(t)
+	disabled := false
+	cfg.Routing.Session.Enabled = &disabled
 	clock := newManualRetentionClock(time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC))
 	a, err := newWithLookupWithMaintenance(context.Background(), cfg, lookup(env), retentionMaintenanceOptions{Clock: clock})
 	if err != nil {
@@ -844,6 +846,39 @@ func TestZeroRetentionDoesNotStartMaintenance(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	if a.maintenance != nil || clock.newTickerCalls != 0 {
 		t.Fatalf("unlimited retention started maintenance: maintenance=%v ticks=%d", a.maintenance, clock.newTickerCalls)
+	}
+}
+
+func TestRetentionMaintenanceExpiresSessionsWithUnlimitedContent(t *testing.T) {
+	cfg, env := fixture(t)
+	clock := newManualRetentionClock(time.Date(2026, 9, 21, 15, 0, 0, 0, time.UTC))
+	completed := make(chan error, 1)
+	var sessionTTL time.Duration
+	contentCalls := 0
+	var a *App
+	var err error
+	a, err = newWithLookupWithMaintenance(context.Background(), cfg, lookup(env), retentionMaintenanceOptions{
+		Clock: clock,
+		DeleteExpiredContent: func(context.Context, time.Duration, time.Time) (int64, error) {
+			contentCalls++
+			return 0, nil
+		},
+		DeleteExpiredSessions: func(ctx context.Context, ttl time.Duration, now time.Time) (int64, error) {
+			sessionTTL = ttl
+			return a.store.DeleteExpiredSessions(ctx, ttl, now)
+		},
+		OnCycleComplete: func(err error) { completed <- err },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	clock.Tick()
+	if err := <-completed; err != nil {
+		t.Fatal(err)
+	}
+	if sessionTTL != time.Hour || contentCalls != 0 {
+		t.Fatalf("maintenance session ttl=%v content calls=%d; want 1h and none", sessionTTL, contentCalls)
 	}
 }
 

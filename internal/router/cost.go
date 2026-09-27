@@ -9,20 +9,28 @@ import (
 )
 
 // CandidateScore is the reproducible USD estimate for a hard-eligible model,
-// including models subsequently rejected by policy budgets. EscalationCost is
-// the conditional cost of escalation; ExpectedTotalCost weights it by failure.
+// including models subsequently rejected by policy budgets. DirectCost is the
+// worst case for this request, with max_tokens of output. ExpectedTurnCost uses
+// the expected output instead, and HorizonCost prices the session turns a
+// sticky model is expected to serve next. EscalationCost is the conditional
+// cost of escalation; ExpectedTotalCost weights it by failure and ranks
+// candidates.
 type CandidateScore struct {
 	ModelID, Provider                              string
 	DirectCost, FailureProbability, EscalationCost float64
+	ExpectedTurnCost, HorizonCost                  float64
 	SuccessProbability                             float64
 	LatencyPenalty, ExpectedTotalCost              float64
 	Latency                                        time.Duration
 }
 
-func scoreCandidate(model domain.Model, features domain.RequestFeatures, task domain.TaskType, cfg PolicyConfig) (CandidateScore, error) {
+func scoreCandidate(model domain.Model, features domain.RequestFeatures, task domain.TaskType, cfg PolicyConfig, session *SessionEstimate) (CandidateScore, error) {
 	score := CandidateScore{ModelID: model.ID, Provider: model.Provider, Latency: model.LatencyP95, EscalationCost: cfg.FailureEscalationCost}
 	prices := []float64{model.Pricing.InputPerMillion, model.Pricing.CachedInputPerMillion, model.Pricing.OutputPerMillion, model.Pricing.PerRequestUSD}
 
+	if session != nil {
+		prices = append(prices, model.Pricing.CacheWriteInputPerMillion)
+	}
 	for _, price := range prices {
 		if !nonnegativeFinite(price) {
 			return score, fmt.Errorf("model price must be finite and nonnegative")
@@ -41,10 +49,27 @@ func scoreCandidate(model domain.Model, features domain.RequestFeatures, task do
 	cached := min(features.CachedInputTokens, features.InputTokens)
 	uncached := features.InputTokens - cached
 	score.DirectCost = float64(uncached)/1e6*prices[0] + float64(cached)/1e6*prices[1] + float64(features.MaxOutputTokens)/1e6*prices[2] + prices[3]
+	output := features.MaxOutputTokens
+	if features.ExpectedOutputTokens > 0 {
+		output = features.ExpectedOutputTokens
+	}
+	if session == nil {
+		// Same expression as DirectCost, so it is bit-identical without an
+		// expected output estimate.
+		score.ExpectedTurnCost = float64(uncached)/1e6*prices[0] + float64(cached)/1e6*prices[1] + float64(output)/1e6*prices[2] + prices[3]
+	} else {
+		outputCost := float64(output)/1e6*prices[2] + prices[3]
+		// A newly pinned model writes the whole prompt to its cache, then
+		// reads the cached share and writes the rest on each later turn.
+		input, write := float64(features.InputTokens)/1e6, prices[4]
+		warmInput := session.CacheHitRatio*input*prices[1] + (1-session.CacheHitRatio)*input*write
+		score.ExpectedTurnCost = input*write + outputCost
+		score.HorizonCost = float64(session.HorizonTurns) * (warmInput + outputCost)
+	}
 	score.FailureProbability = 1 - prior
 	score.SuccessProbability = prior
 	score.LatencyPenalty = model.LatencyP95.Seconds() * cfg.LatencyPenaltyPerSecond
-	score.ExpectedTotalCost = score.DirectCost + score.FailureProbability*score.EscalationCost + score.LatencyPenalty
+	score.ExpectedTotalCost = score.ExpectedTurnCost + score.HorizonCost + score.FailureProbability*score.EscalationCost + score.LatencyPenalty
 
 	if !nonnegativeFinite(score.ExpectedTotalCost) {
 		return score, fmt.Errorf("model cost estimate overflows")

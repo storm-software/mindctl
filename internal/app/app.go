@@ -186,7 +186,12 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 			return nil, err
 		}
 	}
-	a.maintenance = newRetentionMaintenance(cfg.SQLite.Retention, cfg.SQLite.RetentionMaintenanceInterval, a.store.DeleteExpiredContent, maintenanceOptions)
+	var sessionIdleTTL time.Duration
+	if cfg.Routing.Session.EnabledValue() {
+		sessionIdleTTL = cfg.Routing.Session.IdleTTLValue()
+	}
+	a.maintenance = newRetentionMaintenance(cfg.SQLite.Retention, sessionIdleTTL, cfg.SQLite.RetentionMaintenanceInterval,
+		a.store.DeleteExpiredContent, a.store.DeleteExpiredSessions, maintenanceOptions)
 	classifierToken, _ := getenv(cfg.Classifier.TokenEnv)
 	a.classifier = laya.NewClient(cfg.Classifier, classifierToken, a.httpClient)
 	var debugLogger *slog.Logger
@@ -212,7 +217,7 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		a.classifier,
 		a.policy,
 		provider.NewRegistry(providers),
-		conversation.New(a.store),
+		conversation.NewWithOptions(a.store, conversation.Options{SessionIdleTTL: cfg.Routing.Session.IdleTTLValue()}),
 		compressor,
 		debugLogger,
 	)
@@ -225,8 +230,14 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
 		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
 		ChatGPTOAuthProviders: chatGPTOAuthProviders, ClaudeOAuthProviders: claudeOAuthProviders,
-		SavingsBaseline: cfg.Savings.BaselineModel,
-		Logger:          debugLogger,
+		SavingsBaseline:      cfg.Savings.BaselineModel,
+		SessionEnabled:       cfg.Routing.Session.EnabledValue(),
+		ExpectedOutputTokens: cfg.Routing.ExpectedOutputTokens,
+		Session: executor.SessionSettings{
+			HorizonTurns:         cfg.Routing.Session.HorizonTurnsValue(),
+			DefaultCacheHitRatio: cfg.Routing.Session.DefaultCacheHitRatioValue(),
+		},
+		Logger: debugLogger,
 	}
 	responses := api.NewResponsesHandler(a.executor, responsesConfig)
 	responses = api.CaptureClaudeOAuth(responses)

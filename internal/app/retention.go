@@ -38,20 +38,24 @@ func (t wallRetentionTicker) C() <-chan time.Time { return t.Ticker.C }
 // retentionMaintenanceOptions are construction seams. Production leaves them
 // zero-valued; tests inject a clock and inspect bounded real storage work.
 type retentionMaintenanceOptions struct {
-	Clock                retentionClock
-	DeleteExpiredContent func(context.Context, time.Duration, time.Time) (int64, error)
-	OperationTimeout     time.Duration
-	OnCycleComplete      func(error)
+	Clock                 retentionClock
+	DeleteExpiredContent  func(context.Context, time.Duration, time.Time) (int64, error)
+	DeleteExpiredSessions func(context.Context, time.Duration, time.Time) (int64, error)
+	OperationTimeout      time.Duration
+	OnCycleComplete       func(error)
 }
 
-// retentionMaintenance deletes only encrypted content through the repository.
-// It holds no raw content and stores only a failure bit, so readiness cannot
-// accidentally retain or expose a storage error that might contain data.
+// retentionMaintenance deletes only encrypted content and idle routing
+// sessions through the repository. It holds no raw content and stores only a
+// failure bit, so readiness cannot accidentally retain or expose a storage
+// error that might contain data.
 type retentionMaintenance struct {
 	retention        time.Duration
+	sessionIdleTTL   time.Duration
 	clock            retentionClock
 	ticker           retentionTicker
 	deleteExpired    func(context.Context, time.Duration, time.Time) (int64, error)
+	deleteSessions   func(context.Context, time.Duration, time.Time) (int64, error)
 	operationTimeout time.Duration
 	onCycleComplete  func(error)
 	cancel           context.CancelFunc
@@ -61,8 +65,14 @@ type retentionMaintenance struct {
 	failed bool
 }
 
-func newRetentionMaintenance(retention, interval time.Duration, deleteExpired func(context.Context, time.Duration, time.Time) (int64, error), options retentionMaintenanceOptions) *retentionMaintenance {
-	if retention <= 0 {
+// newRetentionMaintenance returns nil when neither content retention nor
+// session expiry is finite.
+func newRetentionMaintenance(
+	retention, sessionIdleTTL, interval time.Duration,
+	deleteExpired, deleteSessions func(context.Context, time.Duration, time.Time) (int64, error),
+	options retentionMaintenanceOptions,
+) *retentionMaintenance {
+	if retention <= 0 && sessionIdleTTL <= 0 {
 		return nil
 	}
 	clock := options.Clock
@@ -79,9 +89,13 @@ func newRetentionMaintenance(retention, interval time.Duration, deleteExpired fu
 	if options.DeleteExpiredContent != nil {
 		deleteExpired = options.DeleteExpiredContent
 	}
+	if options.DeleteExpiredSessions != nil {
+		deleteSessions = options.DeleteExpiredSessions
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &retentionMaintenance{
-		retention: retention, clock: clock, ticker: clock.NewTicker(interval), deleteExpired: deleteExpired,
+		retention: retention, sessionIdleTTL: sessionIdleTTL, clock: clock, ticker: clock.NewTicker(interval),
+		deleteExpired: deleteExpired, deleteSessions: deleteSessions,
 		operationTimeout: operationTimeout, onCycleComplete: options.OnCycleComplete, cancel: cancel, done: make(chan struct{}),
 	}
 	go m.run(ctx)
@@ -102,7 +116,17 @@ func (m *retentionMaintenance) run(ctx context.Context) {
 
 func (m *retentionMaintenance) runOnce(parent context.Context) {
 	ctx, cancel := context.WithTimeout(parent, m.operationTimeout)
-	_, err := m.deleteExpired(ctx, m.retention, m.clock.Now())
+	now := m.clock.Now()
+	var errs []error
+	if m.retention > 0 {
+		_, err := m.deleteExpired(ctx, m.retention, now)
+		errs = append(errs, err)
+	}
+	if m.sessionIdleTTL > 0 {
+		_, err := m.deleteSessions(ctx, m.sessionIdleTTL, now)
+		errs = append(errs, err)
+	}
+	err := errors.Join(errs...)
 	cancel()
 	m.mu.Lock()
 	m.failed = err != nil

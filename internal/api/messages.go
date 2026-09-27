@@ -53,6 +53,7 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		decoded.Request.Model = id
 	}
+	decoded.Request.SessionKey = requestSessionKey(h.config, r, clientID, decoded.Request, messagesMetadataUserID(decoded.Request.AnthropicExtra))
 	ctx := r.Context()
 	if decoded.Native {
 		ctx = conversation.WithTrustedNativeInput(ctx)
@@ -63,7 +64,8 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Models: append([]domain.Model(nil), h.config.Models...), MinTier: minTier, MaxTier: maxTier,
 		SafeFallbackTier:    h.config.SafeFallbackTier,
 		ProviderCredentials: providerCredentials(ctx, h.config), ProviderAvailability: cloneBools(h.config.ProviderAvailability),
-		SavingsBaseline: h.config.SavingsBaseline,
+		SavingsBaseline:      h.config.SavingsBaseline,
+		ExpectedOutputTokens: h.config.ExpectedOutputTokens, Session: h.config.Session,
 	}
 	if decoded.Request.Stream {
 		writer := &messagesSSEWriter{response: w}

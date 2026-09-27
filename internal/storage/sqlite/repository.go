@@ -122,9 +122,11 @@ func (tx *transaction) insertRequest(record storage.RequestRecord) error {
 	for position, score := range record.Decision.Candidates {
 		if _, err := tx.conn.ExecContext(tx.ctx, `INSERT INTO candidate_scores
 			(request_id, position, model_id, provider, direct_cost, failure_probability, escalation_cost,
-			success_probability, latency_penalty, expected_total_cost, latency_ns) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			success_probability, latency_penalty, expected_total_cost, latency_ns, expected_turn_cost, horizon_cost)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			record.ID, position, score.ModelID, score.Provider, score.DirectCost, score.FailureProbability, score.EscalationCost,
-			score.SuccessProbability, score.LatencyPenalty, score.ExpectedTotalCost, int64(score.Latency)); err != nil {
+			score.SuccessProbability, score.LatencyPenalty, score.ExpectedTotalCost, int64(score.Latency),
+			score.ExpectedTurnCost, score.HorizonCost); err != nil {
 			return failure("insert candidate score", err)
 		}
 	}
@@ -402,7 +404,8 @@ func (db *DB) readHistoryAttempts(
 
 func readCandidates(ctx context.Context, conn *sql.Conn, record *storage.RequestRecord) error {
 	rows, err := conn.QueryContext(ctx, `SELECT model_id, provider, direct_cost, failure_probability,
-		escalation_cost, success_probability, latency_penalty, expected_total_cost, latency_ns
+		escalation_cost, success_probability, latency_penalty, expected_total_cost, latency_ns,
+		COALESCE(expected_turn_cost, direct_cost), horizon_cost
 		FROM candidate_scores WHERE request_id = ? ORDER BY position`, record.ID)
 	if err != nil {
 		return failure("read candidate scores", err)
@@ -411,7 +414,8 @@ func readCandidates(ctx context.Context, conn *sql.Conn, record *storage.Request
 	for rows.Next() {
 		var score router.CandidateScore
 		if err := rows.Scan(&score.ModelID, &score.Provider, &score.DirectCost, &score.FailureProbability,
-			&score.EscalationCost, &score.SuccessProbability, &score.LatencyPenalty, &score.ExpectedTotalCost, &score.Latency); err != nil {
+			&score.EscalationCost, &score.SuccessProbability, &score.LatencyPenalty, &score.ExpectedTotalCost, &score.Latency,
+			&score.ExpectedTurnCost, &score.HorizonCost); err != nil {
 			return failure("decode candidate score", err)
 		}
 		record.Decision.Candidates = append(record.Decision.Candidates, score)
@@ -507,9 +511,24 @@ func (db *DB) CreateTurn(ctx context.Context, turn storage.NewTurn) error {
 		if conversationCreated.IsZero() {
 			conversationCreated = created
 		}
+		floor := turn.Conversation.Floor
+		var pin *router.Pin
+		var sessionKey any
+		if turn.SessionKey != "" {
+			seededPin, seededFloor, err := seedSession(ctx, conn, turn.Conversation.ClientID, turn.SessionKey, turn.SessionIdleTTL, created)
+			if err != nil {
+				return err
+			}
+			pin, floor, sessionKey = seededPin, max(floor, seededFloor), turn.SessionKey
+		}
+		var pinProvider, pinModel, pinTier any
+		if pin != nil {
+			pinProvider, pinModel, pinTier = pin.Provider, pin.ModelID, pin.Floor
+		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO conversations
-			(id, client_id, created_at, escalation_floor) VALUES (?, ?, ?, ?)
-			ON CONFLICT(id) DO NOTHING`, turn.Conversation.ID, turn.Conversation.ClientID, conversationCreated.UnixNano(), turn.Conversation.Floor); err != nil {
+			(id, client_id, created_at, escalation_floor, pin_provider, pin_model_id, pin_tier, session_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO NOTHING`, turn.Conversation.ID, turn.Conversation.ClientID, conversationCreated.UnixNano(), floor,
+			pinProvider, pinModel, pinTier, sessionKey); err != nil {
 			return failure("insert conversation", err)
 		}
 		var owner string
@@ -535,13 +554,13 @@ func (db *DB) GetConversationTurn(ctx context.Context, clientID, responseID stri
 	var turn storage.ConversationTurn
 	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
 		var conversationCreated, responseCreated int64
-		var provider, model sql.NullString
+		var provider, model, sessionKey sql.NullString
 		var pinTier sql.NullInt64
 		if err := conn.QueryRowContext(ctx, `SELECT c.id, c.client_id, c.created_at, c.pin_provider, c.pin_model_id,
-			c.pin_tier, c.escalation_floor, r.id, r.conversation_id, r.sequence, r.created_at, r.status
+			c.pin_tier, c.escalation_floor, c.session_key, r.id, r.conversation_id, r.sequence, r.created_at, r.status
 			FROM responses r JOIN conversations c ON c.id = r.conversation_id
 			WHERE c.client_id = ? AND r.id = ?`, clientID, responseID).Scan(
-			&turn.Conversation.ID, &turn.Conversation.ClientID, &conversationCreated, &provider, &model, &pinTier, &turn.Conversation.Floor,
+			&turn.Conversation.ID, &turn.Conversation.ClientID, &conversationCreated, &provider, &model, &pinTier, &turn.Conversation.Floor, &sessionKey,
 			&turn.Response.ID, &turn.Response.ConversationID, &turn.Response.Sequence, &responseCreated, &turn.Response.Status); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return storage.ErrNotFound
@@ -555,6 +574,14 @@ func (db *DB) GetConversationTurn(ctx context.Context, clientID, responseID stri
 				return failure("read conversation pin", errors.New("incomplete stored pin"))
 			}
 			turn.Conversation.Pin = &router.Pin{Provider: provider.String, ModelID: model.String, Floor: domain.Tier(pinTier.Int64)}
+		}
+		if sessionKey.Valid {
+			turn.Conversation.SessionKey = sessionKey.String
+			usage, err := readSessionUsage(ctx, conn, clientID, sessionKey.String)
+			if err != nil {
+				return err
+			}
+			turn.SessionUsage = usage
 		}
 		return db.readTranscript(ctx, conn, &turn)
 	})
@@ -633,6 +660,10 @@ func (db *DB) BeginProviderAttempt(ctx context.Context, attempt storage.Provider
 			if _, err := conn.ExecContext(ctx, `UPDATE conversations SET pin_provider = ?, pin_model_id = ?, pin_tier = ?, escalation_floor = ? WHERE id = ?`,
 				attempt.Decision.Provider, attempt.Decision.ModelID, attempt.Decision.Tier, floor, conversationID); err != nil {
 				return failure("persist initial conversation pin", err)
+			}
+			pin := router.Pin{Provider: attempt.Decision.Provider, ModelID: attempt.Decision.ModelID, Floor: attempt.Decision.Tier}
+			if err := syncSession(ctx, conn, conversationID, &pin, floor, nil, time.Now().UTC()); err != nil {
+				return err
 			}
 		}
 		decision, err := json.Marshal(attempt.Decision)
@@ -713,6 +744,14 @@ func (db *DB) CommitConversationResult(ctx context.Context, clientID, responseID
 			pin.Provider, pin.ModelID, tier, floor, conversationID); err != nil {
 			return failure("update conversation pin", err)
 		}
+		var usage *storage.SessionUsage
+		if result.Usage.Known {
+			uncached, cacheRead, cacheWrite, output := savings.TokenClasses(pin.Provider, result.Usage)
+			usage = &storage.SessionUsage{Provider: pin.Provider, UncachedInput: uncached, CacheRead: cacheRead, CacheWrite: cacheWrite, Output: output}
+		}
+		if err := syncSession(ctx, conn, conversationID, &pin, floor, usage, now); err != nil {
+			return err
+		}
 		if _, err := conn.ExecContext(ctx, "UPDATE responses SET status = 'completed' WHERE id = ?", responseID); err != nil {
 			return failure("complete response", err)
 		}
@@ -759,8 +798,124 @@ func (db *DB) RaiseConversationFloor(ctx context.Context, clientID, responseID s
 		if _, err := conn.ExecContext(ctx, "UPDATE conversations SET escalation_floor = ? WHERE id = ?", floor, conversationID); err != nil {
 			return failure("raise conversation floor", err)
 		}
+		return syncSession(ctx, conn, conversationID, nil, floor, nil, time.Now().UTC())
+	})
+}
+
+// seedSession returns a routing session's live pin and floor for a new
+// conversation. It creates a missing session, resets one idle strictly longer
+// than idleTTL (zero never expires), and marks the session active at now.
+func seedSession(ctx context.Context, conn *sql.Conn, clientID, key string, idleTTL time.Duration, now time.Time) (*router.Pin, domain.Tier, error) {
+	var updated int64
+	var provider, model sql.NullString
+	var pinTier sql.NullInt64
+	var floor domain.Tier
+	err := conn.QueryRowContext(ctx, `SELECT updated_at, pin_provider, pin_model_id, pin_tier, escalation_floor
+		FROM routing_sessions WHERE client_id = ? AND session_key = ?`, clientID, key).Scan(&updated, &provider, &model, &pinTier, &floor)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := conn.ExecContext(ctx, `INSERT INTO routing_sessions (client_id, session_key, created_at, updated_at, escalation_floor)
+			VALUES (?, ?, ?, ?, 0)`, clientID, key, now.UnixNano(), now.UnixNano()); err != nil {
+			return nil, 0, failure("insert routing session", err)
+		}
+		return nil, 0, nil
+	case err != nil:
+		return nil, 0, failure("read routing session", err)
+	case idleTTL > 0 && now.Sub(time.Unix(0, updated)) > idleTTL:
+		if _, err := conn.ExecContext(ctx, `UPDATE routing_sessions SET created_at = ?, updated_at = ?, pin_provider = NULL,
+			pin_model_id = NULL, pin_tier = NULL, escalation_floor = 0, last_usage_provider = '', last_uncached_input_tokens = 0,
+			last_cache_read_tokens = 0, last_cache_write_tokens = 0, last_output_tokens = 0
+			WHERE client_id = ? AND session_key = ?`, now.UnixNano(), now.UnixNano(), clientID, key); err != nil {
+			return nil, 0, failure("reset expired routing session", err)
+		}
+		return nil, 0, nil
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE routing_sessions SET updated_at = MAX(updated_at, ?)
+		WHERE client_id = ? AND session_key = ?`, now.UnixNano(), clientID, key); err != nil {
+		return nil, 0, failure("touch routing session", err)
+	}
+	if !provider.Valid || !model.Valid || !pinTier.Valid {
+		return nil, floor, nil
+	}
+	return &router.Pin{Provider: provider.String, ModelID: model.String, Floor: domain.Tier(pinTier.Int64)}, floor, nil
+}
+
+// syncSession writes a conversation's pin, floor, and last usage back to its
+// routing session, if it has one. The session floor only rises and its pin is
+// replaced only at an equal or higher tier, so concurrent conversations in one
+// session cannot lower it. A nil pin or usage leaves that state unchanged.
+func syncSession(ctx context.Context, conn *sql.Conn, conversationID string, pin *router.Pin, floor domain.Tier, usage *storage.SessionUsage, now time.Time) error {
+	var clientID string
+	var key sql.NullString
+	if err := conn.QueryRowContext(ctx, "SELECT client_id, session_key FROM conversations WHERE id = ?", conversationID).Scan(&clientID, &key); err != nil {
+		return failure("read conversation session", err)
+	}
+	if !key.Valid {
+		return nil
+	}
+	var pinProvider, pinModel, pinTier any
+	if pin != nil {
+		pinProvider, pinModel, pinTier = pin.Provider, pin.ModelID, pin.Floor
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO routing_sessions
+		(client_id, session_key, created_at, updated_at, pin_provider, pin_model_id, pin_tier, escalation_floor)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(client_id, session_key) DO UPDATE SET
+			updated_at = MAX(routing_sessions.updated_at, excluded.updated_at),
+			escalation_floor = MAX(routing_sessions.escalation_floor, excluded.escalation_floor),
+			pin_provider = CASE WHEN excluded.pin_tier IS NOT NULL AND (routing_sessions.pin_tier IS NULL OR excluded.pin_tier >= routing_sessions.pin_tier)
+				THEN excluded.pin_provider ELSE routing_sessions.pin_provider END,
+			pin_model_id = CASE WHEN excluded.pin_tier IS NOT NULL AND (routing_sessions.pin_tier IS NULL OR excluded.pin_tier >= routing_sessions.pin_tier)
+				THEN excluded.pin_model_id ELSE routing_sessions.pin_model_id END,
+			pin_tier = CASE WHEN excluded.pin_tier IS NOT NULL AND (routing_sessions.pin_tier IS NULL OR excluded.pin_tier >= routing_sessions.pin_tier)
+				THEN excluded.pin_tier ELSE routing_sessions.pin_tier END`,
+		clientID, key.String, now.UnixNano(), now.UnixNano(), pinProvider, pinModel, pinTier, floor); err != nil {
+		return failure("update routing session", err)
+	}
+	if usage == nil {
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE routing_sessions SET last_usage_provider = ?, last_uncached_input_tokens = ?,
+		last_cache_read_tokens = ?, last_cache_write_tokens = ?, last_output_tokens = ? WHERE client_id = ? AND session_key = ?`,
+		usage.Provider, usage.UncachedInput, usage.CacheRead, usage.CacheWrite, usage.Output, clientID, key.String); err != nil {
+		return failure("record routing session usage", err)
+	}
+	return nil
+}
+
+func readSessionUsage(ctx context.Context, conn *sql.Conn, clientID, key string) (*storage.SessionUsage, error) {
+	var usage storage.SessionUsage
+	err := conn.QueryRowContext(ctx, `SELECT last_usage_provider, last_uncached_input_tokens, last_cache_read_tokens,
+		last_cache_write_tokens, last_output_tokens FROM routing_sessions WHERE client_id = ? AND session_key = ?`, clientID, key).Scan(
+		&usage.Provider, &usage.UncachedInput, &usage.CacheRead, &usage.CacheWrite, &usage.Output)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && usage.Provider == "") {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, failure("read routing session usage", err)
+	}
+	return &usage, nil
+}
+
+// DeleteExpiredSessions removes routing sessions idle strictly longer than
+// idleTTL. Their conversations remain; only affinity is forgotten.
+func (db *DB) DeleteExpiredSessions(ctx context.Context, idleTTL time.Duration, now time.Time) (int64, error) {
+	if idleTTL <= 0 {
+		return 0, nil
+	}
+	var removed int64
+	err := inTransaction(ctx, db.db, true, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, "DELETE FROM routing_sessions WHERE updated_at < ?", now.Add(-idleTTL).UnixNano())
+		if err != nil {
+			return failure("delete expired routing sessions", err)
+		}
+		removed, err = result.RowsAffected()
+		if err != nil {
+			return failure("count expired routing sessions", err)
+		}
 		return nil
 	})
+	return removed, err
 }
 
 func insertTranscriptItems(ctx context.Context, conn *sql.Conn, keyring *contentcrypto.Keyring, responseID, provider string, items []inference.Item, created time.Time) error {

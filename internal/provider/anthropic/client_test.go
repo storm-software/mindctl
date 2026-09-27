@@ -396,3 +396,15 @@ func TestAnthropicErrorStatusDropsMessageEchoingRequestContent(t *testing.T) {
 		t.Fatalf("err=%#v", normalized)
 	}
 }
+
+func TestAdaptersNeverForwardSessionKey(t *testing.T) {
+	const marker = "session-key-marker-0123456789abcdef"
+	request, err := toMessagesRequest(anthropicModel(), inference.Request{Model: "m", SessionKey: marker, Input: []inference.Item{{Type: "message", Role: "user", Text: "hi"}}}, false)
+	if err != nil {
+		t.Fatalf("toMessagesRequest() error = %v", err)
+	}
+	body, err := json.Marshal(request)
+	if err != nil || strings.Contains(string(body), marker) {
+		t.Fatalf("outbound body leaks the session key: %s (err=%v)", body, err)
+	}
+}
