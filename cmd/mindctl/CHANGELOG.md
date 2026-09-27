@@ -2,6 +2,16 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.33](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.33) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Ensure we do not cutoff min-word in history truncation ([d5ca8f7](https://github.com/storm-software/mindctl/commit/d5ca8f7))
+
+### Features
+
+- **mindctl:** Store explicit model selection history ([a292e1e](https://github.com/storm-software/mindctl/commit/a292e1e))
+
 ## [0.1.32](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.32) (09/27/2026)
 
 ### Bug Fixes
