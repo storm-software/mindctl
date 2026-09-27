@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.34](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.34) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Improve display of history command ([aa14d84](https://github.com/storm-software/mindctl/commit/aa14d84))
+
 ## [0.1.33](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.33) (09/27/2026)
 
 ### Bug Fixes
