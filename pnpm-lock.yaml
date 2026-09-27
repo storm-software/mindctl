@@ -3709,28 +3709,17 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@storm-software/build-tools@0.158.304':
-    resolution: {integrity: sha512-1qFyfHGQ5qWuiIERM1+aoiC0XfPx+Con/Fmtbfz4yB/HbkcKFy/msr69FCWO9SRvGXwWgG7PphX2cULHGlQK4Q==}
+  '@storm-software/build-tools@0.158.305':
+    resolution: {integrity: sha512-jcMyhQIg4Sc4bQBdT0TCWFaDu+SsCLU69lBeO/QDSaWBPFyP5OLvbXWkIHQ1lDlOerZzm8wd1UtLNDt19+7uNw==}
     peerDependencies:
       '@nx/devkit': 23.1.1
       '@nx/js': 23.1.1
       nx: 23.1.1
       typescript: ^6.0.3
 
-  '@storm-software/config-tools@1.190.144':
-    resolution: {integrity: sha512-j72Js9x1thIpNcisRHyIdmk+U0Tkn505PSM7+19Yn0R03Mbg1vf+l/uZqyEYa6dHmy5mTpl4N7y2jwB2CkBzfg==}
-    hasBin: true
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
-
   '@storm-software/config-tools@1.190.145':
     resolution: {integrity: sha512-WxwQIy/YD4fU6QCa/BWIiK08NcyFdWWCCT8QQ3uLFhS4qzHyrEWkxhwpNJYH/Jn5NTcPEZA9znGupts0AIwV8Q==}
     hasBin: true
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
-
-  '@storm-software/config@1.138.80':
-    resolution: {integrity: sha512-jlXw4gKccpwVPAyG8QmJ0vYSSa+O+YN4y8M7VyhgqY1fCBf9tXawPrJfcJY7a1DsgHRd8GNUNy67PwkboUxigw==}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -5833,8 +5822,8 @@ packages:
     resolution: {integrity: sha512-yuToqVvRrj6pfDXREyQAAv8SkAEk/8GS3jQRTiUMm66TVtBYmqQeoEjL2Lmq8Rpo6271vH76InTChTitEAm65w==}
     engines: {node: '>=22'}
 
-  copy-anything@4.1.3:
-    resolution: {integrity: sha512-i6UIxTjvO3VPljHh+Kb3OS3idg+B91qNN+POpY07lwLSrFo0583PwbBxmIBBlYT6yvf5Cpjx8pG+GDqTIHCOSg==}
+  copy-anything@4.1.4:
+    resolution: {integrity: sha512-/LLeW0CtsoSybVkEpYjifB2Pis8DUSuwY7QD9FiR98fWkdbdrACw3ilckfnAHMecQ+RFEdZlRt6eCXhYHJbl/g==}
     engines: {node: '>=18'}
 
   copy-text-to-clipboard@2.2.0:
@@ -12178,7 +12167,7 @@ snapshots:
 
   '@babel/generator@8.0.0-rc.6':
     dependencies:
-      '@babel/parser': 8.0.6
+      '@babel/parser': 8.0.0-rc.6
       '@babel/types': 8.0.6
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
@@ -13413,6 +13402,7 @@ snapshots:
     dependencies:
       '@emnapi/wasi-threads': 1.2.2
       tslib: 2.8.1
+    optional: true
 
   '@emnapi/core@1.4.5':
     dependencies:
@@ -13433,6 +13423,7 @@ snapshots:
   '@emnapi/runtime@1.11.2':
     dependencies:
       tslib: 2.8.1
+    optional: true
 
   '@emnapi/runtime@1.4.5':
     dependencies:
@@ -13455,6 +13446,7 @@ snapshots:
   '@emnapi/wasi-threads@1.2.2':
     dependencies:
       tslib: 2.8.1
+    optional: true
 
   '@emotion/hash@0.8.0': {}
 
@@ -14311,8 +14303,8 @@ snapshots:
 
   '@napi-rs/wasm-runtime@0.2.4':
     dependencies:
-      '@emnapi/core': 1.11.2
-      '@emnapi/runtime': 1.11.2
+      '@emnapi/core': 1.4.5
+      '@emnapi/runtime': 1.4.5
       '@tybys/wasm-util': 0.9.0
 
   '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)':
@@ -15543,7 +15535,7 @@ snapshots:
   '@powerlines/nx@0.13.253(@babel/traverse@7.29.8)(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@farmfe/cli@1.0.5)(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(@storm-software/pnpm-tools@0.7.159(zod@4.6.5))(@types/node@25.9.8)(@typescript/native-preview@7.0.0-dev.20251218.3)(nx@22.7.5(debug@4.4.3))(oxc-resolver@11.24.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(tsdown@0.22.14(@typescript/native-preview@7.0.0-dev.20251218.3)(oxc-resolver@11.24.2)(tsx@4.23.15)(typescript@6.0.3))(typescript@6.0.3)(valibot@1.5.0(typescript@6.0.3))(verdaccio@6.0.5(typanion@3.14.0))(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)':
     dependencies:
       '@nx/devkit': 23.2.1(nx@22.7.5(debug@4.4.3))
-      '@storm-software/build-tools': 0.158.304(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
+      '@storm-software/build-tools': 0.158.305(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
       '@storm-software/config': 1.138.81(zod@4.6.5)
       '@storm-software/config-tools': 1.190.145(zod@4.6.5)
       '@storm-software/workspace-tools': 1.297.14(@babel/traverse@7.29.8)(@storm-software/pnpm-tools@0.7.159(zod@4.6.5))(@types/node@25.9.8)(nx@22.7.5(debug@4.4.3))(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))
@@ -15649,7 +15641,7 @@ snapshots:
       '@rollup/plugin-inject': 5.0.5(rollup@4.63.5)
       '@rollup/plugin-node-resolve': 16.0.3(rollup@4.63.5)
       '@rollup/plugin-replace': 6.0.3(rollup@4.63.5)
-      '@storm-software/build-tools': 0.158.304(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
+      '@storm-software/build-tools': 0.158.305(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
       '@stryke/convert': 0.7.46
       '@stryke/env': 0.20.134(zod@4.6.5)
       '@stryke/fs': 0.33.117(zod@4.6.5)
@@ -15966,12 +15958,12 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@storm-software/build-tools@0.158.304(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)':
+  '@storm-software/build-tools@0.158.305(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)':
     dependencies:
       '@nx/devkit': 23.2.1(nx@22.7.5(debug@4.4.3))
       '@nx/js': 22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0))
-      '@storm-software/config': 1.138.80(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.144(zod@4.6.5)
+      '@storm-software/config': 1.138.81(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
       '@swc/core': 1.7.26
       glob: 11.1.0
       nx: 22.7.5(debug@4.4.3)
@@ -15983,22 +15975,6 @@ snapshots:
       - '@swc/helpers'
       - magicast
       - zod
-
-  '@storm-software/config-tools@1.190.144(zod@4.6.5)':
-    dependencies:
-      '@ltd/j-toml': 1.38.0
-      '@storm-software/config': 1.138.80(zod@4.6.5)
-      c12: 2.0.4
-      chalk: 4.1.2
-      commander: 12.1.0
-      date-fns: 4.4.0
-      defu: 6.1.7
-      giget: 1.2.5
-      jiti: 2.7.0
-      sqlite: 5.1.1
-      zod: 4.6.5
-    transitivePeerDependencies:
-      - magicast
 
   '@storm-software/config-tools@1.190.145(zod@4.6.5)':
     dependencies:
@@ -16015,10 +15991,6 @@ snapshots:
       zod: 4.6.5
     transitivePeerDependencies:
       - magicast
-
-  '@storm-software/config@1.138.80(zod@4.6.5)':
-    dependencies:
-      zod: 4.6.5
 
   '@storm-software/config@1.138.81(zod@4.6.5)':
     dependencies:
@@ -17591,7 +17563,7 @@ snapshots:
   axios@1.16.0(debug@4.4.3):
     dependencies:
       follow-redirects: 1.16.0(debug@4.4.3)
-      form-data: 4.0.6
+      form-data: 4.0.5
       proxy-from-env: 2.1.0
     transitivePeerDependencies:
       - debug
@@ -17865,11 +17837,11 @@ snapshots:
 
   brace-expansion@5.0.6:
     dependencies:
-      balanced-match: 4.0.4
+      balanced-match: 4.0.3
 
   brace-expansion@5.0.8:
     dependencies:
-      balanced-match: 4.0.4
+      balanced-match: 4.0.3
 
   braces@3.0.3:
     dependencies:
@@ -17985,7 +17957,7 @@ snapshots:
 
   bundle-name@4.1.0:
     dependencies:
-      run-applescript: 7.1.0
+      run-applescript: 7.0.0
 
   bundle-name@4.1.1:
     dependencies:
@@ -18468,7 +18440,7 @@ snapshots:
 
   cookie@2.0.1: {}
 
-  copy-anything@4.1.3: {}
+  copy-anything@4.1.4: {}
 
   copy-text-to-clipboard@2.2.0: {}
 
@@ -18830,8 +18802,8 @@ snapshots:
 
   default-browser@5.2.1:
     dependencies:
-      bundle-name: 4.1.1
-      default-browser-id: 5.0.1
+      bundle-name: 4.1.0
+      default-browser-id: 5.0.0
 
   default-browser@5.5.1:
     dependencies:
@@ -18995,7 +18967,7 @@ snapshots:
 
   dotenv-expand@12.0.3:
     dependencies:
-      dotenv: 16.6.1
+      dotenv: 16.4.7
 
   dotenv@16.4.7: {}
 
@@ -19255,7 +19227,7 @@ snapshots:
       es-errors: 1.3.0
       get-intrinsic: 1.3.0
       has-tostringtag: 1.0.2
-      hasown: 2.0.4
+      hasown: 2.0.2
 
   es-shim-unscopables@1.1.0:
     dependencies:
@@ -19848,6 +19820,10 @@ snapshots:
     dependencies:
       walk-up-path: 4.0.0
 
+  fdir@6.5.0(picomatch@4.0.4):
+    optionalDependencies:
+      picomatch: 4.0.4
+
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
@@ -19947,7 +19923,7 @@ snapshots:
       asynckit: 0.4.0
       combined-stream: 1.0.8
       es-set-tostringtag: 2.1.0
-      hasown: 2.0.4
+      hasown: 2.0.2
       mime-types: 2.1.35
 
   form-data@4.0.6:
@@ -20036,12 +20012,12 @@ snapshots:
       call-bind-apply-helpers: 1.0.2
       es-define-property: 1.0.1
       es-errors: 1.3.0
-      es-object-atoms: 1.1.2
+      es-object-atoms: 1.1.1
       function-bind: 1.1.2
       get-proto: 1.0.1
       gopd: 1.2.0
       has-symbols: 1.1.0
-      hasown: 2.0.4
+      hasown: 2.0.2
       math-intrinsics: 1.1.0
 
   get-orientation@1.1.2:
@@ -20057,7 +20033,7 @@ snapshots:
   get-proto@1.0.1:
     dependencies:
       dunder-proto: 1.0.1
-      es-object-atoms: 1.1.2
+      es-object-atoms: 1.1.1
 
   get-stream@5.2.0:
     dependencies:
@@ -21386,7 +21362,7 @@ snapshots:
       lodash.isstring: 4.0.1
       lodash.once: 4.1.1
       ms: 2.1.3
-      semver: 7.8.5
+      semver: 7.6.3
 
   jsprim@2.0.2:
     dependencies:
@@ -21745,7 +21721,7 @@ snapshots:
     dependencies:
       graceful-fs: 4.2.11
       is-promise: 2.2.2
-      lodash: 4.18.1
+      lodash: 4.17.21
       pify: 3.0.0
       steno: 0.4.4
 
@@ -22332,7 +22308,7 @@ snapshots:
       micromark-util-resolve-all: 2.0.1
       micromark-util-subtokenize: 2.1.0
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-core-commonmark@2.0.3:
     dependencies:
@@ -22360,7 +22336,7 @@ snapshots:
       micromark-factory-whitespace: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
       parse-entities: 4.0.2
 
   micromark-extension-directive@4.0.0:
@@ -22415,7 +22391,7 @@ snapshots:
       micromark-util-character: 2.1.1
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-extension-gfm-footnote@1.1.2:
     dependencies:
@@ -22431,13 +22407,13 @@ snapshots:
   micromark-extension-gfm-footnote@2.1.0:
     dependencies:
       devlop: 1.1.0
-      micromark-core-commonmark: 2.0.3
+      micromark-core-commonmark: 2.0.2
       micromark-factory-space: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-normalize-identifier: 2.0.1
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-extension-gfm-strikethrough@0.6.5:
     dependencies:
@@ -22483,7 +22459,7 @@ snapshots:
       micromark-factory-space: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-extension-gfm-table@2.1.1:
     dependencies:
@@ -22574,7 +22550,7 @@ snapshots:
       micromark-factory-space: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-extension-mdx-expression@1.0.8:
     dependencies:
@@ -22688,7 +22664,7 @@ snapshots:
     dependencies:
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-factory-label@1.1.0:
     dependencies:
@@ -22702,7 +22678,7 @@ snapshots:
       devlop: 1.1.0
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-factory-mdx-expression@1.0.9:
     dependencies:
@@ -22749,7 +22725,7 @@ snapshots:
       micromark-factory-space: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-factory-whitespace@1.1.0:
     dependencies:
@@ -22763,7 +22739,7 @@ snapshots:
       micromark-factory-space: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-util-character@1.2.0:
     dependencies:
@@ -22793,7 +22769,7 @@ snapshots:
     dependencies:
       micromark-util-character: 2.1.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-util-combine-extensions@1.1.0:
     dependencies:
@@ -22870,7 +22846,7 @@ snapshots:
 
   micromark-util-resolve-all@2.0.1:
     dependencies:
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-util-sanitize-uri@1.2.0:
     dependencies:
@@ -22896,7 +22872,7 @@ snapshots:
       devlop: 1.1.0
       micromark-util-chunked: 2.0.1
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
 
   micromark-util-symbol@1.1.0: {}
 
@@ -22943,7 +22919,7 @@ snapshots:
       debug: 4.4.3(supports-color@11.0.0)
       decode-named-character-reference: 1.3.0
       devlop: 1.1.0
-      micromark-core-commonmark: 2.0.3
+      micromark-core-commonmark: 2.0.2
       micromark-factory-space: 2.0.1
       micromark-util-character: 2.1.1
       micromark-util-chunked: 2.0.1
@@ -22955,7 +22931,7 @@ snapshots:
       micromark-util-sanitize-uri: 2.0.1
       micromark-util-subtokenize: 2.1.0
       micromark-util-symbol: 2.0.1
-      micromark-util-types: 2.0.2
+      micromark-util-types: 2.0.1
     transitivePeerDependencies:
       - supports-color
 
@@ -23700,10 +23676,10 @@ snapshots:
 
   open@10.1.0:
     dependencies:
-      default-browser: 5.5.1
+      default-browser: 5.2.1
       define-lazy-prop: 3.0.0
       is-inside-container: 1.0.0
-      is-wsl: 3.1.1
+      is-wsl: 3.1.0
 
   open@10.2.0:
     dependencies:
@@ -23739,7 +23715,7 @@ snapshots:
       bl: 4.1.0
       chalk: 4.1.2
       cli-cursor: 3.1.0
-      cli-spinners: 2.9.2
+      cli-spinners: 2.6.1
       is-interactive: 1.0.0
       log-symbols: 4.1.0
       strip-ansi: 6.0.1
@@ -25638,7 +25614,7 @@ snapshots:
 
   superjson@2.2.6:
     dependencies:
-      copy-anything: 4.1.3
+      copy-anything: 4.1.4
 
   supports-color@11.0.0: {}
 
@@ -25723,7 +25699,7 @@ snapshots:
     dependencies:
       '@istanbuljs/schema': 0.1.6
       glob: 10.5.0
-      minimatch: 10.2.6
+      minimatch: 10.2.5
 
   text-decoder@1.2.7:
     dependencies:
@@ -25766,8 +25742,8 @@ snapshots:
 
   tinyglobby@0.2.17:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.7)
-      picomatch: 4.0.7
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
 
   tinypool@2.2.0: {}
 
