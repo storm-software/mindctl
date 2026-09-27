@@ -46,14 +46,31 @@ func (content messageContent) MarshalJSON() ([]byte, error) {
 }
 
 type messageUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+}
+
+// messageUsageFrom reports usage with Anthropic semantics, where input_tokens
+// excludes cache reads and cache writes. Other providers include cached tokens
+// in their input count, so they are subtracted to keep clients from counting
+// them twice.
+func messageUsageFrom(usage inference.Usage, providerID string) messageUsage {
+	cached := max(usage.CachedInputTokens, 0)
+	written := max(usage.CacheWriteInputTokens, 0)
+	input := max(usage.InputTokens, 0)
+	if providerID != "anthropic" {
+		input = max(input-cached-written, 0)
+	}
+	return messageUsage{InputTokens: input, OutputTokens: max(usage.OutputTokens, 0), CacheCreationInputTokens: written, CacheReadInputTokens: cached}
 }
 
 func messageFromResult(result inference.Result, providerID string) (messageResponseBody, error) {
 	body := messageResponseBody{ID: result.ID, Type: "message", Role: "assistant", Model: result.Model, Content: []messageContent{}}
 	if result.Usage.Known {
-		body.Usage = &messageUsage{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens}
+		usage := messageUsageFrom(result.Usage, providerID)
+		body.Usage = &usage
 	}
 	if result.StopReason != "" && providerID == "anthropic" {
 		body.StopReason = result.StopReason

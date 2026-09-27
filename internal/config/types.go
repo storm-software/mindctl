@@ -158,30 +158,40 @@ func (p ProviderConfig) AuthMode() ProviderAuthMode {
 }
 
 // ModelConfig describes one configured provider model. InputPrice and
-// OutputPrice are USD per million tokens; CachedInputPriceUSDPerMillion and
-// PerRequestPriceUSD make their units explicit. Zero MaxOutputTokens advertises
-// no positive output capacity, and zero LatencyP95 means no latency prior.
+// OutputPrice are USD per million tokens; CachedInputPriceUSDPerMillion,
+// CacheWriteInputPriceUSDPerMillion (Anthropic cache-creation input), and
+// PerRequestPriceUSD make their units explicit. Zero MaxOutputTokens
+// advertises no positive output capacity, and zero LatencyP95 means no
+// latency prior.
 type ModelConfig struct {
-	ID                            string             `yaml:"id"`
-	Provider                      string             `yaml:"provider"`
-	Tier                          string             `yaml:"tier"`
-	Capabilities                  []string           `yaml:"capabilities"`
-	ContextWindow                 int                `yaml:"context_window"`
-	MaxOutputTokens               int                `yaml:"max_output_tokens"`
-	Available                     bool               `yaml:"available"`
-	ExplicitOnly                  bool               `yaml:"explicit_only"`
-	InputPrice                    float64            `yaml:"input_price"`
-	CachedInputPriceUSDPerMillion float64            `yaml:"cached_input_price_usd_per_million"`
-	OutputPrice                   float64            `yaml:"output_price"`
-	PerRequestPriceUSD            float64            `yaml:"per_request_price_usd"`
-	LatencyP95                    time.Duration      `yaml:"latency_p95"`
-	SuccessPrior                  float64            `yaml:"success_prior"`
-	TaskSuccessPriors             map[string]float64 `yaml:"task_success_priors"`
-	cachedInputPriceConfigured    bool
+	ID                                string             `yaml:"id"`
+	Provider                          string             `yaml:"provider"`
+	Tier                              string             `yaml:"tier"`
+	Capabilities                      []string           `yaml:"capabilities"`
+	ContextWindow                     int                `yaml:"context_window"`
+	MaxOutputTokens                   int                `yaml:"max_output_tokens"`
+	Available                         bool               `yaml:"available"`
+	ExplicitOnly                      bool               `yaml:"explicit_only"`
+	InputPrice                        float64            `yaml:"input_price"`
+	CachedInputPriceUSDPerMillion     float64            `yaml:"cached_input_price_usd_per_million"`
+	CacheWriteInputPriceUSDPerMillion float64            `yaml:"cache_write_input_price_usd_per_million"`
+	OutputPrice                       float64            `yaml:"output_price"`
+	PerRequestPriceUSD                float64            `yaml:"per_request_price_usd"`
+	LatencyP95                        time.Duration      `yaml:"latency_p95"`
+	SuccessPrior                      float64            `yaml:"success_prior"`
+	TaskSuccessPriors                 map[string]float64 `yaml:"task_success_priors"`
+	cachedInputPriceConfigured        bool
+	cacheWriteInputPriceConfigured    bool
 }
 
+// DefaultCacheWriteMultiplier prices cache writes relative to the input price
+// when a model omits cache_write_input_price_usd_per_million. It matches
+// Anthropic's five-minute cache-write rate and Weave Router's default.
+const DefaultCacheWriteMultiplier = 1.25
+
 // UnmarshalYAML keeps legacy catalogs compatible: an omitted cached input
-// price means the ordinary input price, while an explicit zero remains a real
+// price means the ordinary input price and an omitted cache-write price means
+// DefaultCacheWriteMultiplier times it, while an explicit zero remains a real
 // configured price.
 func (m *ModelConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain ModelConfig
@@ -191,9 +201,11 @@ func (m *ModelConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*m = ModelConfig(decoded)
 	for index := 0; index+1 < len(value.Content); index += 2 {
-		if value.Content[index].Value == "cached_input_price_usd_per_million" {
+		switch value.Content[index].Value {
+		case "cached_input_price_usd_per_million":
 			m.cachedInputPriceConfigured = true
-			break
+		case "cache_write_input_price_usd_per_million":
+			m.cacheWriteInputPriceConfigured = true
 		}
 	}
 	return nil
@@ -206,6 +218,15 @@ func (m ModelConfig) CachedInputPrice() float64 {
 		return m.CachedInputPriceUSDPerMillion
 	}
 	return m.InputPrice
+}
+
+// CacheWriteInputPrice returns the configured cache-write price or the input
+// price scaled by DefaultCacheWriteMultiplier when the field was omitted.
+func (m ModelConfig) CacheWriteInputPrice() float64 {
+	if m.cacheWriteInputPriceConfigured || m.CacheWriteInputPriceUSDPerMillion != 0 {
+		return m.CacheWriteInputPriceUSDPerMillion
+	}
+	return m.InputPrice * DefaultCacheWriteMultiplier
 }
 
 // ValidateCatalog checks provider and model identities without resolving
@@ -422,6 +443,7 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		}{
 			{"input price", model.InputPrice},
 			{"cached input price", model.CachedInputPrice()},
+			{"cache write input price", model.CacheWriteInputPrice()},
 			{"output price", model.OutputPrice},
 			{"per-request price", model.PerRequestPriceUSD},
 		} {

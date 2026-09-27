@@ -98,7 +98,7 @@ func writeSavings(output io.Writer, summary storage.SavingsSummary, headroomEnab
 
 	rows := [][]string{
 		{"Requests", formatCount(total.Attempts) + " (" + formatCount(total.AutomaticAttempts) + " auto-routed)"},
-		{"Input tokens", formatCount(total.InputTokens) + " (" + formatCount(total.CachedInputTokens) + " cached)"},
+		{"Input tokens", formatCount(total.InputTokens) + " (" + formatCount(total.CachedInputTokens) + " cached, " + formatCount(total.CacheWriteInputTokens) + " cache writes)"},
 		{"Output tokens", formatCount(total.OutputTokens)},
 		{"Actual cost", formatUSD(total.ActualCost)},
 		{"Baseline cost", formatUSD(total.BaselineCost)},

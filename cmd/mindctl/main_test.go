@@ -1297,7 +1297,7 @@ func TestSavingsCommandSummarizesRecordedSavings(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := svc.RecordSavings(context.Background(), attempt, savings.Record{
-		InputTokens: 1_234_567, CachedInputTokens: 1_000, OutputTokens: 4_321,
+		InputTokens: 1_234_567, CachedInputTokens: 1_000, CacheWriteInputTokens: 2_000, OutputTokens: 4_321,
 		ActualCost: 0.5, BaselineCost: 12.5, BaselineProvider: "anthropic", BaselineModelID: "large",
 		CompressionTokensBefore: 400, CompressionTokensSaved: 100, CompressionSavings: 0.25,
 	}); err != nil {
@@ -1312,7 +1312,7 @@ func TestSavingsCommandSummarizesRecordedSavings(t *testing.T) {
 	want := [][]string{
 		{"SAVINGS", "VALUE"},
 		{"Requests", "1 (1 auto-routed)"},
-		{"Input tokens", "1,234,567 (1,000 cached)"},
+		{"Input tokens", "1,234,567 (1,000 cached, 2,000 cache writes)"},
 		{"Output tokens", "4,321"},
 		{"Actual cost", "$0.5000"},
 		{"Baseline cost", "$12.50"},

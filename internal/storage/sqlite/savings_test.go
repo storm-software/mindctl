@@ -54,7 +54,7 @@ func TestSummarizeSavingsAggregatesPerServingModel(t *testing.T) {
 		record   savings.Record
 	}{
 		{inference.AutomaticModel, small, savings.Record{
-			InputTokens: 100, CachedInputTokens: 40, OutputTokens: 10, ActualCost: 1, BaselineCost: 5,
+			InputTokens: 100, CachedInputTokens: 40, CacheWriteInputTokens: 30, OutputTokens: 10, ActualCost: 1, BaselineCost: 5,
 			BaselineProvider: "anthropic", BaselineModelID: "claude-large",
 			CompressionTokensBefore: 200, CompressionTokensSaved: 50, CompressionSavings: 0.25,
 		}},
@@ -79,7 +79,7 @@ func TestSummarizeSavingsAggregatesPerServingModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	total := summary.Total
-	if total.Attempts != 3 || total.AutomaticAttempts != 2 || total.InputTokens != 160 || total.CachedInputTokens != 40 ||
+	if total.Attempts != 3 || total.AutomaticAttempts != 2 || total.InputTokens != 160 || total.CachedInputTokens != 40 || total.CacheWriteInputTokens != 30 ||
 		total.OutputTokens != 16 || total.CompressionTokensBefore != 200 || total.CompressionTokensSaved != 50 {
 		t.Fatalf("total = %+v", total)
 	}

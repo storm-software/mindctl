@@ -213,6 +213,11 @@ attempt, and `mindctl savings` summarizes it (filter with `--provider`,
   `savings.baseline_model` for `mindctl-auto` requests; when that is unset,
   the highest-tier model eligible for automatic routing is used. Savings are
   negative when a request was served by a pricier model than its baseline.
+  Like Weave Router, Anthropic cache reads and cache writes
+  (`cache_creation_input_tokens`) are priced at the model's
+  `cached_input_price_usd_per_million` and
+  `cache_write_input_price_usd_per_million` rates. An omitted cache-write
+  price defaults to 1.25 times `input_price`, Anthropic's five-minute rate.
 - **Headroom savings** price the tokens removed by compression at the served
   model's uncached input rate, and are only recorded when Headroom is enabled.
 

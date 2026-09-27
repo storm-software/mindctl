@@ -46,6 +46,49 @@ func TestMessagesSSEWriterLifecycle(t *testing.T) {
 	}
 }
 
+func TestMessagesSSEWriterReportsCacheUsage(t *testing.T) {
+	for _, test := range []struct {
+		provider, wantStart, wantDelta string
+	}{
+		// Anthropic input_tokens already excludes cache reads and writes.
+		{"anthropic",
+			`"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}`,
+			`"usage":{"input_tokens":10,"output_tokens":6,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}`},
+		// Other providers count cached tokens as input, so they are removed.
+		{"openai",
+			`"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}`,
+			`"usage":{"input_tokens":0,"output_tokens":6,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}`},
+	} {
+		response := httptest.NewRecorder()
+		writer := &messagesSSEWriter{response: response}
+		_ = writer.Start(executor.StreamMetadata{ResponseID: "msg_1", Model: "test", Provider: test.provider})
+		usage := inference.Usage{InputTokens: 10, CachedInputTokens: 30, CacheWriteInputTokens: 20, Known: true}
+		if err := writer.WriteEvent(context.Background(), inference.Event{Type: "message_start", Usage: usage}); err != nil {
+			t.Fatal(err)
+		}
+		usage.OutputTokens = 6
+		if err := writer.WriteEvent(context.Background(), inference.Event{Type: "response.completed", Usage: usage}); err != nil {
+			t.Fatal(err)
+		}
+		start, delta, _ := strings.Cut(response.Body.String(), "event: message_delta")
+		if !strings.Contains(start, test.wantStart) || !strings.Contains(delta, test.wantDelta) {
+			t.Fatalf("provider=%s stream=%s", test.provider, response.Body.String())
+		}
+	}
+}
+
+func TestMessagesSSEWriterOmitsUnknownUsage(t *testing.T) {
+	response := httptest.NewRecorder()
+	writer := &messagesSSEWriter{response: response}
+	_ = writer.Start(executor.StreamMetadata{ResponseID: "msg_1", Model: "test", Provider: "openai"})
+	if err := writer.WriteEvent(context.Background(), inference.Event{Type: "response.completed"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(response.Body.String(), `"usage":{"output_tokens":0}}`) || strings.Contains(response.Body.String(), "cache_") {
+		t.Fatalf("stream=%s", response.Body.String())
+	}
+}
+
 func TestMessagesSSEWriterCancellationAndTerminalError(t *testing.T) {
 	response := httptest.NewRecorder()
 	writer := &messagesSSEWriter{response: response}

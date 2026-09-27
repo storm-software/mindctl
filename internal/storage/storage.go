@@ -158,6 +158,7 @@ type SavingsFilter struct {
 type SavingsTotals struct {
 	Attempts, AutomaticAttempts                     int64
 	InputTokens, CachedInputTokens, OutputTokens    int64
+	CacheWriteInputTokens                           int64
 	ActualCost, BaselineCost                        float64
 	CompressionTokensBefore, CompressionTokensSaved int64
 	CompressionSavings                              float64
@@ -175,6 +176,7 @@ func (t *SavingsTotals) Add(other SavingsTotals) {
 	t.AutomaticAttempts += other.AutomaticAttempts
 	t.InputTokens += other.InputTokens
 	t.CachedInputTokens += other.CachedInputTokens
+	t.CacheWriteInputTokens += other.CacheWriteInputTokens
 	t.OutputTokens += other.OutputTokens
 	t.ActualCost += other.ActualCost
 	t.BaselineCost += other.BaselineCost

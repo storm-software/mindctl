@@ -40,10 +40,12 @@ func (w *messagesSSEWriter) WriteEvent(ctx context.Context, event inference.Even
 	}
 	if !w.started {
 		w.started = true
+		startUsage := messageUsageFrom(w.usage, w.metadata.Provider)
+		startUsage.OutputTokens = 0
 		if err := w.write("message_start", map[string]any{"type": "message_start", "message": map[string]any{
 			"id": w.metadata.ResponseID, "type": "message", "role": "assistant", "model": w.metadata.Model,
 			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
-			"usage": messageUsage{InputTokens: w.usage.InputTokens, OutputTokens: 0},
+			"usage": startUsage,
 		}}); err != nil {
 			return err
 		}
@@ -115,7 +117,13 @@ func (w *messagesSSEWriter) WriteEvent(ctx context.Context, event inference.Even
 				stopReason = "end_turn"
 			}
 		}
-		if err := w.write("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil}, "usage": map[string]any{"output_tokens": w.usage.OutputTokens}}); err != nil {
+		// Usage may only be known at completion, as with OpenAI, so the final
+		// delta repeats the input and cache counts alongside output tokens.
+		var usage any = map[string]any{"output_tokens": 0}
+		if w.usage.Known {
+			usage = messageUsageFrom(w.usage, w.metadata.Provider)
+		}
+		if err := w.write("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stopReason, "stop_sequence": nil}, "usage": usage}); err != nil {
 			return err
 		}
 		w.completed = true

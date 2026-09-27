@@ -57,6 +57,32 @@ func TestMessageFromResult(t *testing.T) {
 	}
 }
 
+func TestMessageFromResultReportsCacheUsage(t *testing.T) {
+	usage := inference.Usage{InputTokens: 100, CachedInputTokens: 30, CacheWriteInputTokens: 20, OutputTokens: 7, Known: true}
+	for _, test := range []struct {
+		provider string
+		usage    inference.Usage
+		want     string
+	}{
+		{"anthropic", usage, `{"input_tokens":100,"output_tokens":7,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}`},
+		{"openai", usage, `{"input_tokens":50,"output_tokens":7,"cache_creation_input_tokens":20,"cache_read_input_tokens":30}`},
+		{"gemini", inference.Usage{InputTokens: 100, OutputTokens: 7, Known: true}, `{"input_tokens":100,"output_tokens":7}`},
+	} {
+		body, err := messageFromResult(inference.Result{Status: "completed", Usage: test.usage}, test.provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, _ := json.Marshal(body.Usage)
+		if string(encoded) != test.want {
+			t.Errorf("provider=%s usage=%s, want %s", test.provider, encoded, test.want)
+		}
+	}
+	body, err := messageFromResult(inference.Result{Status: "completed"}, "anthropic")
+	if err != nil || body.Usage != nil {
+		t.Fatalf("unknown usage=%+v err=%v", body.Usage, err)
+	}
+}
+
 func TestWriteMessagesError(t *testing.T) {
 	for _, test := range []struct {
 		name string

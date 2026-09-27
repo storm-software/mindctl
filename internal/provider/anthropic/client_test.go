@@ -29,11 +29,11 @@ func TestAnthropicTranslatesInstructionsFunctionsAndToolResults(t *testing.T) {
 		if err := json.Unmarshal(body.Messages[1].Content[0].Content, &result); err != nil || result != `{"temperature":70}` {
 			t.Fatalf("tool result content=%s err=%v", body.Messages[1].Content[0].Content, err)
 		}
-	}, `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":8,"output_tokens":2}}`)
+	}, `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":8,"output_tokens":2,"cache_read_input_tokens":5,"cache_creation_input_tokens":13}}`)
 	defer server.Close()
 
 	got, err := newAnthropic(server.URL).Execute(context.Background(), anthropicModel(), functionResultRequest())
-	if err != nil || len(got.Output) != 1 || got.Output[0].Text != "done" || got.Usage.InputTokens != 8 || got.Status != "completed" || got.ProviderRequestID != "anthropic-req" {
+	if err != nil || len(got.Output) != 1 || got.Output[0].Text != "done" || got.Usage.InputTokens != 8 || got.Usage.CachedInputTokens != 5 || got.Usage.CacheWriteInputTokens != 13 || got.Status != "completed" || got.ProviderRequestID != "anthropic-req" {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 }
@@ -217,7 +217,7 @@ func TestAnthropicStreamNormalizesLifecycleAndCompletion(t *testing.T) {
 		}
 		w.Header().Set("request-id", "anthropic-stream-req")
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":3,\"output_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":3,\"output_tokens\":0,\"cache_creation_input_tokens\":7}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
 	}))
 	defer server.Close()
 
@@ -236,7 +236,7 @@ func TestAnthropicStreamNormalizesLifecycleAndCompletion(t *testing.T) {
 		t.Fatalf("event=%+v err=%v", delta, err)
 	}
 	completed, err := stream.Next(context.Background())
-	if err != nil || completed.Status != "completed" || !completed.Usage.Known || completed.Usage.OutputTokens != 1 {
+	if err != nil || completed.Status != "completed" || !completed.Usage.Known || completed.Usage.OutputTokens != 1 || completed.Usage.CacheWriteInputTokens != 7 {
 		t.Fatalf("event=%+v err=%v", completed, err)
 	}
 }

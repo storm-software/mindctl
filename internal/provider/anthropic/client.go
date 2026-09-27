@@ -344,6 +344,9 @@ func (s *stream) mergeUsage(usage *messagesUsage) {
 	if usage.CacheReadInputTokens != nil && *usage.CacheReadInputTokens >= 0 {
 		s.usage.CachedInputTokens = *usage.CacheReadInputTokens
 	}
+	if usage.CacheCreationInputTokens != nil && *usage.CacheCreationInputTokens >= 0 {
+		s.usage.CacheWriteInputTokens = *usage.CacheCreationInputTokens
+	}
 	s.usage.Known = s.hasInputUsage && s.hasOutputUsage
 }
 

@@ -124,14 +124,14 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 	}
 
 	wantModels := map[string]struct {
-		tier                       string
-		context, outputLimit       int
-		input, cachedInput, output float64
+		tier                                   string
+		context, outputLimit                   int
+		input, cachedInput, cacheWrite, output float64
 	}{
-		"claude-fable-5-1": {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, output: 50},
-		"claude-opus-5-5":  {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, output: 20},
-		"claude-sonnet-5":  {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .2, output: 10},
-		"claude-haiku-4-5": {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, output: 5},
+		"claude-fable-5-1": {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, cacheWrite: 12.5, output: 50},
+		"claude-opus-5-5":  {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, cacheWrite: 5, output: 20},
+		"claude-sonnet-5":  {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .2, cacheWrite: 2.5, output: 10},
+		"claude-haiku-4-5": {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, cacheWrite: 1.25, output: 5},
 	}
 	for _, model := range cfg.Models {
 		want, ok := wantModels[model.ID]
@@ -147,6 +147,9 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 		}
 		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
 			t.Errorf("model %s prices = input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice)
+		}
+		if model.CacheWriteInputPrice() != want.cacheWrite {
+			t.Errorf("model %s cache write price = %g, want %g", model.ID, model.CacheWriteInputPrice(), want.cacheWrite)
 		}
 		if !slices.Equal(model.Capabilities, []string{"chat", "tools", "images", "json_schema"}) {
 			t.Errorf("model %s capabilities = %v", model.ID, model.Capabilities)
@@ -456,6 +459,28 @@ func TestModelConfigDecodesExplicitOnly(t *testing.T) {
 	}
 	if !loaded.Models[0].ExplicitOnly {
 		t.Fatal("explicit_only setting was not decoded")
+	}
+}
+
+func TestModelConfigCacheWritePriceDefaultsToInputMultiplier(t *testing.T) {
+	var omitted, explicit, zero ModelConfig
+	if err := yaml.Unmarshal([]byte("input_price: 4\n"), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte("input_price: 4\ncache_write_input_price_usd_per_million: 8\n"), &explicit); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte("input_price: 4\ncache_write_input_price_usd_per_million: 0\n"), &zero); err != nil {
+		t.Fatal(err)
+	}
+	if got := omitted.CacheWriteInputPrice(); got != 5 {
+		t.Errorf("omitted cache write price = %g, want 5", got)
+	}
+	if got := explicit.CacheWriteInputPrice(); got != 8 {
+		t.Errorf("explicit cache write price = %g, want 8", got)
+	}
+	if got := zero.CacheWriteInputPrice(); got != 0 {
+		t.Errorf("explicit zero cache write price = %g, want 0", got)
 	}
 }
 

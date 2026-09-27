@@ -229,7 +229,9 @@ models:
 
   # Claude subscription catalog. Prices are the comparable Claude API rates
   # in USD per million tokens; Pro, Max, Team, and Enterprise subscription
-  # usage follows its own plan limits instead of API token billing.
+  # usage follows its own plan limits instead of API token billing. Cache
+  # writes use the five-minute rate, 1.25 times input, which is also the
+  # default when cache_write_input_price_usd_per_million is omitted.
   - id: claude-fable-5-1
     provider: anthropic
     tier: T6
@@ -239,6 +241,7 @@ models:
     available: true
     input_price: 10
     cached_input_price_usd_per_million: 0.25
+    cache_write_input_price_usd_per_million: 12.5
     output_price: 50
     per_request_price_usd: 0
     latency_p95: 0s
@@ -254,6 +257,7 @@ models:
     available: true
     input_price: 4
     cached_input_price_usd_per_million: 0.2
+    cache_write_input_price_usd_per_million: 5
     output_price: 20
     per_request_price_usd: 0
     latency_p95: 0s
@@ -270,6 +274,7 @@ models:
     available: true
     input_price: 2
     cached_input_price_usd_per_million: 0.2
+    cache_write_input_price_usd_per_million: 2.5
     output_price: 10
     per_request_price_usd: 0
     latency_p95: 0s
@@ -286,6 +291,7 @@ models:
     available: true
     input_price: 1
     cached_input_price_usd_per_million: 0.1
+    cache_write_input_price_usd_per_million: 1.25
     output_price: 5
     per_request_price_usd: 0
     latency_p95: 0s

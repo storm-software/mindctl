@@ -135,9 +135,10 @@ type messagesResponse struct {
 }
 
 type messagesUsage struct {
-	InputTokens          *int64 `json:"input_tokens"`
-	OutputTokens         *int64 `json:"output_tokens"`
-	CacheReadInputTokens *int64 `json:"cache_read_input_tokens"`
+	InputTokens              *int64 `json:"input_tokens"`
+	OutputTokens             *int64 `json:"output_tokens"`
+	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
 }
 
 // providerData is the continuation payload for one portable item. Blocks
@@ -429,6 +430,12 @@ func parseUsage(usage *messagesUsage) inference.Usage {
 			return inference.Usage{}
 		}
 		result.CachedInputTokens = *usage.CacheReadInputTokens
+	}
+	if usage.CacheCreationInputTokens != nil {
+		if *usage.CacheCreationInputTokens < 0 {
+			return inference.Usage{}
+		}
+		result.CacheWriteInputTokens = *usage.CacheCreationInputTokens
 	}
 	return result
 }

@@ -820,10 +820,10 @@ func (db *DB) RecordAttemptSavings(ctx context.Context, clientID, responseID, at
 			return storage.ErrNotFound
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO attempt_savings
-			(attempt_id, created_at, input_tokens, cached_input_tokens, output_tokens, actual_cost,
+			(attempt_id, created_at, input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, actual_cost,
 			baseline_provider, baseline_model_id, baseline_cost, compression_tokens_before, compression_tokens_saved, compression_savings)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (attempt_id) DO NOTHING`,
-			attemptID, time.Now().UTC().UnixNano(), record.InputTokens, record.CachedInputTokens, record.OutputTokens, record.ActualCost,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (attempt_id) DO NOTHING`,
+			attemptID, time.Now().UTC().UnixNano(), record.InputTokens, record.CachedInputTokens, record.CacheWriteInputTokens, record.OutputTokens, record.ActualCost,
 			record.BaselineProvider, record.BaselineModelID, record.BaselineCost,
 			record.CompressionTokensBefore, record.CompressionTokensSaved, record.CompressionSavings); err != nil {
 			return failure("insert attempt savings", err)
@@ -840,7 +840,7 @@ func (db *DB) SummarizeSavings(ctx context.Context, filter storage.SavingsFilter
 	summary := storage.SavingsSummary{Models: []storage.ModelSavings{}}
 	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
 		query := `SELECT a.provider, a.model_id, count(*), COALESCE(SUM(r.explicit_model = 0), 0),
-			SUM(s.input_tokens), SUM(s.cached_input_tokens), SUM(s.output_tokens), SUM(s.actual_cost), SUM(s.baseline_cost),
+			SUM(s.input_tokens), SUM(s.cached_input_tokens), SUM(s.cache_write_input_tokens), SUM(s.output_tokens), SUM(s.actual_cost), SUM(s.baseline_cost),
 			SUM(s.compression_tokens_before), SUM(s.compression_tokens_saved), SUM(s.compression_savings)
 			FROM attempt_savings s JOIN provider_attempts a ON a.id = s.attempt_id JOIN responses r ON r.id = a.response_id
 			WHERE 1 = 1`
@@ -881,6 +881,7 @@ func (db *DB) SummarizeSavings(ctx context.Context, filter storage.SavingsFilter
 				&model.AutomaticAttempts,
 				&model.InputTokens,
 				&model.CachedInputTokens,
+				&model.CacheWriteInputTokens,
 				&model.OutputTokens,
 				&model.ActualCost,
 				&model.BaselineCost,

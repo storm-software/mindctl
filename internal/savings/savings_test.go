@@ -26,6 +26,16 @@ func TestCostHonorsProviderCacheSemantics(t *testing.T) {
 	approx(t, "unknown usage cost", Cost(pricing, inference.Usage{InputTokens: 1_000_000}, "openai"), 0)
 }
 
+func TestCostPricesCacheWritesAtCacheWriteRate(t *testing.T) {
+	pricing := domain.Pricing{InputPerMillion: 10, CachedInputPerMillion: 1, CacheWriteInputPerMillion: 12.5, OutputPerMillion: 20}
+	usage := inference.Usage{InputTokens: 1_000_000, CachedInputTokens: 400_000, CacheWriteInputTokens: 200_000, OutputTokens: 100_000, Known: true}
+
+	// Anthropic input_tokens excludes both cache reads and cache writes.
+	approx(t, "anthropic cost", Cost(pricing, usage, "anthropic"), 10+0.4+2.5+2)
+	// Providers that fold cache writes into input tokens are not billed twice.
+	approx(t, "openai cost", Cost(pricing, usage, "openai"), 4+0.4+2.5+2)
+}
+
 func TestComputePricesObservedUsageAtBaselineAndServedRates(t *testing.T) {
 	served := domain.Model{ID: "small", Provider: "openai", Pricing: domain.Pricing{InputPerMillion: 1, CachedInputPerMillion: 0.1, OutputPerMillion: 4}}
 	baseline := domain.Model{ID: "large", Provider: "anthropic", Pricing: domain.Pricing{InputPerMillion: 10, CachedInputPerMillion: 1, OutputPerMillion: 40}}

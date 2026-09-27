@@ -3,8 +3,10 @@
 //
 // Routing savings follow the Weave Router convention: the observed token usage
 // is priced at both the baseline model's and the served model's rates, and the
-// difference is the saving. The baseline is never re-run, and a negative
-// difference (serving on a pricier model) is kept rather than clamped.
+// difference is the saving. As in Weave Router, cache reads and cache writes
+// are priced at their own rates rather than the uncached input rate. The
+// baseline is never re-run, and a negative difference (serving on a pricier
+// model) is kept rather than clamped.
 //
 // Compression savings price the tokens Headroom removed at the served model's
 // uncached input rate. The two parts are additive because routing savings are
@@ -23,6 +25,7 @@ import (
 // so BaselineCost equals ActualCost and routing saved nothing.
 type Record struct {
 	InputTokens, CachedInputTokens, OutputTokens    int64
+	CacheWriteInputTokens                           int64
 	ActualCost, BaselineCost                        float64
 	BaselineProvider, BaselineModelID               string
 	CompressionTokensBefore, CompressionTokensSaved int64
@@ -58,6 +61,7 @@ func Compute(in Input) Record {
 	if in.Usage.Known {
 		record.InputTokens = max(in.Usage.InputTokens, 0)
 		record.CachedInputTokens = max(in.Usage.CachedInputTokens, 0)
+		record.CacheWriteInputTokens = max(in.Usage.CacheWriteInputTokens, 0)
 		record.OutputTokens = max(in.Usage.OutputTokens, 0)
 		// Token semantics depend on the provider that reported the usage, so
 		// both sides are priced as the served provider counted them.
@@ -79,20 +83,24 @@ func Compute(in Input) Record {
 }
 
 // Cost prices usage as reported by provider. Anthropic reports cache reads
-// separately from input tokens; other providers include them in input tokens.
+// and cache writes separately from input tokens; other providers include them
+// in input tokens.
 func Cost(pricing domain.Pricing, usage inference.Usage, provider string) float64 {
 	if !usage.Known {
 		return 0
 	}
 	input := max(usage.InputTokens, 0)
 	cached := max(usage.CachedInputTokens, 0)
+	written := max(usage.CacheWriteInputTokens, 0)
 	uncached := input
 	if provider != "anthropic" {
 		cached = min(cached, input)
-		uncached = input - cached
+		written = min(written, input-cached)
+		uncached = input - cached - written
 	}
 	cost := float64(uncached)/1e6*pricing.InputPerMillion +
 		float64(cached)/1e6*pricing.CachedInputPerMillion +
+		float64(written)/1e6*pricing.CacheWriteInputPerMillion +
 		float64(max(usage.OutputTokens, 0))/1e6*pricing.OutputPerMillion +
 		pricing.PerRequestUSD
 	return finite(cost)

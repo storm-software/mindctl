@@ -127,8 +127,10 @@ type Result struct {
 }
 
 // Usage is normalized provider token accounting. Known distinguishes absent
-// provider usage metadata from a reported zero.
+// provider usage metadata from a reported zero. CacheWriteInputTokens are the
+// input tokens written to a prompt cache, which only Anthropic reports.
 type Usage struct {
 	InputTokens, OutputTokens, CachedInputTokens int64
+	CacheWriteInputTokens                        int64
 	Known                                        bool
 }

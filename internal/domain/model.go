@@ -28,6 +28,7 @@ type Capabilities struct {
 // Pricing records provider-independent USD pricing terms.
 type Pricing struct {
 	InputPerMillion, CachedInputPerMillion, OutputPerMillion float64
+	CacheWriteInputPerMillion                                float64
 	PerRequestUSD                                            float64
 }
 
