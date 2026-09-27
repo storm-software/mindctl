@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/domain"
@@ -45,6 +46,13 @@ func (process execProcess) Wait() error { return process.command.Wait() }
 func (process execProcess) Kill() error { return process.command.Process.Kill() }
 
 func NewExecRunner() ProcessRunner { return execRunner{} }
+
+// The Python runtime needs several seconds to bind its port after launch, so
+// readiness is polled rather than probed once.
+var (
+	readinessTimeout  = 60 * time.Second
+	readinessInterval = 250 * time.Millisecond
+)
 
 type Manager struct {
 	cfg         config.HeadroomConfig
@@ -121,24 +129,44 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.failure = unavailable(errors.New("authentication listener unavailable"))
 		return m.failure
 	}
+	exited := make(chan struct{})
+	go m.watch(process, exited)
 	authServer := &http.Server{Handler: authenticatedProxy{token: token, target: "http://127.0.0.1:" + strconv.Itoa(port), client: m.httpClient}}
 	go func() { _ = authServer.Serve(authListener) }()
 	client := NewClient("http://"+authListener.Addr().String(), token, m.httpClient)
-	if err := client.Ready(ctx); err != nil {
+	if err := waitReady(ctx, client, exited); err != nil {
 		_ = process.Kill()
 		_ = authServer.Close()
-		m.failure = unavailable(errors.New("managed runtime failed readiness"))
+		m.failure = unavailable(fmt.Errorf("managed runtime failed readiness: %w", err))
 		return m.failure
 	}
 	m.client, m.process, m.server, m.listener, m.token = client, process, authServer, authListener, token
-	go m.watch(process)
 	return nil
 }
 
-func (m *Manager) watch(process Process) {
-	if err := process.Wait(); err == nil {
-		err = errors.New("managed runtime stopped")
+func waitReady(ctx context.Context, client *Client, exited <-chan struct{}) error {
+	readyCtx, cancel := context.WithTimeout(ctx, readinessTimeout)
+	defer cancel()
+	for {
+		err := client.Ready(readyCtx)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-exited:
+			return errors.New("managed runtime exited during startup")
+		case <-readyCtx.Done():
+			return err
+		case <-time.After(readinessInterval):
+		}
 	}
+}
+
+// watch reaps the process and marks the manager failed if a running sidecar
+// stops. A process that never became ready is not yet m.process.
+func (m *Manager) watch(process Process, exited chan<- struct{}) {
+	_ = process.Wait()
+	close(exited)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.process == process && !m.closed {

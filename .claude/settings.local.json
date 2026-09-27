@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ps aux *)",
+      "Read(//home/development/.config/mindctl/**)",
+      "Bash(sed -E 's/\\(token|key|secret\\)\\([^:]*\\):.*/\\\\1\\\\2: <redacted>/I')",
+      "Read(//home/development/.cache/mindctl/logs/**)",
+      "Bash(env)",
+      "Bash(sed -n 1,80p internal/headroom/bootstrap.go | grep -n -E \"func|Executable|bin\" ; find ~/.cache/mindctl/headroom -maxdepth 4 -name headroom -type f 2>/dev/null | head)",
+      "Read(//home/development/.cache/mindctl/headroom/**)"
+    ]
+  }
+}
