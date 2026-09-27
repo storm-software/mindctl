@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.35](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.35) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Clean up history display and resolve issue with Haiku model ([33ed329](https://github.com/storm-software/mindctl/commit/33ed329))
+
 ## [0.1.34](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.34) (09/27/2026)
 
 ### Bug Fixes
