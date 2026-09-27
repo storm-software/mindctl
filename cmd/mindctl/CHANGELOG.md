@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.37](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.37) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Clean up the history table display ([59bce64](https://github.com/storm-software/mindctl/commit/59bce64))
+
 ## [0.1.36](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.36) (09/27/2026)
 
 ### Bug Fixes
