@@ -21,8 +21,8 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
-	"unicode/utf8"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/storm-software/mindctl/internal/app"
@@ -488,64 +488,26 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 // belong together; groups are separated by a horizontal rule. Cells containing
 // newlines span multiple lines, and the row grows to its tallest cell.
 func writeBoxTable(output io.Writer, header []string, groups [][][]string) error {
-	widths := make([]int, len(header))
-	measure := func(row []string) {
-		for index, cell := range row {
-			for _, cellLine := range strings.Split(cell, "\n") {
-				widths[index] = max(widths[index], utf8.RuneCountInString(cellLine))
-			}
-		}
+	writer := table.NewWriter()
+	writer.SetStyle(table.StyleLight)
+	headerRow := make(table.Row, len(header))
+	for index, cell := range header {
+		headerRow[index] = cell
 	}
-	measure(header)
-	for _, rows := range groups {
+	writer.AppendHeader(headerRow)
+	for index, rows := range groups {
+		if index > 0 {
+			writer.AppendSeparator()
+		}
 		for _, row := range rows {
-			measure(row)
-		}
-	}
-
-	var buffer strings.Builder
-	rule := func(left, middle, right string) {
-		buffer.WriteString(left)
-		for index, width := range widths {
-			if index > 0 {
-				buffer.WriteString(middle)
+			cells := make(table.Row, len(row))
+			for cellIndex, cell := range row {
+				cells[cellIndex] = cell
 			}
-			buffer.WriteString(strings.Repeat("─", width+2))
-		}
-		buffer.WriteString(right + "\n")
-	}
-	line := func(row []string) {
-		cells := make([][]string, len(row))
-		height := 1
-		for index, cell := range row {
-			cells[index] = strings.Split(cell, "\n")
-			height = max(height, len(cells[index]))
-		}
-		for lineIndex := range height {
-			for index, width := range widths {
-				var cellLine string
-				if lineIndex < len(cells[index]) {
-					cellLine = cells[index][lineIndex]
-				}
-				buffer.WriteString("│ ")
-				buffer.WriteString(cellLine)
-				buffer.WriteString(strings.Repeat(" ", width-utf8.RuneCountInString(cellLine)+1))
-			}
-			buffer.WriteString("│\n")
+			writer.AppendRow(cells)
 		}
 	}
-
-	rule("┌", "┬", "┐")
-	line(header)
-	for _, rows := range groups {
-		rule("├", "┼", "┤")
-		for _, row := range rows {
-			line(row)
-		}
-	}
-	rule("└", "┴", "┘")
-
-	_, err := io.WriteString(output, buffer.String())
+	_, err := io.WriteString(output, writer.Render()+"\n")
 	return err
 }
 
