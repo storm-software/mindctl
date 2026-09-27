@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
@@ -45,17 +46,12 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if decoded.Request.Model != inference.AutomaticModel {
-		matched := false
-		for _, model := range h.config.Models {
-			if model.ID == decoded.Request.Model && (decoded.RequiredProvider == "" || model.Provider == decoded.RequiredProvider) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
+		id, ok := resolveMessagesModel(h.config.Models, decoded.Request.Model, decoded.RequiredProvider)
+		if !ok {
 			h.reject(w, inference.Invalid("model", fmt.Sprintf("%q is unknown or not served by required provider %q", decoded.Request.Model, decoded.RequiredProvider)))
 			return
 		}
+		decoded.Request.Model = id
 	}
 	ctx := r.Context()
 	if decoded.Native {
@@ -89,6 +85,32 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// resolveMessagesModel returns the configured ID for requested. Claude Code
+// sends dated Anthropic snapshots such as claude-haiku-4-5-20251001, which
+// resolve to the undated catalog entry when no exact entry exists.
+func resolveMessagesModel(models []domain.Model, requested, requiredProvider string) (string, bool) {
+	find := func(id, provider string) bool {
+		for _, model := range models {
+			if model.ID == id && (provider == "" || model.Provider == provider) {
+				return true
+			}
+		}
+		return false
+	}
+	if find(requested, requiredProvider) {
+		return requested, true
+	}
+	index := strings.LastIndexByte(requested, '-')
+	if index <= 0 || len(requested)-index != 9 || strings.Trim(requested[index+1:], "0123456789") != "" {
+		return "", false
+	}
+	if requiredProvider != "" && requiredProvider != "anthropic" {
+		return "", false
+	}
+	base := requested[:index]
+	return base, find(base, "anthropic")
 }
 
 // reject writes a client error and records why at debug level. Only the

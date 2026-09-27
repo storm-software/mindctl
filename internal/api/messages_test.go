@@ -42,6 +42,28 @@ func (e *messagesExecutor) Stream(ctx context.Context, input executor.Input, wri
 	return nil
 }
 
+func TestResolveMessagesModelAcceptsDatedAnthropicSnapshots(t *testing.T) {
+	models := []domain.Model{{ID: "claude-haiku-4-5", Provider: "anthropic"}, {ID: "gpt-test", Provider: "openai"}}
+	for _, test := range []struct {
+		requested, requiredProvider, want string
+		ok                                bool
+	}{
+		{requested: "claude-haiku-4-5", want: "claude-haiku-4-5", ok: true},
+		{requested: "claude-haiku-4-5-20251001", want: "claude-haiku-4-5", ok: true},
+		{requested: "claude-haiku-4-5-20251001", requiredProvider: "anthropic", want: "claude-haiku-4-5", ok: true},
+		{requested: "claude-haiku-4-5-20251001", requiredProvider: "openai"},
+		{requested: "claude-haiku-4-5-2025100"},
+		{requested: "claude-haiku-4-5-latest"},
+		{requested: "gpt-test-20251001"},
+		{requested: "-20251001"},
+	} {
+		got, ok := resolveMessagesModel(models, test.requested, test.requiredProvider)
+		if ok != test.ok || (ok && got != test.want) {
+			t.Errorf("resolve(%q, %q) = %q, %v; want %q, %v", test.requested, test.requiredProvider, got, ok, test.want, test.ok)
+		}
+	}
+}
+
 func TestMessagesHandlerCrossProviderAndStream(t *testing.T) {
 	runner := &messagesExecutor{}
 	cfg := ResponsesConfig{MaxBodyBytes: 1 << 20, ProviderCredentials: map[string]bool{"openai": true}, ClaudeOAuthProviders: map[string]bool{"anthropic": true}}

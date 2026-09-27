@@ -534,12 +534,12 @@ func TestHistoryCommandListsAndFiltersRequests(t *testing.T) {
 		t.Fatalf("history output has %d rows, want header and one row:\n%s", len(rows), output)
 	}
 	if got, want := rows[0], []string{
-		"CREATED", "RESPONSE ID", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
+		"CREATED", "RESPONSE ID", "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
 	}; !slices.Equal(got, want) {
 		t.Errorf("history header = %q", got)
 	}
 	if got, want := rows[1], []string{
-		secondCreated.Local().Format(historyCreatedLayout), second.ResponseID, "completed", "explicit",
+		secondCreated.Local().Format(historyCreatedLayout), second.ResponseID, "completed", "✓",
 		"openai/gpt-large", "T4", "succeeded", "visible request", "visible response",
 	}; !slices.Equal(got, want) {
 		t.Errorf("history row = %q", got)
@@ -658,9 +658,9 @@ func TestWriteHistoryTable(t *testing.T) {
 	}
 	rows := historyTableRows(stdout.String())
 	for index, want := range [][]string{
-		{"CREATED", "RESPONSE ID", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE"},
+		{"CREATED", "RESPONSE ID", "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE"},
 		{
-			created.Local().Format(historyCreatedLayout), "resp_1", "failed", "auto", "anthropic/claude-small", "T2", "failed",
+			created.Local().Format(historyCreatedLayout), "resp_1", "failed", "", "anthropic/claude-small", "T2", "failed",
 			strings.Repeat("a", 40), "error: timeout",
 		},
 		{"", "", "", "", "", "", "", "...", ""},
@@ -680,7 +680,7 @@ func TestWriteHistoryTable(t *testing.T) {
 	}
 	rows = historyTableRows(stdout.String())
 	if got, want := rows[0], []string{
-		"CREATED", "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
+		"CREATED", "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE",
 	}; !slices.Equal(got, want) {
 		t.Errorf("history header without response ID = %q", got)
 	}
@@ -694,8 +694,8 @@ func TestWriteHistoryTable(t *testing.T) {
 	if want := []string{strings.Repeat("a", 40), "middle", strings.Repeat("b", 40)}; !slices.Equal(request, want) {
 		t.Errorf("full history request lines = %q, want %q", request, want)
 	}
-	if got := rows[1][2]; got != "N/A" {
-		t.Errorf("untracked selection = %q, want N/A", got)
+	if got := rows[1][2]; got != "" {
+		t.Errorf("untracked user-specified = %q, want blank", got)
 	}
 }
 

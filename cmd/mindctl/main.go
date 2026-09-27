@@ -435,7 +435,7 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 	if options.ResponseID {
 		header = append(header, "RESPONSE ID")
 	}
-	header = append(header, "STATUS", "SELECTION", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE")
+	header = append(header, "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE")
 
 	groups := make([][][]string, 0, len(records))
 	for _, record := range records {
@@ -454,7 +454,7 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 		if options.ResponseID {
 			columns = append(columns, record.ResponseID)
 		}
-		columns = append(columns, record.Status, historySelection(record.ExplicitModel))
+		columns = append(columns, record.Status, historyUserSpecified(record.ExplicitModel))
 		if len(record.Attempts) == 0 {
 			groups = append(groups, [][]string{append(columns, "-", "-", "-", request, "-")})
 			continue
@@ -549,18 +549,14 @@ func writeBoxTable(output io.Writer, header []string, groups [][][]string) error
 	return err
 }
 
-// historySelection reports whether the client named the model ("explicit") or
-// let the gateway route ("auto"). Requests recorded before selection was
-// tracked show "N/A".
-func historySelection(explicit *bool) string {
-	switch {
-	case explicit == nil:
-		return "N/A"
-	case *explicit:
-		return "explicit"
-	default:
-		return "auto"
+// historyUserSpecified shows a checkmark when the client named the model. Auto
+// routed requests, and requests recorded before selection was tracked, are
+// left blank.
+func historyUserSpecified(explicit *bool) string {
+	if explicit != nil && *explicit {
+		return "✓"
 	}
+	return ""
 }
 
 func historyAttemptResponse(attempt storage.HistoryAttempt, full bool) (string, error) {
