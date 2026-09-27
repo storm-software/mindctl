@@ -624,7 +624,7 @@ func TestHistoryCommandDefaultsToLatestTwentyRequests(t *testing.T) {
 
 func TestWriteHistoryTable(t *testing.T) {
 	created := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	longText := strings.Repeat("a", 40) + "\n" + strings.Repeat("b", 40)
+	longText := strings.Repeat("a", 40) + "\nmiddle\n" + strings.Repeat("b", 40)
 	var stdout bytes.Buffer
 	if err := writeHistory(&stdout, []storage.HistoryRecord{{
 		ResponseID:             "resp_1",
@@ -658,7 +658,7 @@ func TestWriteHistoryTable(t *testing.T) {
 	rows := historyTableRows(stdout.String())
 	if got, want := rows[1], []string{
 		"2026-09-23T12:00:00Z", "resp_1", "failed", "auto", "anthropic/claude-small", "T2", "failed",
-		strings.Repeat("a", 30) + " ... " + strings.Repeat("b", 30), "error: timeout",
+		strings.Repeat("a", 40) + " ... " + strings.Repeat("b", 40), "error: timeout",
 	}; !slices.Equal(got, want) {
 		t.Errorf("first attempt row = %q", got)
 	}
@@ -672,7 +672,7 @@ func TestWriteHistoryTable(t *testing.T) {
 	}}, true); err != nil {
 		t.Fatal(err)
 	}
-	if want := strings.Repeat("a", 40) + " " + strings.Repeat("b", 40); !strings.Contains(stdout.String(), want) {
+	if want := strings.Repeat("a", 40) + " middle " + strings.Repeat("b", 40); !strings.Contains(stdout.String(), want) {
 		t.Errorf("full history omitted untruncated request:\n%s", stdout.String())
 	}
 	if got := historyTableRows(stdout.String())[1][3]; got != "-" {
@@ -695,6 +695,42 @@ func historyTableRows(output string) [][]string {
 		rows = append(rows, cells)
 	}
 	return rows
+}
+
+func TestTruncateHistoryValueKeepsWholeWords(t *testing.T) {
+	for _, test := range []struct {
+		name, value, want string
+	}{
+		{"short", "hello world", "hello world"},
+		{"collapses whitespace", "hello\n\t world", "hello world"},
+		{
+			"keeps cut at existing word boundaries",
+			strings.Repeat("word ", 28) + "end",
+			"word word word word word word ... word word word word word word end",
+		},
+		{
+			"extends mid-word cuts to whole words",
+			strings.Repeat("a", 28) + " extended middle omitted middle extended " + strings.Repeat("b", 28),
+			strings.Repeat("a", 28) + " extended ... extended " + strings.Repeat("b", 28),
+		},
+		{
+			"exact boundaries",
+			strings.Repeat("a", 30) + " middle " + strings.Repeat("b", 30),
+			strings.Repeat("a", 30) + " ... " + strings.Repeat("b", 30),
+		},
+		{
+			"keeps value when only a space would be omitted",
+			strings.Repeat("a", 40) + " " + strings.Repeat("b", 40),
+			strings.Repeat("a", 40) + " " + strings.Repeat("b", 40),
+		},
+		{"keeps single long word", strings.Repeat("x", 100), strings.Repeat("x", 100)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := truncateHistoryValue(test.value, false); got != test.want {
+				t.Errorf("truncateHistoryValue() = %q, want %q", got, test.want)
+			}
+		})
+	}
 }
 
 func TestHistoryCommandRejectsInvalidFilters(t *testing.T) {

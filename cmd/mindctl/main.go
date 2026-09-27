@@ -323,15 +323,28 @@ const (
 )
 
 // truncateHistoryValue collapses whitespace so each value fits in one table
-// cell, then keeps its head and tail unless full content was requested.
+// cell, then keeps its head and tail unless full content was requested. The
+// head and tail are extended to word boundaries so no word is cut off.
 func truncateHistoryValue(value string, full bool) string {
 	value = strings.Join(strings.Fields(value), " ")
 	runes := []rune(value)
 	if full || len(runes) <= historyTruncateThreshold {
 		return value
 	}
-	head := string(runes[:historyTruncateHeadLength])
-	tail := string(runes[len(runes)-historyTruncateTailLength:])
+	headEnd := historyTruncateHeadLength
+	for headEnd < len(runes) && runes[headEnd-1] != ' ' && runes[headEnd] != ' ' {
+		headEnd++
+	}
+	tailStart := len(runes) - historyTruncateTailLength
+	for tailStart > 0 && runes[tailStart] != ' ' && runes[tailStart-1] != ' ' {
+		tailStart--
+	}
+	// Nothing but the separating space would be omitted.
+	if headEnd+1 >= tailStart {
+		return value
+	}
+	head := strings.TrimRight(string(runes[:headEnd]), " ")
+	tail := strings.TrimLeft(string(runes[tailStart:]), " ")
 	return head + " ... " + tail
 }
 
