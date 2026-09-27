@@ -144,6 +144,11 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
 	path := "/v1/responses"
+	// OpenAI-compatible base URLs are commonly configured with the version
+	// segment (for example https://api.meta.ai/v1); avoid requesting /v1/v1.
+	if strings.HasSuffix(c.baseURL, "/v1") {
+		path = "/responses"
+	}
 	accessToken := c.apiKey
 	accountID, originator, userAgent := "", "", ""
 	switch c.auth {

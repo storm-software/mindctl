@@ -46,6 +46,22 @@ func TestExecuteTranslatesOpenAIRequestAndUsage(t *testing.T) {
 	}
 }
 
+func TestExecuteDoesNotDuplicateVersionedBaseURLPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path=%s, want /v1/responses", r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"id":"upstream","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":3,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	for _, baseURL := range []string{server.URL + "/v1", server.URL + "/v1/"} {
+		if _, err := NewClient(baseURL, "secret", server.Client()).Execute(context.Background(), openAIModel(), textRequest()); err != nil {
+			t.Fatalf("baseURL=%s err=%v", baseURL, err)
+		}
+	}
+}
+
 func TestOpenAIResponsePreservesReasoningAndOutputItemIDs(t *testing.T) {
 	result := fromResponsesResponse(responsesResponse{
 		ID:     "upstream-response",
