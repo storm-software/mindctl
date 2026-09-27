@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.36](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.36) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Clean up the table display using `go-pretty` package ([e60d9e0](https://github.com/storm-software/mindctl/commit/e60d9e0))
+
 ## [0.1.35](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.35) (09/27/2026)
 
 ### Bug Fixes
