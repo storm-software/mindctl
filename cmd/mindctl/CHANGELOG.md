@@ -2,6 +2,13 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.38](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.38) (09/27/2026)
+
+### Features
+
+- **mindctl:** Add Anthropic request cache to router ([542f3ab](https://github.com/storm-software/mindctl/commit/542f3ab))
+- **mindctl:** Added savings calculation to router ([dea8d9d](https://github.com/storm-software/mindctl/commit/dea8d9d))
+
 ## [0.1.37](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.37) (09/27/2026)
 
 ### Bug Fixes
