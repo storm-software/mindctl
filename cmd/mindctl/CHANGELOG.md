@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.29](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.29) (09/26/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve Anthropic messaging issues ([9aca4e2](https://github.com/storm-software/mindctl/commit/9aca4e2))
+
 ## [0.1.27](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.27) (09/26/2026)
 
 ### Bug Fixes
