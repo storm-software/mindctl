@@ -23,11 +23,15 @@ type Request struct {
 	Thinking                                    *ThinkingOptions
 	AnthropicSystem                             []NativeSystemBlock
 	AnthropicToolChoice                         *NativeToolChoice
+	// AnthropicExtra holds caller Messages fields without a portable meaning.
+	// They are forwarded verbatim and only to Anthropic.
+	AnthropicExtra map[string]json.RawMessage
 }
 
 type ThinkingOptions struct {
 	Type         string `json:"type"`
 	BudgetTokens int64  `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
 }
 
 type NativeSystemBlock struct {
@@ -37,8 +41,9 @@ type NativeSystemBlock struct {
 }
 
 type NativeToolChoice struct {
-	Type string `json:"type"`
-	Name string `json:"name,omitempty"`
+	Type                   string `json:"type"`
+	Name                   string `json:"name,omitempty"`
+	DisableParallelToolUse *bool  `json:"disable_parallel_tool_use,omitempty"`
 }
 
 // ReasoningOptions carries Responses API reasoning controls without coupling
@@ -88,6 +93,9 @@ type Tool struct {
 	Tools                   []Tool
 	Strict                  bool
 	CacheControl            json.RawMessage
+	// AnthropicNative is the caller's verbatim Messages tool definition when
+	// it carries fields, such as defer_loading, without a portable meaning.
+	AnthropicNative json.RawMessage
 }
 
 // ToolFormat defines the syntax accepted by a custom freeform tool.

@@ -35,8 +35,8 @@ type ErrorDetail struct {
 	Code    string `json:"code,omitempty"`
 }
 
-// WriteError emits only stable Responses-style errors. Internal and provider
-// error text is intentionally never serialized.
+// WriteError emits only stable Responses-style errors. Validation reasons are
+// gateway-authored and returned; internal and provider error text is not.
 func WriteError(w http.ResponseWriter, err error) {
 	status, detail := errorDetail(err)
 	w.Header().Set("Content-Type", "application/json")
@@ -56,7 +56,7 @@ func errorDetail(err error) (int, ErrorDetail) {
 		detail := ErrorDetail{Message: "invalid request", Type: "invalid_request_error"}
 		var validation *inference.ValidationError
 		if errors.As(err, &validation) {
-			detail.Param = validation.Param
+			detail.Message, detail.Param = validation.Error(), validation.Param
 		}
 		return http.StatusBadRequest, detail
 	case errors.Is(err, headroom.ErrUnavailable):

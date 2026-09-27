@@ -26,9 +26,14 @@ type messageContent struct {
 	Thinking     string          `json:"thinking,omitempty"`
 	Signature    string          `json:"signature,omitempty"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+	// Raw, when set, is an Anthropic block relayed verbatim.
+	Raw json.RawMessage `json:"-"`
 }
 
 func (content messageContent) MarshalJSON() ([]byte, error) {
+	if len(content.Raw) != 0 {
+		return content.Raw, nil
+	}
 	if content.Type == "thinking" {
 		return json.Marshal(struct {
 			Type      string `json:"type"`
@@ -71,24 +76,48 @@ func messageFromResult(result inference.Result, providerID string) (messageRespo
 			return messageResponseBody{}, inference.Invalid("output", "cannot translate provider output")
 		}
 		if providerID == "anthropic" && len(item.ProviderData) > 0 {
-			var native struct {
-				Content messageContent   `json:"anthropic_content_block"`
-				Prefix  []messageContent `json:"anthropic_prefix"`
-			}
-			if json.Unmarshal(item.ProviderData, &native) != nil || native.Content.Type != content.Type {
+			var native messagesNativeData
+			var block messageContent
+			if json.Unmarshal(item.ProviderData, &native) != nil {
 				return messageResponseBody{}, inference.Invalid("output", "cannot translate native content")
 			}
-			for _, prefix := range native.Prefix {
-				if prefix.Type != "thinking" || prefix.Signature == "" {
-					return messageResponseBody{}, inference.Invalid("output", "cannot translate native content")
-				}
-				body.Content = append(body.Content, prefix)
+			// A textless carrier holds only native blocks.
+			carrier := item.Type == "message" && item.Text == "" && len(native.Content) == 0
+			if !carrier && (json.Unmarshal(native.Content, &block) != nil || block.Type != content.Type) {
+				return messageResponseBody{}, inference.Invalid("output", "cannot translate native content")
 			}
-			content.CacheControl = native.Content.CacheControl
+			for _, raw := range native.Prefix {
+				if err := appendNativeContent(&body, raw); err != nil {
+					return messageResponseBody{}, err
+				}
+			}
+			if !carrier {
+				// The provider's block keeps fields such as text citations.
+				content.Raw = append(json.RawMessage(nil), native.Content...)
+				body.Content = append(body.Content, content)
+			}
+			for _, raw := range native.Suffix {
+				if err := appendNativeContent(&body, raw); err != nil {
+					return messageResponseBody{}, err
+				}
+			}
+			continue
 		}
 		body.Content = append(body.Content, content)
 	}
 	return body, nil
+}
+
+// appendNativeContent relays an Anthropic-only block, such as signed thinking
+// or server_tool_use, exactly as the provider returned it.
+func appendNativeContent(body *messageResponseBody, raw json.RawMessage) error {
+	var block messageContent
+	if json.Unmarshal(raw, &block) != nil || block.Type == "" || (block.Type == "thinking" && block.Signature == "") {
+		return inference.Invalid("output", "cannot translate native content")
+	}
+	block.Raw = append(json.RawMessage(nil), raw...)
+	body.Content = append(body.Content, block)
+	return nil
 }
 
 func writeMessagesError(w http.ResponseWriter, err error) {

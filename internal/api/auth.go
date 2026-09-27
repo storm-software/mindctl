@@ -81,6 +81,14 @@ func AuthenticateWithError(next http.Handler, header string, tokens TokenSource,
 // so separately credentialed providers remain eligible.
 func CaptureNativeClaudeOAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		beta, ok := repeatedProtocolHeader(r, "anthropic-beta")
+		if !ok {
+			writeMessagesError(w, ErrInvalidRequest)
+			return
+		}
+		// API-key callers send x-api-key rather than Authorization but rely on
+		// the same beta features.
+		r = r.WithContext(upstreamauth.WithAnthropicBeta(r.Context(), beta))
 		authorizations := r.Header.Values("Authorization")
 		if len(authorizations) == 0 {
 			next.ServeHTTP(w, r)
@@ -95,29 +103,12 @@ func CaptureNativeClaudeOAuth(next http.Handler) http.Handler {
 			writeMessagesError(w, ErrUnauthorized)
 			return
 		}
-		credential := upstreamauth.ClaudeCredential{AccessToken: fields[1]}
-		for _, header := range []struct {
-			name  string
-			value *string
-		}{{"anthropic-beta", &credential.Beta}, {"anthropic-version", &credential.Version}} {
-			// A compression/relay proxy in front of Mindctl (e.g. Headroom) may
-			// repeat one of these protocol headers verbatim rather than folding
-			// it into a single value. That repetition carries no security
-			// weight, unlike Authorization, so only genuinely conflicting
-			// values are rejected.
-			values := r.Header.Values(header.name)
-			if len(values) > 1 {
-				for _, value := range values[1:] {
-					if value != values[0] {
-						writeMessagesError(w, ErrInvalidRequest)
-						return
-					}
-				}
-			}
-			if len(values) >= 1 {
-				*header.value = values[0]
-			}
+		version, ok := repeatedProtocolHeader(r, "anthropic-version")
+		if !ok {
+			writeMessagesError(w, ErrInvalidRequest)
+			return
 		}
+		credential := upstreamauth.ClaudeCredential{AccessToken: fields[1], Beta: beta, Version: version}
 		ctx := upstreamauth.WithClaude(r.Context(), credential)
 		if _, ok := upstreamauth.Claude(ctx); !ok {
 			writeMessagesError(w, ErrUnauthorized)
@@ -125,6 +116,24 @@ func CaptureNativeClaudeOAuth(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// repeatedProtocolHeader returns a protocol header value. A compression/relay
+// proxy in front of Mindctl (e.g. Headroom) may repeat one of these headers
+// verbatim rather than folding it into a single value. That repetition carries
+// no security weight, unlike Authorization, so only genuinely conflicting
+// values are rejected.
+func repeatedProtocolHeader(r *http.Request, name string) (string, bool) {
+	values := r.Header.Values(name)
+	if len(values) == 0 {
+		return "", true
+	}
+	for _, value := range values[1:] {
+		if value != values[0] {
+			return "", false
+		}
+	}
+	return values[0], true
 }
 
 // CaptureChatGPTOAuth attaches one complete caller-managed OAuth credential to

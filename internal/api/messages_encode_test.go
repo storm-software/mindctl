@@ -26,7 +26,8 @@ func TestMessageFromResult(t *testing.T) {
 		{name: "native signature", provider: "anthropic", stop: "end_turn", wantBlocks: 2, result: inference.Result{Model: "claude-test", Status: "completed", Output: []inference.Item{{Type: "message", Text: "hi", ProviderData: []byte(`{"anthropic_content_block":{"type":"text","text":"hi"},"anthropic_prefix":[{"type":"thinking","thinking":"secret","signature":"signed"}]}`)}}}},
 		{name: "omitted thinking retains empty text", provider: "anthropic", stop: "end_turn", wantBlocks: 2, result: inference.Result{Model: "claude-test", Status: "completed", Output: []inference.Item{{Type: "message", Text: "hi", ProviderData: []byte(`{"anthropic_content_block":{"type":"text","text":"hi"},"anthropic_prefix":[{"type":"thinking","thinking":"","signature":"signed"}]}`)}}}},
 		{name: "native block is not portable", provider: "openai", stop: "end_turn", wantBlocks: 1, result: inference.Result{Status: "completed", Output: []inference.Item{{Type: "message", Text: "hi", ProviderData: []byte(`{"anthropic_prefix":[{"type":"thinking","signature":"signed"}]}`)}}}},
-		{name: "unknown native output", provider: "anthropic", result: inference.Result{Output: []inference.Item{{Type: "message", Text: "hi", ProviderData: []byte(`{"anthropic_prefix":[{"type":"unexpected"}],"anthropic_content_block":{"type":"text","text":"hi"}}`)}}}, wantError: true},
+		{name: "server tool blocks relay verbatim", provider: "anthropic", stop: "end_turn", wantBlocks: 4, result: inference.Result{Model: "claude-test", Status: "completed", Output: []inference.Item{{Type: "message", Text: "found", ProviderData: []byte(`{"anthropic_prefix":[{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"x"}},{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[]}}],"anthropic_content_block":{"type":"text","text":"found","citations":null},"anthropic_suffix":[{"type":"redacted_thinking","data":"opaque"}]}`)}}}},
+		{name: "untyped native output", provider: "anthropic", result: inference.Result{Output: []inference.Item{{Type: "message", Text: "hi", ProviderData: []byte(`{"anthropic_prefix":[{"id":"x"}],"anthropic_content_block":{"type":"text","text":"hi"}}`)}}}, wantError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			body, err := messageFromResult(test.result, test.provider)
@@ -38,6 +39,13 @@ func TestMessageFromResult(t *testing.T) {
 			}
 			if body.StopReason != test.stop || len(body.Content) != test.wantBlocks {
 				t.Fatalf("body=%+v", body)
+			}
+			if test.name == "server tool blocks relay verbatim" {
+				encoded, _ := json.Marshal(body.Content)
+				want := `[{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"x"}},{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[]}},{"type":"text","text":"found","citations":null},{"type":"redacted_thinking","data":"opaque"}]`
+				if string(encoded) != want {
+					t.Fatalf("content=%s", encoded)
+				}
 			}
 			if test.name == "omitted thinking retains empty text" {
 				encoded, _ := json.Marshal(body)

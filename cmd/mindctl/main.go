@@ -51,6 +51,7 @@ func main() {
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
 	command := newRootCommand(ctx, stdout, stderr)
 	command.SetArgs(normalizeLegacyConfigFlag(args))
+
 	return command.ExecuteContext(ctx)
 }
 
@@ -66,6 +67,7 @@ func normalizeLegacyConfigFlag(args []string) []string {
 			normalized[index] = arg
 		}
 	}
+
 	return normalized
 }
 
@@ -96,6 +98,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 			)
 		},
 	}
+
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	root.PersistentFlags().String("config", "config.example.yaml", "gateway YAML configuration")
@@ -103,6 +106,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	if err := settings.BindPFlag("config", root.PersistentFlags().Lookup("config")); err != nil {
 		panic(fmt.Sprintf("bind config flag: %v", err))
 	}
+
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print build version information",
@@ -112,6 +116,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 			return err
 		},
 	})
+
 	root.AddCommand(newConfigCommand())
 	root.AddCommand(
 		newStatusCommand(),
@@ -119,6 +124,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		newProviderCommand(settings),
 		newHistoryCommand(settings),
 	)
+
 	return root
 }
 
@@ -145,18 +151,22 @@ func newStatusCommand() *cobra.Command {
 				_, err = fmt.Fprintln(command.OutOrStdout(), connectionStatus(connected))
 				return err
 			}
+
 			codex, err := codexConnected()
 			if err != nil {
 				return err
 			}
+
 			claude, err := claudeConnected()
 			if err != nil {
 				return err
 			}
+
 			output := tabwriter.NewWriter(command.OutOrStdout(), 0, 0, 2, ' ', 0)
 			if _, err := fmt.Fprintf(output, "HARNESS\tSTATUS\ncodex\t%s\nclaude\t%s\n", connectionStatus(codex), connectionStatus(claude)); err != nil {
 				return err
 			}
+
 			return output.Flush()
 		},
 	}
@@ -166,6 +176,7 @@ func connectionStatus(connected bool) string {
 	if connected {
 		return "connected"
 	}
+
 	return "disconnected"
 }
 
@@ -174,24 +185,30 @@ func claudeConnected() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("find home directory: %w", err)
 	}
+
 	body, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, fmt.Errorf("read Claude settings: %w", err)
 	}
+
 	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
 		return false, errors.New("read Claude settings: expected a JSON object")
 	}
+
 	var settings struct {
 		Env struct {
 			AnthropicBaseURL string `json:"ANTHROPIC_BASE_URL"`
 		} `json:"env"`
 	}
+
 	if err := json.Unmarshal(body, &settings); err != nil {
 		return false, fmt.Errorf("read Claude settings: %w", err)
 	}
+
 	return settings.Env.AnthropicBaseURL == "http://127.0.0.1:8080" || settings.Env.AnthropicBaseURL == "http://127.0.0.1:8080/", nil
 }
 
@@ -200,19 +217,23 @@ func codexConnected() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("find home directory: %w", err)
 	}
+
 	path := filepath.Join(home, ".codex", "config.toml")
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, fmt.Errorf("read Codex config: %w", err)
 	}
+
 	settings := viper.New()
 	settings.SetConfigType("toml")
 	if err := settings.ReadConfig(bytes.NewReader(body)); err != nil {
 		return false, fmt.Errorf("read Codex config: %w", err)
 	}
+
 	return settings.GetString("model_provider") == "mindctl", nil
 }
 
@@ -226,21 +247,26 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 		Args:  noArgs("unexpected arguments for history"),
 		RunE: func(command *cobra.Command, _ []string) error {
 			var err error
+
 			filter.Since, err = parseHistoryTime("since", since)
 			if err != nil {
 				return err
 			}
-			filter.Until, err = parseHistoryTime("until", until)
+
+            filter.Until, err = parseHistoryTime("until", until)
 			if err != nil {
 				return err
 			}
-			if filter.Limit < 0 {
+
+            if filter.Limit < 0 {
 				return errors.New("limit must be nonnegative")
 			}
-			if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
+
+            if !filter.Since.IsZero() && !filter.Until.IsZero() && filter.Since.After(filter.Until) {
 				return errors.New("since must not be after until")
 			}
-			switch filter.Status {
+
+            switch filter.Status {
 			case "", "started", "succeeded", "failed":
 			default:
 				return errors.New("status must be started, succeeded, or failed")
@@ -250,19 +276,23 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			db, err := openHistoryStorage(command.Context(), cfg, os.LookupEnv)
+
+            db, err := openHistoryStorage(command.Context(), cfg, os.LookupEnv)
 			if err != nil {
 				return err
 			}
+
 			defer db.Close()
 
 			records, err := db.ListHistory(command.Context(), filter)
 			if err != nil {
 				return err
 			}
+
 			return writeHistory(command.OutOrStdout(), records, full)
 		},
 	}
+
 	command.Flags().StringVar(&filter.Provider, "provider", "", "filter by selected provider")
 	command.Flags().StringVar(&filter.ModelID, "model", "", "filter by selected model")
 	command.Flags().StringVar(&filter.Status, "status", "", "filter by attempt status")
@@ -270,12 +300,13 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().StringVar(&until, "until", "", "include requests at or before an RFC3339 timestamp")
 	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
 	command.Flags().BoolVar(&full, "full", false, "show full request and response content instead of truncating")
-	return command
+
+    return command
 }
 
 const (
-	historyTruncateHeadLength = 100
-	historyTruncateTailLength = 200
+	historyTruncateHeadLength = 50
+	historyTruncateTailLength = 100
 	historyTruncateThreshold  = historyTruncateHeadLength + historyTruncateTailLength
 )
 

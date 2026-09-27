@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/storm-software/mindctl/internal/conversation"
@@ -40,7 +41,7 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	decoded, err := DecodeMessagesRequest(w, r, h.config.MaxBodyBytes)
 	if err != nil {
-		writeMessagesError(w, err)
+		h.reject(w, err)
 		return
 	}
 	if decoded.Request.Model != "mindctl-auto" {
@@ -52,12 +53,12 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !matched {
-			writeMessagesError(w, inference.Invalid("model", "is unknown or incompatible with required features"))
+			h.reject(w, inference.Invalid("model", fmt.Sprintf("%q is unknown or not served by required provider %q", decoded.Request.Model, decoded.RequiredProvider)))
 			return
 		}
 	}
 	ctx := r.Context()
-	if decoded.RequiredProvider == "anthropic" {
+	if decoded.Native {
 		ctx = conversation.WithTrustedNativeInput(ctx)
 	}
 	minTier, maxTier := tierBounds(h.config, Controls{})
@@ -88,4 +89,13 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// reject writes a client error and records why at debug level. Only the
+// gateway-authored reason is logged, never request content.
+func (h *messagesHandler) reject(w http.ResponseWriter, err error) {
+	if h.config.Logger != nil {
+		h.config.Logger.Debug("messages.request.rejected", "error", err.Error())
+	}
+	writeMessagesError(w, err)
 }

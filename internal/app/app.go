@@ -201,7 +201,11 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		}
 		provisioner := headroom.NewProvisioner(filepath.Join(cacheDir, "mindctl"), a.httpClient, nil)
 		a.headroomManager = headroom.NewManager(cfg.Headroom, provisioner, a.httpClient, headroom.NewExecRunner())
-		_ = a.headroomManager.Start(ctx)
+		// A failed start is sticky and surfaces per request as
+		// headroom_unavailable; the trace keeps the gateway-authored reason.
+		if err := a.headroomManager.Start(ctx); err != nil && debugLogger != nil {
+			debugLogger.Debug("headroom.start.failed", "error", err.Error())
+		}
 		compressor = a.headroomManager
 	}
 	a.executor = executor.NewWithCompressor(
@@ -221,6 +225,7 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		MaxBodyBytes: maxBodyBytes, Models: a.catalog, MinTier: a.minTier, MaxTier: a.maxTier, SafeFallbackTier: a.safeFallbackTier,
 		ProviderCredentials: a.providerCredentials, ProviderAvailability: a.providerAvailability,
 		ChatGPTOAuthProviders: chatGPTOAuthProviders, ClaudeOAuthProviders: claudeOAuthProviders,
+		Logger: debugLogger,
 	}
 	responses := api.NewResponsesHandler(a.executor, responsesConfig)
 	responses = api.CaptureClaudeOAuth(responses)

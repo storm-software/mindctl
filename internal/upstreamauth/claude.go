@@ -16,6 +16,23 @@ type ClaudeCredential struct {
 
 type claudeContextKey struct{}
 
+type anthropicBetaContextKey struct{}
+
+// WithAnthropicBeta records a native Messages caller's anthropic-beta header
+// so API-key Anthropic requests can enable the same features.
+func WithAnthropicBeta(ctx context.Context, beta string) context.Context {
+	if beta == "" || !validProtocolValue(beta) {
+		return ctx
+	}
+	return context.WithValue(ctx, anthropicBetaContextKey{}, beta)
+}
+
+// AnthropicBeta returns the caller's anthropic-beta header, if recorded.
+func AnthropicBeta(ctx context.Context) string {
+	beta, _ := ctx.Value(anthropicBetaContextKey{}).(string)
+	return beta
+}
+
 // WithClaude returns a child context containing a valid credential.
 func WithClaude(ctx context.Context, credential ClaudeCredential) context.Context {
 	if !validClaudeCredential(credential) {

@@ -57,7 +57,7 @@ func (w *messagesSSEWriter) WriteEvent(ctx context.Context, event inference.Even
 		if event.ItemType == "thinking" && w.metadata.Provider != "anthropic" {
 			return nil
 		}
-		return w.startBlock(key, event.ItemType, event.CallID, event.Name)
+		return w.startBlock(key, event.ItemType, event.CallID, event.Name, w.nativeFrame(event, "content_block"))
 	case "content_block_stop":
 		return w.stopBlock(key)
 	case "content_block_delta", "response.output_text.delta", "response.function_call_arguments.delta":
@@ -72,8 +72,11 @@ func (w *messagesSSEWriter) WriteEvent(ctx context.Context, event inference.Even
 		if blockType == "thinking" && w.metadata.Provider != "anthropic" {
 			return nil
 		}
-		if err := w.startBlock(key, blockType, event.CallID, event.Name); err != nil {
+		if err := w.startBlock(key, blockType, event.CallID, event.Name, nil); err != nil {
 			return err
+		}
+		if native := w.nativeFrame(event, "delta"); native != nil {
+			return w.write("content_block_delta", map[string]any{"type": "content_block_delta", "index": w.blocks[key], "delta": native})
 		}
 		var delta map[string]any
 		switch {
@@ -91,7 +94,7 @@ func (w *messagesSSEWriter) WriteEvent(ctx context.Context, event inference.Even
 		return w.write("content_block_delta", map[string]any{"type": "content_block_delta", "index": w.blocks[key], "delta": delta})
 	case "response.output_item.added":
 		if event.ItemType == "function_call" && event.CallID != "" && event.Name != "" {
-			return w.startBlock(key, "tool_use", event.CallID, event.Name)
+			return w.startBlock(key, "tool_use", event.CallID, event.Name, nil)
 		}
 	case "response.output_item.done":
 		if event.ItemType == "function_call" || event.ItemType == "message" {
@@ -121,16 +124,30 @@ func (w *messagesSSEWriter) WriteEvent(ctx context.Context, event inference.Even
 	return nil
 }
 
-func (w *messagesSSEWriter) startBlock(key, blockType, callID, name string) error {
+// nativeFrame returns a field of the raw Anthropic stream frame so blocks the
+// gateway does not model, such as server_tool_use, reach the client unchanged.
+func (w *messagesSSEWriter) nativeFrame(event inference.Event, field string) json.RawMessage {
+	if w.metadata.Provider != "anthropic" || len(event.Data) == 0 {
+		return nil
+	}
+	var frame map[string]json.RawMessage
+	if json.Unmarshal(event.Data, &frame) != nil || len(frame[field]) == 0 || string(frame[field]) == "null" {
+		return nil
+	}
+	return frame[field]
+}
+
+func (w *messagesSSEWriter) startBlock(key, blockType, callID, name string, native json.RawMessage) error {
 	if _, exists := w.blocks[key]; exists {
 		return nil
 	}
-	switch blockType {
-	case "tool_use", "function_call":
+	switch {
+	case native != nil:
+	case blockType == "tool_use" || blockType == "function_call":
 		if callID == "" || name == "" {
 			return inference.Invalid("output", "tool call lacks an identifier or name")
 		}
-	case "text", "thinking":
+	case blockType == "text" || blockType == "thinking":
 	default:
 		return inference.Invalid("output", "cannot translate stream block")
 	}
@@ -143,12 +160,15 @@ func (w *messagesSSEWriter) startBlock(key, blockType, callID, name string) erro
 	index := w.nextIndex
 	w.nextIndex++
 	w.blocks[key], w.open = index, key
-	var block map[string]any
-	switch blockType {
-	case "tool_use", "function_call":
+	var block any = native
+	switch {
+	case blockType == "tool_use" || blockType == "function_call":
 		w.usedTool = true
-		block = map[string]any{"type": "tool_use", "id": callID, "name": name, "input": map[string]any{}}
-	case "thinking":
+		if native == nil {
+			block = map[string]any{"type": "tool_use", "id": callID, "name": name, "input": map[string]any{}}
+		}
+	case native != nil:
+	case blockType == "thinking":
 		block = map[string]any{"type": "thinking", "thinking": ""}
 	default:
 		block = map[string]any{"type": "text", "text": ""}

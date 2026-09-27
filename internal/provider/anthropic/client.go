@@ -131,6 +131,9 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Resp
 		request.Header.Set("anthropic-beta", beta)
 	} else {
 		request.Header.Set("x-api-key", accessToken)
+		if beta := apiKeyBeta(upstreamauth.AnthropicBeta(ctx)); beta != "" {
+			request.Header.Set("anthropic-beta", beta)
+		}
 	}
 	version := anthropicVersion
 	if c.auth == authClaudeOAuth && claudeCredential.Version != "" {
@@ -151,6 +154,18 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool) (*http.Resp
 		return nil, requestID, &provider.Error{Kind: errorKind(response.StatusCode), Status: response.StatusCode, RequestID: requestID, Err: errors.New("provider returned an error status")}
 	}
 	return response, requestID, nil
+}
+
+// apiKeyBeta drops OAuth-only flags from a caller's anthropic-beta header,
+// which API-key requests must not send.
+func apiKeyBeta(beta string) string {
+	var flags []string
+	for _, flag := range strings.Split(beta, ",") {
+		if flag = strings.TrimSpace(flag); flag != "" && !strings.HasPrefix(flag, "oauth-") {
+			flags = append(flags, flag)
+		}
+	}
+	return strings.Join(flags, ",")
 }
 
 func errorKind(status int) provider.ErrorKind {
@@ -178,7 +193,7 @@ type stream struct {
 	contentBlocks                 map[int]streamContentIdentity
 }
 
-type streamContentIdentity struct{ itemID, callID, name string }
+type streamContentIdentity struct{ itemID, itemType, callID, name string }
 
 func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	frame, err := s.reader.Next(ctx)
@@ -219,11 +234,16 @@ func (s *stream) trackContentBlock(kind string, data []byte, event *inference.Ev
 		if s.contentBlocks == nil {
 			s.contentBlocks = make(map[int]streamContentIdentity)
 		}
-		s.contentBlocks[index] = streamContentIdentity{itemID: event.ItemID, callID: event.CallID, name: event.Name}
+		s.contentBlocks[index] = streamContentIdentity{itemID: event.ItemID, itemType: event.ItemType, callID: event.CallID, name: event.Name}
 		return
 	}
 	if identity, ok := s.contentBlocks[index]; ok {
 		event.ItemID, event.CallID, event.Name = identity.itemID, identity.callID, identity.name
+		// Server tool input streams like tool_use input but is not a client
+		// call; it stays in the raw frame for native relays.
+		if identity.itemType != "tool_use" {
+			event.ArgumentsDelta = ""
+		}
 	}
 }
 
@@ -310,7 +330,9 @@ func parseStreamEvent(kind string, data []byte, previousResponseID, previousStat
 	case "content_block_start":
 		event.ItemID = itemID(frame.Index, frame.ContentBlock)
 		event.ItemType = frame.ContentBlock.Type
-		event.CallID, event.Name = frame.ContentBlock.ID, frame.ContentBlock.Name
+		if frame.ContentBlock.Type == "tool_use" {
+			event.CallID, event.Name = frame.ContentBlock.ID, frame.ContentBlock.Name
+		}
 	case "content_block_delta":
 		event.ItemID = strconv.Itoa(frame.Index)
 		switch frame.Delta.Type {

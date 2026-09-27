@@ -1083,3 +1083,275 @@ func TestClassifierUsesResolvedSecretAndCloseReleasesItsConnections(t *testing.T
 		t.Fatal("App.Close left its classifier connection open")
 	}
 }
+
+func TestMessagesForwardsRecordedClaudeCodeRequestToAnthropicUnchanged(t *testing.T) {
+	recorded, err := os.ReadFile(filepath.Join("..", "api", "testdata", "claude_code_2_1_283_tool_search.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var upstream atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/classify":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/v1/messages":
+			body, _ := io.ReadAll(r.Body)
+			upstream.Store(body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n"+
+				"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"+
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"+
+				"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"+
+				"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n"+
+				"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.ClaudeMessages.Enabled = true
+	cfg.Classifier.Endpoint = server.URL
+	cfg.Providers[0] = config.ProviderConfig{ID: "anthropic", BaseURL: server.URL, Auth: string(config.ProviderAuthClaudeOAuthPassthrough)}
+	cfg.Models[0].ID, cfg.Models[0].Provider, cfg.Models[0].MaxOutputTokens = "claude-opus-5-5", "anthropic", 128000
+	delete(env, "TEST_PROVIDER_KEY")
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(recorded))
+	request.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+	request.Header.Set("Authorization", "Bearer claude.oauth")
+	request.Header.Set("anthropic-beta", "mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,advanced-tool-use-2025-11-20")
+	response := httptest.NewRecorder()
+	a.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: message_stop") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	sent, _ := upstream.Load().([]byte)
+	var got, want map[string]any
+	if err := json.Unmarshal(sent, &got); err != nil {
+		t.Fatalf("upstream body=%s err=%v", sent, err)
+	}
+	if err := json.Unmarshal(recorded, &want); err != nil {
+		t.Fatal(err)
+	}
+	// String message content is the only normalization: it becomes one text block.
+	for _, message := range want["messages"].([]any) {
+		message := message.(map[string]any)
+		if text, ok := message["content"].(string); ok {
+			message["content"] = []any{map[string]any{"type": "text", "text": text}}
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		gotJSON, _ := json.MarshalIndent(got, "", "  ")
+		t.Fatalf("upstream request differs from the recorded request:\n%s", gotJSON)
+	}
+}
+
+func anthropicMessagesApp(t *testing.T, upstream http.HandlerFunc) (*App, map[string]string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/classify" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		upstream(w, r)
+	}))
+	t.Cleanup(server.Close)
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.ClaudeMessages.Enabled = true
+	cfg.Classifier.Endpoint = server.URL
+	cfg.Providers[0] = config.ProviderConfig{ID: "anthropic", BaseURL: server.URL, Auth: string(config.ProviderAuthClaudeOAuthPassthrough)}
+	cfg.Models[0].ID, cfg.Models[0].Provider, cfg.Models[0].MaxOutputTokens = "claude-opus-5-5", "anthropic", 128000
+	delete(env, "TEST_PROVIDER_KEY")
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a, env
+}
+
+func postMessages(a *App, env map[string]string, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	request.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+	request.Header.Set("Authorization", "Bearer claude.oauth")
+	response := httptest.NewRecorder()
+	a.Handler().ServeHTTP(response, request)
+	return response
+}
+
+func TestMessagesStreamRelaysNativeAnthropicBlocks(t *testing.T) {
+	blocks := []string{
+		`{"type":"thinking","thinking":"","signature":""}`,
+		`{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{}}`,
+		`{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[{"type":"tool_reference","tool_name":"lookup"}]}}`,
+		`{"type":"text","text":""}`,
+		`{"type":"redacted_thinking","data":"opaque"}`,
+	}
+	deltas := map[int][]string{
+		0: {`{"type":"thinking_delta","thinking":"plan"}`, `{"type":"signature_delta","signature":"sig"}`},
+		1: {`{"type":"input_json_delta","partial_json":"{\"pattern\":"}`, `{"type":"input_json_delta","partial_json":"\"look\"}"}`},
+		3: {`{"type":"text_delta","text":"found it"}`, `{"type":"citations_delta","citation":{"type":"char_location","cited_text":"x"}}`},
+	}
+	a, env := anthropicMessagesApp(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n")
+		for index, block := range blocks {
+			_, _ = io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":"+string(rune('0'+index))+",\"content_block\":"+block+"}\n\n")
+			for _, delta := range deltas[index] {
+				_, _ = io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":"+string(rune('0'+index))+",\"delta\":"+delta+"}\n\n")
+			}
+			_, _ = io.WriteString(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":"+string(rune('0'+index))+"}\n\n")
+		}
+		_, _ = io.WriteString(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":9}}\n\n"+
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	})
+	response := postMessages(a, env, `{"model":"claude-opus-5-5","max_tokens":64,"stream":true,"thinking":{"type":"adaptive"},"messages":[{"role":"user","content":"find"}],"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var starts, gotDeltas []string
+	for _, frame := range strings.Split(response.Body.String(), "\n\n") {
+		_, data, ok := strings.Cut(frame, "data: ")
+		if !ok {
+			continue
+		}
+		var event struct {
+			Type         string          `json:"type"`
+			Index        int             `json:"index"`
+			ContentBlock json.RawMessage `json:"content_block"`
+			Delta        json.RawMessage `json:"delta"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			t.Fatal(err)
+		}
+		switch event.Type {
+		case "error":
+			t.Fatalf("stream error: %s", data)
+		case "content_block_start":
+			if event.Index != len(starts) {
+				t.Fatalf("block index=%d, want %d", event.Index, len(starts))
+			}
+			starts = append(starts, string(event.ContentBlock))
+		case "content_block_delta":
+			gotDeltas = append(gotDeltas, string(event.Delta))
+		}
+	}
+	var wantDeltas []string
+	for index := range blocks {
+		wantDeltas = append(wantDeltas, deltas[index]...)
+	}
+	if !reflect.DeepEqual(starts, blocks) || !reflect.DeepEqual(gotDeltas, wantDeltas) || !strings.Contains(response.Body.String(), `"stop_reason":"end_turn"`) {
+		t.Fatalf("starts=%q deltas=%q body=%s", starts, gotDeltas, response.Body.String())
+	}
+}
+
+func TestMessagesNonStreamRelaysNativeAnthropicBlocks(t *testing.T) {
+	content := `[{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"look"}},` +
+		`{"type":"tool_search_tool_result","tool_use_id":"srvtoolu_1","content":{"type":"tool_search_tool_search_result","tool_references":[]}},` +
+		`{"type":"text","text":"none found","citations":null},` +
+		`{"type":"server_tool_use","id":"srvtoolu_2","name":"tool_search_tool_regex","input":{"pattern":"other"}}]`
+	a, env := anthropicMessagesApp(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":`+content+`,"stop_reason":"pause_turn","usage":{"input_tokens":2,"output_tokens":1}}`)
+	})
+	response := postMessages(a, env, `{"model":"claude-opus-5-5","max_tokens":64,"messages":[{"role":"user","content":"find"}],"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}]}`)
+	var body struct {
+		Content    json.RawMessage `json:"content"`
+		StopReason string          `json:"stop_reason"`
+	}
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if string(body.Content) != content || body.StopReason != "pause_turn" {
+		t.Fatalf("content=%s stop=%s", body.Content, body.StopReason)
+	}
+}
+
+func TestMessagesRelaysNativeOnlyAnthropicResponses(t *testing.T) {
+	block := `{"type":"server_tool_use","id":"srvtoolu_1","name":"tool_search_tool_regex","input":{"pattern":"look"}}`
+	a, env := anthropicMessagesApp(t, func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		if !request.Stream {
+			_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","role":"assistant","content":[`+block+`],"stop_reason":"pause_turn","usage":{"input_tokens":2,"output_tokens":1}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n"+
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srvtoolu_1\",\"name\":\"tool_search_tool_regex\",\"input\":{}}}\n\n"+
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"pattern\\\":\\\"look\\\"}\"}}\n\n"+
+			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"+
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"pause_turn\"},\"usage\":{\"output_tokens\":2}}\n\n"+
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	})
+	request := `{"model":"claude-opus-5-5","max_tokens":64,"messages":[{"role":"user","content":"find"}],"tools":[{"type":"tool_search_tool_regex_20251119","name":"tool_search_tool_regex"}]`
+	response := postMessages(a, env, request+`}`)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"content":[`+block+`]`) || !strings.Contains(response.Body.String(), `"stop_reason":"pause_turn"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = postMessages(a, env, request+`,"stream":true}`)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "event: error") || !strings.Contains(response.Body.String(), `"type":"server_tool_use"`) || !strings.Contains(response.Body.String(), `"stop_reason":"pause_turn"`) {
+		t.Fatalf("stream status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestMessagesRoutesRecordedClaudeCodeRequestToOtherProviders(t *testing.T) {
+	recorded, err := os.ReadFile(filepath.Join("..", "api", "testdata", "claude_code_2_1_283_tool_search.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request map[string]any
+	if err := json.Unmarshal(recorded, &request); err != nil {
+		t.Fatal(err)
+	}
+	request["model"] = "mindctl-auto"
+	request["tools"] = append(request["tools"].([]any), map[string]any{"type": "tool_search_tool_regex_20251119", "name": "tool_search_tool_regex"})
+	body, _ := json.Marshal(request)
+	var upstream atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/classify" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		sent, _ := io.ReadAll(r.Body)
+		upstream.Store(sent)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\"item_id\":\"msg_1\",\"delta\":\"hi\"}\n\n"+
+			"event: response.completed\ndata: {\"response\":{\"id\":\"upstream\",\"status\":\"completed\",\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n")
+	}))
+	t.Cleanup(server.Close)
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.ClaudeMessages.Enabled = true
+	cfg.Classifier.Endpoint = server.URL
+	cfg.Providers[0].BaseURL = server.URL
+	cfg.Providers = append(cfg.Providers, config.ProviderConfig{ID: "anthropic", BaseURL: "https://api.anthropic.com", Auth: string(config.ProviderAuthClaudeOAuthPassthrough)})
+	cfg.Models[0].ContextWindow, cfg.Models[0].MaxOutputTokens = 1000000, 128000
+	a, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	response := postMessages(a, env, string(body))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"text":"hi"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	sent, _ := upstream.Load().([]byte)
+	for _, native := range []string{"defer_loading", "context_management", "cache_control", "output_config", "metadata", "signature", "tool_search_tool_regex"} {
+		if strings.Contains(string(sent), native) {
+			t.Fatalf("OpenAI request carries Anthropic-only %s: %s", native, sent)
+		}
+	}
+	if !strings.Contains(string(sent), `"role":"system"`) || !strings.Contains(string(sent), `"DeferredToolPlaceholder"`) || !strings.Contains(string(sent), `"arguments":"{`) {
+		t.Fatalf("portable content was lost: %s", sent)
+	}
+}

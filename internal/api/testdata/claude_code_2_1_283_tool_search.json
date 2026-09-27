@@ -1,0 +1,175 @@
+{
+  "model": "claude-opus-5-5",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "redacted text 4"
+        },
+        {
+          "type": "text",
+          "text": "redacted text 5"
+        }
+      ]
+    },
+    {
+      "role": "system",
+      "content": "redacted text 6",
+      "output_config": {
+        "effort": "medium"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "thinking",
+          "thinking": "",
+          "signature": "c2lnbmF0dXJl"
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_capture1",
+          "name": "ToolSearch",
+          "input": {
+            "query": "select:DeferredToolPlaceholder",
+            "max_results": 1
+          }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_capture1",
+          "content": "No matching deferred tools found"
+        }
+      ]
+    },
+    {
+      "role": "system",
+      "content": [
+        {
+          "type": "text",
+          "text": "redacted text 7",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "system": [
+    {
+      "type": "text",
+      "text": "redacted text 1"
+    },
+    {
+      "type": "text",
+      "text": "redacted text 2",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    },
+    {
+      "type": "text",
+      "text": "redacted text 3",
+      "cache_control": {
+        "type": "ephemeral"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "name": "Read",
+      "description": "redacted text 8",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "description": "redacted",
+            "type": "string"
+          },
+          "offset": {
+            "description": "redacted",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "description": "redacted",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "pages": {
+            "description": "redacted",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "ToolSearch",
+      "description": "redacted text 9",
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "description": "redacted",
+            "type": "string"
+          },
+          "max_results": {
+            "description": "redacted",
+            "default": 5,
+            "type": "number"
+          }
+        },
+        "required": [
+          "query",
+          "max_results"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "DeferredToolPlaceholder",
+      "description": "redacted text 10",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "defer_loading": true
+    }
+  ],
+  "metadata": {
+    "user_id": "{\"device_id\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"account_uuid\": \"\", \"session_id\": \"00000000-0000-0000-0000-000000000000\"}"
+  },
+  "max_tokens": 128000,
+  "thinking": {
+    "type": "adaptive",
+    "display": "omitted"
+  },
+  "context_management": {
+    "edits": [
+      {
+        "type": "clear_thinking_20251015",
+        "keep": "all"
+      }
+    ]
+  },
+  "output_config": {
+    "effort": "medium"
+  },
+  "stream": true
+}

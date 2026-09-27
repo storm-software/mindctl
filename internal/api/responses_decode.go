@@ -355,5 +355,12 @@ func decodeError(err error) error {
 	if errors.As(err, &tooLarge) {
 		return fmt.Errorf("%w: limit %d", ErrBodyTooLarge, tooLarge.Limit)
 	}
+	var typeErr *json.UnmarshalTypeError
+	if errors.As(err, &typeErr) && typeErr.Field != "" {
+		return inference.Invalid(typeErr.Field, "has an invalid JSON type "+typeErr.Value)
+	}
+	if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+		return inference.Invalid(strings.Trim(field, `"`), "is not a supported field")
+	}
 	return inference.Invalid("body", "must contain one valid JSON object")
 }

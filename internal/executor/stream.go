@@ -407,8 +407,8 @@ func drainStream(ctx context.Context, stream provider.Stream, responseID, model,
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				result := accumulator.result(responseID)
-				if len(accumulator.pendingNative) != 0 || accumulator.currentNative != nil {
-					return result, completion, emitted, inference.Invalid("output", "incomplete signed thinking continuation")
+				if accumulator.currentNative != nil {
+					return result, completion, emitted, inference.Invalid("output", "incomplete native content block")
 				}
 				if !accumulator.terminal || !provider.IsSuccessfulCompletion(result.Status) {
 					return result, completion, emitted, provider.UnsuccessfulCompletionError(result.ProviderRequestID)
@@ -502,38 +502,74 @@ type streamAccumulator struct {
 	outputIndexes                                []int
 	text, functions                              map[string]int
 	customTools                                  map[string]int
-	currentNative                                *nativeThinkingBlock
-	pendingNative                                []nativeThinkingBlock
-	nativeFor                                    map[int][]nativeThinkingBlock
+	currentNative                                *nativeBlock
+	pendingNative                                []json.RawMessage
+	nativeFor                                    map[int][]json.RawMessage
 }
 
-type nativeThinkingBlock struct {
-	Type      string `json:"type"`
-	Thinking  string `json:"thinking"`
-	Signature string `json:"signature"`
+// nativeBlock assembles an Anthropic-only content block, such as signed
+// thinking or server_tool_use, from its start frame and deltas.
+type nativeBlock struct {
+	fields                           map[string]json.RawMessage
+	thinking, signature, partialJSON string
 }
 
 func (a *streamAccumulator) observeNative(event inference.Event) error {
 	switch event.Type {
 	case "content_block_start":
-		if event.ItemType == "thinking" {
-			a.currentNative = &nativeThinkingBlock{Type: "thinking"}
+		if event.ItemType == "text" || event.ItemType == "tool_use" {
+			return nil
 		}
+		var frame struct {
+			ContentBlock map[string]json.RawMessage `json:"content_block"`
+		}
+		if json.Unmarshal(event.Data, &frame) != nil || frame.ContentBlock == nil {
+			kind, _ := json.Marshal(event.ItemType)
+			frame.ContentBlock = map[string]json.RawMessage{"type": kind}
+		}
+		a.currentNative = &nativeBlock{fields: frame.ContentBlock}
 	case "content_block_delta":
 		if a.currentNative != nil {
-			a.currentNative.Thinking += event.Thinking
-			a.currentNative.Signature += event.Signature
+			var frame struct {
+				Delta struct {
+					PartialJSON string `json:"partial_json"`
+				} `json:"delta"`
+			}
+			_ = json.Unmarshal(event.Data, &frame)
+			a.currentNative.thinking += event.Thinking
+			a.currentNative.signature += event.Signature
+			a.currentNative.partialJSON += frame.Delta.PartialJSON
 		}
 	case "content_block_stop":
 		if a.currentNative != nil {
-			if a.currentNative.Signature == "" {
-				return inference.Invalid("output", "incomplete signed thinking continuation")
+			block, err := a.currentNative.encode()
+			if err != nil {
+				return err
 			}
-			a.pendingNative = append(a.pendingNative, *a.currentNative)
+			a.pendingNative = append(a.pendingNative, block)
 			a.currentNative = nil
 		}
 	}
 	return nil
+}
+
+func (b *nativeBlock) encode() (json.RawMessage, error) {
+	var kind string
+	_ = json.Unmarshal(b.fields["type"], &kind)
+	if kind == "thinking" {
+		if b.signature == "" {
+			return nil, inference.Invalid("output", "incomplete signed thinking continuation")
+		}
+		b.fields["thinking"], _ = json.Marshal(b.thinking)
+		b.fields["signature"], _ = json.Marshal(b.signature)
+	}
+	if b.partialJSON != "" {
+		if !json.Valid([]byte(b.partialJSON)) {
+			return nil, inference.Invalid("output", "incomplete native tool input")
+		}
+		b.fields["input"] = json.RawMessage(b.partialJSON)
+	}
+	return json.Marshal(b.fields)
 }
 
 func (a *streamAccumulator) attachNative(index int) {
@@ -541,9 +577,9 @@ func (a *streamAccumulator) attachNative(index int) {
 		return
 	}
 	if a.nativeFor == nil {
-		a.nativeFor = make(map[int][]nativeThinkingBlock)
+		a.nativeFor = make(map[int][]json.RawMessage)
 	}
-	a.nativeFor[index] = append([]nativeThinkingBlock(nil), a.pendingNative...)
+	a.nativeFor[index] = append([]json.RawMessage(nil), a.pendingNative...)
 	a.pendingNative = nil
 }
 
@@ -689,20 +725,39 @@ func (a *streamAccumulator) result(responseID string) inference.Result {
 	sort.SliceStable(positions, func(left, right int) bool {
 		return a.outputIndexes[positions[left]] < a.outputIndexes[positions[right]]
 	})
-	for _, position := range positions {
+	for index, position := range positions {
 		item := a.items[position]
 		if item.Type == "function_call" && len(item.Arguments) != 0 && !json.Valid(item.Arguments) {
 			continue
 		}
-		if prefix := a.nativeFor[position]; len(prefix) != 0 {
+		prefix := a.nativeFor[position]
+		// Trailing native blocks, such as a server_tool_use before pause_turn,
+		// stay with the last item.
+		var suffix []json.RawMessage
+		if index == len(positions)-1 {
+			suffix = a.pendingNative
+		}
+		if len(prefix) != 0 || len(suffix) != 0 {
 			content := map[string]any{"type": "text", "text": item.Text}
 			if item.Type == "function_call" {
 				content = map[string]any{"type": "tool_use", "id": item.CallID, "name": item.Name, "input": item.Arguments}
 			}
-			item.ProviderData, _ = json.Marshal(map[string]any{"anthropic_content_block": content, "anthropic_prefix": prefix})
+			data := map[string]any{"anthropic_content_block": content}
+			if len(prefix) != 0 {
+				data["anthropic_prefix"] = prefix
+			}
+			if len(suffix) != 0 {
+				data["anthropic_suffix"] = suffix
+			}
+			item.ProviderData, _ = json.Marshal(data)
 			item.ContinuationProvider = "anthropic"
 		}
 		items = append(items, item)
+	}
+	if len(items) == 0 && len(a.pendingNative) != 0 {
+		// A textless carrier keeps a response made only of native blocks.
+		data, _ := json.Marshal(map[string]any{"anthropic_suffix": a.pendingNative})
+		items = append(items, inference.Item{Type: "message", Role: "assistant", ContinuationProvider: "anthropic", ProviderData: data})
 	}
 	return inference.Result{ID: responseID, Model: a.model, ProviderRequestID: a.providerRequestID, Status: status, StopReason: a.stopReason, Output: items, Usage: a.usage}
 }

@@ -62,7 +62,8 @@ func (t Turn) TranscriptFor(provider string) []inference.Item {
 			origin = t.origins[i]
 		}
 		if origin != "" && origin != provider {
-			if item.Type == "reasoning" {
+			// Reasoning and textless native carriers have no portable content.
+			if item.Type == "reasoning" || (item.Type == "message" && item.Text == "" && len(item.ImageURL) == 0) {
 				continue
 			}
 			item.ProviderData = nil

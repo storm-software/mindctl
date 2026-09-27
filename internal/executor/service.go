@@ -264,6 +264,7 @@ func providerScopedContext(ctx context.Context, providerID string) context.Conte
 	if providerID != "anthropic" {
 		return upstreamauth.WithoutClaude(ctx)
 	}
+
 	return ctx
 }
 
@@ -272,10 +273,17 @@ func providerScopedRequest(request inference.Request, providerID string) inferen
 		request.Thinking = nil
 		request.AnthropicSystem = nil
 		request.AnthropicToolChoice = nil
-		request.Tools = append([]inference.Tool(nil), request.Tools...)
-		for index := range request.Tools {
-			request.Tools[index].CacheControl = nil
+		request.AnthropicExtra = nil
+		var tools []inference.Tool
+		for _, tool := range request.Tools {
+			// Anthropic server tools have no schema and no portable form.
+			if len(tool.AnthropicNative) != 0 && len(tool.Parameters) == 0 {
+				continue
+			}
+			tool.CacheControl, tool.AnthropicNative = nil, nil
+			tools = append(tools, tool)
 		}
+		request.Tools = tools
 	}
 	return request
 }

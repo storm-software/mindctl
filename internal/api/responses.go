@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -29,6 +30,8 @@ type ResponsesConfig struct {
 	ProviderCredentials, ProviderAvailability map[string]bool
 	ChatGPTOAuthProviders                     map[string]bool
 	ClaudeOAuthProviders                      map[string]bool
+	// Logger receives debug diagnostics such as rejected requests. Nil disables them.
+	Logger *slog.Logger
 }
 
 // NewResponsesHandler exposes the supported OpenAI Responses subset. Caller

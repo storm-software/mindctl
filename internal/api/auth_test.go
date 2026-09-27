@@ -148,3 +148,28 @@ func TestAuthenticateWithErrorKeepsExistingResponsesShape(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureNativeClaudeOAuthRecordsBetaWithoutBearer(t *testing.T) {
+	var beta string
+	var present bool
+	handler := CaptureNativeClaudeOAuth(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		beta = upstreamauth.AnthropicBeta(request.Context())
+		_, present = upstreamauth.Claude(request.Context())
+	}))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Set("x-api-key", "caller-key")
+	request.Header.Set("anthropic-beta", "advanced-tool-use-2025-11-20")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if beta != "advanced-tool-use-2025-11-20" || present {
+		t.Fatalf("beta=%q credential=%v", beta, present)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Add("anthropic-beta", "a")
+	request.Header.Add("anthropic-beta", "b")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("conflicting beta status=%d", response.Code)
+	}
+}

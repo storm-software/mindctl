@@ -247,7 +247,12 @@ func toResponseInput(item inference.Item) responseInputItem {
 		if strings.HasSuffix(item.Type, "_call_output") {
 			return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Output: item.Output}
 		}
-		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: item.Arguments, Output: item.Output}
+		arguments := item.Arguments
+		if item.Type == "function_call" {
+			// Messages tool_use input is a JSON object; Responses requires a string.
+			arguments = encodeFunctionCallArguments(arguments)
+		}
+		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Arguments: arguments, Output: item.Output}
 	}
 }
 

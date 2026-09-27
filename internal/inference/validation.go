@@ -81,7 +81,8 @@ func validateItem(item Item) error {
 		if item.Role != "user" && item.Role != "assistant" && item.Role != "system" && item.Role != "developer" {
 			return errors.New("message role is invalid")
 		}
-		if item.Text == "" && len(item.ImageURL) == 0 {
+		// Anthropic carriers hold only native blocks, such as server_tool_use.
+		if item.Text == "" && len(item.ImageURL) == 0 && (item.ContinuationProvider != "anthropic" || len(item.ProviderData) == 0) {
 			return errors.New("message content is required")
 		}
 	case "input_image":
