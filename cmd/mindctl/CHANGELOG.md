@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.39](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.39) (09/27/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolved the content must not be empty error ([0e17ff0](https://github.com/storm-software/mindctl/commit/0e17ff0))
+
 ## [0.1.38](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.38) (09/27/2026)
 
 ### Features
