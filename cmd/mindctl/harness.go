@@ -9,26 +9,47 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // routerOrigin is the local gateway origin that harness setup writes and
 // status checks compare against.
 const routerOrigin = "http://127.0.0.1:8080"
 
+// harnessState describes how a harness is configured relative to the router.
+type harnessState string
+
+const (
+	// harnessConnected means the harness sends requests to the router.
+	harnessConnected harnessState = "connected"
+	// harnessOff means the router settings are parked and can be restored
+	// with `mindctl on`.
+	harnessOff harnessState = "off"
+	// harnessDisconnected means the harness is not set up for the router.
+	harnessDisconnected harnessState = "disconnected"
+)
+
+// actionResult reports what a harness action did. Changed is false when the
+// harness was already in the requested state.
+type actionResult struct {
+	Changed bool
+	Message string
+}
+
 // harness describes a command-line client that can be pointed at the router.
 type harness struct {
 	ID          string
 	Name        string
 	Description string
-	Connected   func() (bool, error)
-	Setup       func(home string) (string, error)
+	State       func(home string) (harnessState, error)
+	Setup       func(home string) (actionResult, error)
+	Off         func(home string) (actionResult, error)
+	On          func(home string) (actionResult, error)
+	Uninstall   func(home string) (actionResult, error)
 }
 
 var harnesses = []harness{
@@ -36,65 +57,154 @@ var harnesses = []harness{
 		ID:          "claude",
 		Name:        "Claude Code",
 		Description: "patches ~/.claude/settings.json",
-		Connected:   claudeConnected,
+		State:       claudeState,
 		Setup:       setupClaude,
+		Off:         offClaude,
+		On:          onClaude,
+		Uninstall:   uninstallClaude,
 	},
 	{
 		ID:          "codex",
 		Name:        "Codex",
 		Description: "patches ~/.codex/config.toml",
-		Connected:   codexConnected,
+		State:       codexState,
 		Setup:       setupCodex,
+		Off:         offCodex,
+		On:          onCodex,
+		Uninstall:   uninstallCodex,
 	},
 }
 
-// runSetup configures the requested harnesses, or asks which ones to
-// configure when none were requested.
-func runSetup(command *cobra.Command, requested []string) error {
+func findHarness(id string) (harness, bool) {
+	index := slices.IndexFunc(harnesses, func(candidate harness) bool { return candidate.ID == id })
+	if index < 0 {
+		return harness{}, false
+	}
+
+	return harnesses[index], true
+}
+
+// harnessAction is one operation that can be applied to several harnesses.
+type harnessAction struct {
+	// Name completes "Select the harnesses to ...".
+	Name string
+	Run  func(candidate harness, home string) (actionResult, error)
+	// NextSteps, when set, is printed after any selected harness changed.
+	NextSteps func(output io.Writer, selected []string) error
+}
+
+var (
+	setupAction = harnessAction{
+		Name:      "set up",
+		Run:       func(candidate harness, home string) (actionResult, error) { return candidate.Setup(home) },
+		NextSteps: writeSetupNextSteps,
+	}
+	offAction = harnessAction{
+		Name: "turn off",
+		Run:  func(candidate harness, home string) (actionResult, error) { return candidate.Off(home) },
+	}
+	onAction = harnessAction{
+		Name: "turn on",
+		Run:  func(candidate harness, home string) (actionResult, error) { return candidate.On(home) },
+	}
+	uninstallAction = harnessAction{
+		Name: "uninstall",
+		Run:  func(candidate harness, home string) (actionResult, error) { return candidate.Uninstall(home) },
+	}
+)
+
+// addHarnessFlags adds one boolean flag per harness, such as --claude.
+func addHarnessFlags(command *cobra.Command, verb string) {
+	for _, candidate := range harnesses {
+		command.Flags().Bool(candidate.ID, false, verb+" "+candidate.Name)
+	}
+}
+
+// requestedHarnesses returns the IDs of the harness flags that were set.
+func requestedHarnesses(command *cobra.Command) []string {
+	var requested []string
+	for _, candidate := range harnesses {
+		if enabled, _ := command.Flags().GetBool(candidate.ID); enabled {
+			requested = append(requested, candidate.ID)
+		}
+	}
+
+	return requested
+}
+
+// newHarnessActionCommand builds a subcommand, such as `mindctl off`, that
+// applies action to the flagged harnesses or to those picked from a menu.
+func newHarnessActionCommand(use, short string, action harnessAction) *cobra.Command {
+	command := &cobra.Command{
+		Use:     use,
+		Short:   short,
+		Example: fmt.Sprintf("  mindctl %[1]s\n  mindctl %[1]s --claude\n  mindctl %[1]s --codex --claude", use),
+		Args:    noArgs("unexpected arguments for " + use),
+		RunE: func(command *cobra.Command, _ []string) error {
+			return runHarnessAction(command, requestedHarnesses(command), action)
+		},
+	}
+
+	addHarnessFlags(command, action.Name)
+	return command
+}
+
+// runHarnessAction applies action to the requested harnesses, or asks which
+// ones to use when none were requested.
+func runHarnessAction(command *cobra.Command, requested []string, action harnessAction) error {
+	home, err := userHome()
+	if err != nil {
+		return err
+	}
+
 	selected := requested
 	if len(selected) == 0 {
-		var err error
-		selected, err = promptHarnesses(command.InOrStdin(), command.OutOrStdout())
+		selected, err = promptHarnesses(command.InOrStdin(), command.OutOrStdout(), home, action.Name)
 		if err != nil {
 			return err
 		}
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("find home directory: %w", err)
-	}
-
 	output := command.OutOrStdout()
+	changed := false
 	for _, candidate := range harnesses {
 		if !slices.Contains(selected, candidate.ID) {
 			continue
 		}
 
-		summary, err := candidate.Setup(home)
+		result, err := action.Run(candidate, home)
 		if err != nil {
-			return fmt.Errorf("set up %s: %w", candidate.Name, err)
+			return fmt.Errorf("%s %s: %w", action.Name, candidate.Name, err)
 		}
 
-		if _, err := fmt.Fprintf(output, "✓ %s: %s\n", candidate.Name, summary); err != nil {
+		marker := "•"
+		if result.Changed {
+			marker, changed = "✓", true
+		}
+
+		if _, err := fmt.Fprintf(output, "%s %s: %s\n", marker, candidate.Name, result.Message); err != nil {
 			return err
 		}
 	}
 
-	return writeSetupNextSteps(output, selected)
+	if changed && action.NextSteps != nil {
+		return action.NextSteps(output, selected)
+	}
+
+	return nil
 }
 
 // promptHarnesses lists the harnesses and reads one or more selections,
 // asking again after invalid input.
-func promptHarnesses(input io.Reader, output io.Writer) ([]string, error) {
-	if _, err := fmt.Fprintln(output, "Select the harnesses to route through Mindctl:"); err != nil {
+func promptHarnesses(input io.Reader, output io.Writer, home, actionName string) ([]string, error) {
+	if _, err := fmt.Fprintf(output, "Select the harnesses to %s:\n", actionName); err != nil {
 		return nil, err
 	}
 
 	for index, candidate := range harnesses {
 		status := "unknown"
-		if connected, err := candidate.Connected(); err == nil {
-			status = connectionStatus(connected)
+		if state, err := candidate.State(home); err == nil {
+			status = string(state)
 		}
 
 		if _, err := fmt.Fprintf(output, "  %d) %-12s — %s (%s)\n", index+1, candidate.Name, candidate.Description, status); err != nil {
@@ -188,154 +298,13 @@ func writeSetupNextSteps(output io.Writer, selected []string) error {
 	return err
 }
 
-// setupClaude points Claude Code's global settings at the router, keeping
-// every other setting and its order.
-func setupClaude(home string) (string, error) {
-	path := filepath.Join(home, ".claude", "settings.json")
-	body, perm, err := readSetupFile(path)
+func userHome() (string, error) {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("read Claude settings: %w", err)
+		return "", fmt.Errorf("find home directory: %w", err)
 	}
 
-	if len(bytes.TrimSpace(body)) == 0 {
-		body = []byte("{}")
-	}
-
-	settings, err := decodeOrderedObject(body)
-	if err != nil {
-		return "", fmt.Errorf("read Claude settings: %w", err)
-	}
-
-	env := orderedObject{}
-	if raw, exists := settings.get("env"); exists && string(raw) != "null" {
-		env, err = decodeOrderedObject(raw)
-		if err != nil {
-			return "", fmt.Errorf("read Claude settings: env: %w", err)
-		}
-	}
-
-	previous := ""
-	if raw, exists := env.get("ANTHROPIC_BASE_URL"); exists {
-		_ = json.Unmarshal(raw, &previous)
-	}
-
-	origin, _ := json.Marshal(routerOrigin)
-	env.set("ANTHROPIC_BASE_URL", origin)
-	encodedEnv, err := env.marshal()
-	if err != nil {
-		return "", err
-	}
-
-	settings.set("env", encodedEnv)
-	encoded, err := settings.marshal()
-	if err != nil {
-		return "", err
-	}
-
-	var formatted bytes.Buffer
-	if err := json.Indent(&formatted, encoded, "", "  "); err != nil {
-		return "", err
-	}
-
-	formatted.WriteByte('\n')
-	if err := writeSetupFile(path, body, formatted.Bytes(), perm); err != nil {
-		return "", fmt.Errorf("write Claude settings: %w", err)
-	}
-
-	summary := fmt.Sprintf("set env.ANTHROPIC_BASE_URL to %s in %s", routerOrigin, path)
-	if previous != "" && strings.TrimSuffix(previous, "/") != routerOrigin {
-		summary += fmt.Sprintf(" (was %s)", previous)
-	}
-
-	return summary, nil
-}
-
-const codexProviderBlock = `# Added by mindctl.
-[model_providers.mindctl]
-name = "Mindctl"
-base_url = "` + routerOrigin + `/v1"
-wire_api = "responses"
-requires_openai_auth = true
-env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
-`
-
-var (
-	codexTableHeader    = regexp.MustCompile(`^\s*\[`)
-	codexProviderHeader = regexp.MustCompile(`^\s*\[\s*model_providers\s*\.\s*"?mindctl"?\s*\]\s*(#.*)?$`)
-)
-
-// setupCodex selects the Mindctl provider and automatic routing in Codex's
-// global configuration. It edits lines in place so comments and unrelated
-// settings survive, and keeps an existing [model_providers.mindctl] table.
-func setupCodex(home string) (string, error) {
-	path := filepath.Join(home, ".codex", "config.toml")
-	body, perm, err := readSetupFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read Codex config: %w", err)
-	}
-
-	if _, err := parseCodexConfig(body); err != nil {
-		return "", err
-	}
-
-	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		lines = nil
-	}
-
-	topLevelEnd := slices.IndexFunc(lines, codexTableHeader.MatchString)
-	if topLevelEnd < 0 {
-		topLevelEnd = len(lines)
-	}
-
-	var assignments []string
-	for _, setting := range []struct{ key, value string }{
-		{"model_provider", "mindctl"},
-		{"model", "mindctl-auto"},
-	} {
-		assignment := fmt.Sprintf("%s = %q", setting.key, setting.value)
-		pattern := regexp.MustCompile(`^\s*` + setting.key + `\s*=`)
-		if index := slices.IndexFunc(lines[:topLevelEnd], pattern.MatchString); index >= 0 {
-			lines[index] = assignment
-			continue
-		}
-
-		assignments = append(assignments, assignment)
-	}
-
-	lines = slices.Insert(lines, 0, assignments...)
-	if !slices.ContainsFunc(lines, codexProviderHeader.MatchString) {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, strings.Split(strings.TrimRight(codexProviderBlock, "\n"), "\n")...)
-	}
-
-	updated := []byte(strings.Join(lines, "\n") + "\n")
-	settings, err := parseCodexConfig(updated)
-	if err != nil {
-		return "", fmt.Errorf("update Codex config: %w", err)
-	}
-
-	if settings.GetString("model_provider") != "mindctl" || !settings.IsSet("model_providers.mindctl.base_url") {
-		return "", errors.New("update Codex config: the mindctl provider is defined in a form setup cannot edit; configure it manually")
-	}
-
-	if err := writeSetupFile(path, body, updated, perm); err != nil {
-		return "", fmt.Errorf("write Codex config: %w", err)
-	}
-
-	return fmt.Sprintf("set model_provider = \"mindctl\" and model = \"mindctl-auto\" in %s", path), nil
-}
-
-func parseCodexConfig(body []byte) (*viper.Viper, error) {
-	settings := viper.New()
-	settings.SetConfigType("toml")
-	if err := settings.ReadConfig(bytes.NewReader(body)); err != nil {
-		return nil, fmt.Errorf("read Codex config: %w", err)
-	}
-
-	return settings, nil
+	return home, nil
 }
 
 // readSetupFile returns a file's contents and permissions, or no contents and
@@ -459,6 +428,15 @@ func (o *orderedObject) set(key string, value json.RawMessage) {
 	}
 
 	o.values[key] = value
+}
+
+func (o *orderedObject) delete(key string) {
+	if _, exists := o.values[key]; !exists {
+		return
+	}
+
+	delete(o.values, key)
+	o.keys = slices.DeleteFunc(o.keys, func(candidate string) bool { return candidate == key })
 }
 
 func (o *orderedObject) marshal() (json.RawMessage, error) {

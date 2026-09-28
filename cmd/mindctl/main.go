@@ -82,27 +82,40 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		Use:   "mindctl",
 		Short: "Route coding harnesses through the Mindctl gateway",
 		Long: "Point Claude Code, Codex, or both at the Mindctl gateway. Without a harness\n" +
-			"flag, mindctl lists the harnesses and asks which ones to set up.\n\n" +
+			"flag, mindctl lists the harnesses and asks which ones to use.\n\n" +
+			"--off parks the router settings so the harness uses its provider directly,\n" +
+			"--on restores them, and --uninstall removes them.\n\n" +
 			"Run the gateway itself with `mindctl serve`.",
-		Example:       "  mindctl\n  mindctl --claude\n  mindctl --codex --claude",
+		Example: "  mindctl\n  mindctl --claude\n  mindctl --codex --claude\n" +
+			"  mindctl --off --codex\n  mindctl --on --codex\n  mindctl --uninstall --claude",
 		Args:          noArgs("unexpected positional arguments"),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(command *cobra.Command, _ []string) error {
-			var requested []string
-			for _, candidate := range harnesses {
-				if enabled, _ := command.Flags().GetBool(candidate.ID); enabled {
-					requested = append(requested, candidate.ID)
+			action := setupAction
+			for _, mode := range []struct {
+				flag   string
+				action harnessAction
+			}{{"off", offAction}, {"on", onAction}, {"uninstall", uninstallAction}} {
+				if enabled, _ := command.Flags().GetBool(mode.flag); enabled {
+					action = mode.action
 				}
 			}
 
-			return runSetup(command, requested)
+			return runHarnessAction(command, requestedHarnesses(command), action)
 		},
 	}
 
-	for _, candidate := range harnesses {
-		root.Flags().Bool(candidate.ID, false, "set up "+candidate.Name+" to use the router")
-	}
+	addHarnessFlags(root, "set up")
+	root.Flags().Bool("off", false, "turn the router off for the selected harnesses, keeping its settings")
+	root.Flags().Bool("on", false, "turn the router back on for the selected harnesses")
+	root.Flags().Bool("uninstall", false, "remove the router settings from the selected harnesses")
+	root.MarkFlagsMutuallyExclusive("off", "on", "uninstall")
+	root.AddCommand(
+		newHarnessActionCommand("off", "Route harnesses to their providers directly, keeping router settings", offAction),
+		newHarnessActionCommand("on", "Route harnesses through the Mindctl router again", onAction),
+		newHarnessActionCommand("uninstall", "Remove the router settings from harnesses", uninstallAction),
+	)
 
 	root.AddCommand(&cobra.Command{
 		Use:   "serve",
@@ -165,107 +178,44 @@ func newStatusCommand() *cobra.Command {
 		Short: "Show harness connections to the Mindctl router",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(command *cobra.Command, args []string) error {
-			if len(args) == 1 {
-				var connected bool
-				var err error
-				switch args[0] {
-				case "codex":
-					connected, err = codexConnected()
-				case "claude":
-					connected, err = claudeConnected()
-				default:
-					return fmt.Errorf("unknown harness %q", args[0])
-				}
-				if err != nil {
-					return err
-				}
-				_, err = fmt.Fprintln(command.OutOrStdout(), connectionStatus(connected))
-				return err
-			}
-
-			codex, err := codexConnected()
+			home, err := userHome()
 			if err != nil {
 				return err
 			}
 
-			claude, err := claudeConnected()
+			if len(args) == 1 {
+				candidate, ok := findHarness(args[0])
+				if !ok {
+					return fmt.Errorf("unknown harness %q", args[0])
+				}
+
+				state, err := candidate.State(home)
+				if err != nil {
+					return err
+				}
+
+				_, err = fmt.Fprintln(command.OutOrStdout(), state)
+				return err
+			}
+
+			codex, err := codexState(home)
+			if err != nil {
+				return err
+			}
+
+			claude, err := claudeState(home)
 			if err != nil {
 				return err
 			}
 
 			output := tabwriter.NewWriter(command.OutOrStdout(), 0, 0, 2, ' ', 0)
-			if _, err := fmt.Fprintf(output, "HARNESS\tSTATUS\ncodex\t%s\nclaude\t%s\n", connectionStatus(codex), connectionStatus(claude)); err != nil {
+			if _, err := fmt.Fprintf(output, "HARNESS\tSTATUS\ncodex\t%s\nclaude\t%s\n", codex, claude); err != nil {
 				return err
 			}
 
 			return output.Flush()
 		},
 	}
-}
-
-func connectionStatus(connected bool) string {
-	if connected {
-		return "connected"
-	}
-
-	return "disconnected"
-}
-
-func claudeConnected() (bool, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false, fmt.Errorf("find home directory: %w", err)
-	}
-
-	body, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-
-	if err != nil {
-		return false, fmt.Errorf("read Claude settings: %w", err)
-	}
-
-	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
-		return false, errors.New("read Claude settings: expected a JSON object")
-	}
-
-	var settings struct {
-		Env struct {
-			AnthropicBaseURL string `json:"ANTHROPIC_BASE_URL"`
-		} `json:"env"`
-	}
-
-	if err := json.Unmarshal(body, &settings); err != nil {
-		return false, fmt.Errorf("read Claude settings: %w", err)
-	}
-
-	return settings.Env.AnthropicBaseURL == routerOrigin || settings.Env.AnthropicBaseURL == routerOrigin+"/", nil
-}
-
-func codexConnected() (bool, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false, fmt.Errorf("find home directory: %w", err)
-	}
-
-	path := filepath.Join(home, ".codex", "config.toml")
-	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-
-	if err != nil {
-		return false, fmt.Errorf("read Codex config: %w", err)
-	}
-
-	settings := viper.New()
-	settings.SetConfigType("toml")
-	if err := settings.ReadConfig(bytes.NewReader(body)); err != nil {
-		return false, fmt.Errorf("read Codex config: %w", err)
-	}
-
-	return settings.GetString("model_provider") == "mindctl", nil
 }
 
 func newHistoryCommand(settings *viper.Viper) *cobra.Command {

@@ -46,21 +46,26 @@
 ## Table of Contents
 
 - [Install](#install)
+  - [npm](#npm)
   - [Native binary](#native-binary)
   - [Homebrew](#homebrew)
   - [Container](#container)
   - [Go Install](#go-install)
   - [From source](#from-source)
+- [Command Line Interface](#command-line-interface)
+  - [ChatGPT subscription routing](#chatgpt-subscription-routing)
+  - [Claude subscription routing](#claude-subscription-routing)
+    - [Claude Code Messages endpoint (opt-in)](#claude-code-messages-endpoint-opt-in)
 - [Configuration](#configuration)
+  - [Managed Headroom compression](#managed-headroom-compression)
+  - [Session affinity](#session-affinity)
+  - [Token usage savings](#token-usage-savings)
   - [Debug router traces](#debug-router-traces)
   - [Model and provider availability](#model-and-provider-availability)
   - [Laya system 1 sidecar](#laya-system-1-sidecar)
-- [Command Line Interface](#command-line-interface)
 - [Development](#development)
   - [Build](#build)
   - [Development Server](#development-server)
-  - [ChatGPT subscription routing](#chatgpt-subscription-routing)
-  - [Claude subscription routing](#claude-subscription-routing)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Support](#support)
@@ -143,6 +148,191 @@ go install github.com/storm-software/mindctl/cmd/mindctl@latest
 ```sh
 devenv shell -- go run ./cmd/mindctl serve --config ./config.yaml
 ```
+
+# Command Line Interface
+
+The Mindctl command line interface provides several commands to manage the application, its configuration, models, and providers. A complete list of available commands can be found in the [CLI documentation](docs/cli/mindctl.md).
+
+Set up Claude Code, Codex, or both to use the Mindctl router:
+
+```sh
+mindctl                   # choose one or more harnesses from a menu
+mindctl --claude          # skip the menu, set up Claude Code
+mindctl --codex           # skip the menu, set up Codex
+mindctl --codex --claude  # set up both
+```
+
+Claude Code setup sets `env.ANTHROPIC_BASE_URL` to `http://127.0.0.1:8080` in
+`~/.claude/settings.json`. Codex setup sets `model_provider = "mindctl"` and
+`model = "mindctl-auto"` in `~/.codex/config.toml` and adds a
+`[model_providers.mindctl]` table unless one already exists. Other settings and
+comments are kept, and the original file is saved beside it with a
+`.mindctl-backup` suffix. Setup does not store the gateway token; see the
+sections below for the gateway configuration each harness needs.
+
+Switch a harness between the router and its own provider without losing the
+router settings, or remove them entirely. Each command accepts `--claude`,
+`--codex`, or both, and shows the same menu when neither is given:
+
+```sh
+mindctl off --codex          # or: mindctl --off --codex
+mindctl on --codex           # or: mindctl --on --codex
+mindctl uninstall --claude   # or: mindctl --uninstall --claude
+```
+
+`off` removes `ANTHROPIC_BASE_URL` from Claude Code's settings (recording it in
+`~/.claude/mindctl-off.json`) and comments out Codex's `model_provider` and
+`model` lines, leaving `[model_providers.mindctl]` in place. `on` restores them;
+a Codex model chosen while routing was off is kept. `uninstall` removes the
+router settings, the parked record, and the `[model_providers.mindctl]` table.
+Changes take effect the next time the harness starts.
+
+Check whether Codex or Claude Code is configured to use the Mindctl router:
+
+```sh
+mindctl status
+mindctl status codex
+mindctl status claude
+```
+
+The first command lists harnesses and their configuration status
+(`connected`, `off`, or `disconnected`); the other commands print one status. Codex checks the top-level `model_provider` in
+`~/.codex/config.toml`; Claude checks the global `env.ANTHROPIC_BASE_URL` in
+`~/.claude/settings.json` against `http://127.0.0.1:8080` (with one optional
+trailing slash). Neither command checks project-level or shell overrides or
+tests whether the gateway is running or reachable.
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
+
+## ChatGPT subscription routing
+
+Mindctl can route Codex requests through the ChatGPT account already signed in
+to Codex. Configure Mindctl with `chatgpt_oauth_passthrough` as shown in
+[`config.example.yaml`](config.example.yaml) or your active configuration file,
+then add this custom provider to
+the Codex `config.toml`:
+
+```toml
+model = "mindctl-auto"
+model_provider = "mindctl"
+
+[model_providers.mindctl]
+name = "Mindctl"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+requires_openai_auth = true
+env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
+```
+
+`mindctl-auto` enables Mindctl's automatic routing. A concrete model name is an
+explicit selection and must match a model ID in Mindctl's configured catalog.
+Set `explicit_only: true` on a catalog model reserved for explicit requests,
+such as a dedicated approval reviewer. Mindctl keeps it out of automatic
+routing, classifier choices, and fallback candidates; an explicit request
+still requires normal model availability, capabilities, tier bounds, and
+provider credentials. The default is `false` for existing models. An
+explicit-only model's failed stream does not escalate to a different model.
+
+With `chatgpt_oauth_passthrough`, Mindctl adds `codex-auto-review` to the
+effective OpenAI catalog as an available, explicit-only model; no YAML model
+entry is needed. API-key providers do not get this entry. A manually configured
+`codex-auto-review` entry is retained only when it belongs to `openai` and has
+`explicit_only: true`; otherwise configuration loading fails. Its catalog
+capacity and capabilities are local routing settings, not a guarantee of
+account access or upstream limits. If `providers.yaml` already exists and
+omits it, enable the reviewer with
+`mindctl model enable openai.codex-auto-review` and restart the gateway.
+
+Sign in to Codex with ChatGPT and export `MINDCTL_GATEWAY_TOKEN` with the same
+gateway token supplied to Mindctl. Do not set `OPENAI_API_KEY` for this
+provider. Codex owns OAuth login and token refresh; Mindctl forwards the
+request-scoped credential only to the configured ChatGPT Codex endpoint.
+
+Available models, workspace access, rate limits, and usage limits remain
+subject to the selected ChatGPT account and subscription. The shipped
+ChatGPT Pro catalog includes `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`,
+`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.3-codex`, and the
+Pro-only research preview `gpt-5.3-codex-spark`. GPT-6 model access is
+currently rolling out and may not yet appear for every Pro account.
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
+
+## Claude subscription routing
+
+Mindctl can also route requests through a caller-managed Claude subscription
+credential. Generate a long-lived token with `claude setup-token`, export it as
+`CLAUDE_CODE_OAUTH_TOKEN`, and configure the Anthropic provider with
+`claude_oauth_passthrough` as shown in
+[`config.example.yaml`](config.example.yaml).
+
+Add the Claude credential to the Codex provider's environment-backed headers:
+
+```toml
+[model_providers.mindctl]
+name = "Mindctl"
+base_url = "http://127.0.0.1:8080/v1"
+wire_api = "responses"
+requires_openai_auth = true
+env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN", "X-Mindctl-Claude-Token" = "CLAUDE_CODE_OAUTH_TOKEN" }
+```
+
+Codex sends the Claude token to Mindctl on each request. Mindctl keeps it in
+request context only, makes subscription-backed Anthropic models eligible for
+that request, and forwards it to the configured Anthropic endpoint as a bearer
+credential. Mindctl does not store, refresh, or log the token.
+
+The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5, and Haiku
+4.5 with comparable Claude API prices for routing decisions. Actual usage is
+governed by the selected Claude subscription's model access and plan limits,
+not API token billing.
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
+
+### Claude Code Messages endpoint (opt-in)
+
+To route Claude Code itself, set `client_auth.header: X-Mindctl-Token` and
+`claude_messages.enabled: true` in the gateway configuration. Configure the
+Anthropic provider with `claude_oauth_passthrough` and the models you want in
+the Mindctl catalog. The endpoint is `POST /v1/messages`; it is absent by
+default, and `/v1/responses` keeps its existing authentication behavior.
+
+Set only the non-secret gateway origin in your **global** Claude settings:
+
+```json
+{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080"}}
+```
+
+Let Claude Code retain its native subscription login. Do not set
+`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` for this
+connection. Supply the separate gateway token from your existing secret store
+in a trusted launcher instead of checking it into Claude settings:
+
+```sh
+#!/bin/sh
+: "${MINDCTL_GATEWAY_TOKEN:?load the gateway token from your secret store}"
+export ANTHROPIC_CUSTOM_HEADERS="X-Mindctl-Token: ${MINDCTL_GATEWAY_TOKEN}"
+exec claude "$@"
+```
+
+`mindctl-auto` can choose any eligible configured provider. A subscription
+credential is sent only to the Anthropic OAuth provider; other providers
+require their own API credentials and may incur separate billing. A specific
+model must match a Mindctl catalog ID; configure Claude Code's main and
+background model overrides deliberately, as built-in aliases are not
+automatically remapped. Signed thinking restricts a turn to Anthropic.
+
+For an existing Home Manager setup managed by Headroom, choose Mindctl
+explicitly in that separate configuration before enabling this setting; to
+roll back, restore Headroom's `ANTHROPIC_BASE_URL` and remove the launcher
+header. Mindctl does not change the managed settings automatically. Confirm
+the actual login and a streamed tool round-trip in a live Claude Code session
+before relying on the connection.
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
 
 # Configuration
 
@@ -374,42 +564,6 @@ an absolute HTTPS endpoint instead. It must implement the documented
 continues to make deterministic routing decisions and falls back safely when
 the endpoint is unavailable.
 
-# Command Line Interface
-
-The Mindctl command line interface provides several commands to manage the application, its configuration, models, and providers. A complete list of available commands can be found in the [CLI documentation](docs/cli/mindctl.md).
-
-Set up Claude Code, Codex, or both to use the Mindctl router:
-
-```sh
-mindctl                   # choose one or more harnesses from a menu
-mindctl --claude          # skip the menu, set up Claude Code
-mindctl --codex           # skip the menu, set up Codex
-mindctl --codex --claude  # set up both
-```
-
-Claude Code setup sets `env.ANTHROPIC_BASE_URL` to `http://127.0.0.1:8080` in
-`~/.claude/settings.json`. Codex setup sets `model_provider = "mindctl"` and
-`model = "mindctl-auto"` in `~/.codex/config.toml` and adds a
-`[model_providers.mindctl]` table unless one already exists. Other settings and
-comments are kept, and the original file is saved beside it with a
-`.mindctl-backup` suffix. Setup does not store the gateway token; see the
-sections below for the gateway configuration each harness needs.
-
-Check whether Codex or Claude Code is configured to use the Mindctl router:
-
-```sh
-mindctl status
-mindctl status codex
-mindctl status claude
-```
-
-The first command lists harnesses and their configuration status; the other
-commands print one status. Codex checks the top-level `model_provider` in
-`~/.codex/config.toml`; Claude checks the global `env.ANTHROPIC_BASE_URL` in
-`~/.claude/settings.json` against `http://127.0.0.1:8080` (with one optional
-trailing slash). Neither command checks project-level or shell overrides or
-tests whether the gateway is running or reachable.
-
 # Development
 
 Enter the repository's development environment before running Go commands:
@@ -437,132 +591,6 @@ release archives in `dist/` without publishing them.
 Run `devenv shell -- go run ./cmd/mindctl serve` to start the gateway with the home
 configuration when present, or pass `--config ./config.yaml` to use a project-
 local file explicitly.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## ChatGPT subscription routing
-
-Mindctl can route Codex requests through the ChatGPT account already signed in
-to Codex. Configure Mindctl with `chatgpt_oauth_passthrough` as shown in
-[`config.example.yaml`](config.example.yaml) or your active configuration file,
-then add this custom provider to
-the Codex `config.toml`:
-
-```toml
-model = "mindctl-auto"
-model_provider = "mindctl"
-
-[model_providers.mindctl]
-name = "Mindctl"
-base_url = "http://127.0.0.1:8080/v1"
-wire_api = "responses"
-requires_openai_auth = true
-env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN" }
-```
-
-`mindctl-auto` enables Mindctl's automatic routing. A concrete model name is an
-explicit selection and must match a model ID in Mindctl's configured catalog.
-Set `explicit_only: true` on a catalog model reserved for explicit requests,
-such as a dedicated approval reviewer. Mindctl keeps it out of automatic
-routing, classifier choices, and fallback candidates; an explicit request
-still requires normal model availability, capabilities, tier bounds, and
-provider credentials. The default is `false` for existing models. An
-explicit-only model's failed stream does not escalate to a different model.
-
-With `chatgpt_oauth_passthrough`, Mindctl adds `codex-auto-review` to the
-effective OpenAI catalog as an available, explicit-only model; no YAML model
-entry is needed. API-key providers do not get this entry. A manually configured
-`codex-auto-review` entry is retained only when it belongs to `openai` and has
-`explicit_only: true`; otherwise configuration loading fails. Its catalog
-capacity and capabilities are local routing settings, not a guarantee of
-account access or upstream limits. If `providers.yaml` already exists and
-omits it, enable the reviewer with
-`mindctl model enable openai.codex-auto-review` and restart the gateway.
-
-Sign in to Codex with ChatGPT and export `MINDCTL_GATEWAY_TOKEN` with the same
-gateway token supplied to Mindctl. Do not set `OPENAI_API_KEY` for this
-provider. Codex owns OAuth login and token refresh; Mindctl forwards the
-request-scoped credential only to the configured ChatGPT Codex endpoint.
-
-Available models, workspace access, rate limits, and usage limits remain
-subject to the selected ChatGPT account and subscription. The shipped
-ChatGPT Pro catalog includes `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`,
-`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.3-codex`, and the
-Pro-only research preview `gpt-5.3-codex-spark`. GPT-6 model access is
-currently rolling out and may not yet appear for every Pro account.
-
-<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
-<br />
-
-## Claude subscription routing
-
-Mindctl can also route requests through a caller-managed Claude subscription
-credential. Generate a long-lived token with `claude setup-token`, export it as
-`CLAUDE_CODE_OAUTH_TOKEN`, and configure the Anthropic provider with
-`claude_oauth_passthrough` as shown in
-[`config.example.yaml`](config.example.yaml).
-
-Add the Claude credential to the Codex provider's environment-backed headers:
-
-```toml
-[model_providers.mindctl]
-name = "Mindctl"
-base_url = "http://127.0.0.1:8080/v1"
-wire_api = "responses"
-requires_openai_auth = true
-env_http_headers = { "X-Mindctl-Token" = "MINDCTL_GATEWAY_TOKEN", "X-Mindctl-Claude-Token" = "CLAUDE_CODE_OAUTH_TOKEN" }
-```
-
-Codex sends the Claude token to Mindctl on each request. Mindctl keeps it in
-request context only, makes subscription-backed Anthropic models eligible for
-that request, and forwards it to the configured Anthropic endpoint as a bearer
-credential. Mindctl does not store, refresh, or log the token.
-
-The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5, and Haiku
-4.5 with comparable Claude API prices for routing decisions. Actual usage is
-governed by the selected Claude subscription's model access and plan limits,
-not API token billing.
-
-### Claude Code Messages endpoint (opt-in)
-
-To route Claude Code itself, set `client_auth.header: X-Mindctl-Token` and
-`claude_messages.enabled: true` in the gateway configuration. Configure the
-Anthropic provider with `claude_oauth_passthrough` and the models you want in
-the Mindctl catalog. The endpoint is `POST /v1/messages`; it is absent by
-default, and `/v1/responses` keeps its existing authentication behavior.
-
-Set only the non-secret gateway origin in your **global** Claude settings:
-
-```json
-{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8080"}}
-```
-
-Let Claude Code retain its native subscription login. Do not set
-`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` for this
-connection. Supply the separate gateway token from your existing secret store
-in a trusted launcher instead of checking it into Claude settings:
-
-```sh
-#!/bin/sh
-: "${MINDCTL_GATEWAY_TOKEN:?load the gateway token from your secret store}"
-export ANTHROPIC_CUSTOM_HEADERS="X-Mindctl-Token: ${MINDCTL_GATEWAY_TOKEN}"
-exec claude "$@"
-```
-
-`mindctl-auto` can choose any eligible configured provider. A subscription
-credential is sent only to the Anthropic OAuth provider; other providers
-require their own API credentials and may incur separate billing. A specific
-model must match a Mindctl catalog ID; configure Claude Code's main and
-background model overrides deliberately, as built-in aliases are not
-automatically remapped. Signed thinking restricts a turn to Anthropic.
-
-For an existing Home Manager setup managed by Headroom, choose Mindctl
-explicitly in that separate configuration before enabling this setting; to
-roll back, restore Headroom's `ANTHROPIC_BASE_URL` and remove the launcher
-header. Mindctl does not change the managed settings automatically. Confirm
-the actual login and a streamed tool round-trip in a live Claude Code session
-before relying on the connection.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
