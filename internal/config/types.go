@@ -29,7 +29,10 @@ const (
 
 // Config is the complete gateway configuration loaded from YAML.
 type Config struct {
-	Debug          bool                 `yaml:"debug"`
+	Debug bool `yaml:"debug"`
+	// DebugBodies also saves the raw body of each failed request next to the
+	// debug trace. It has no effect unless Debug is on.
+	DebugBodies    bool                 `yaml:"debug_bodies"`
 	Listen         string               `yaml:"listen"`
 	ClientAuth     ClientAuthConfig     `yaml:"client_auth"`
 	ClaudeMessages ClaudeMessagesConfig `yaml:"claude_messages"`

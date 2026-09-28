@@ -1,5 +1,7 @@
 # Environment-variable names are configuration; do not put secret values here.
 debug: false
+# Save raw bodies of failed requests beside the trace (contains prompt content).
+debug_bodies: false
 listen: ":8080"
 
 client_auth:

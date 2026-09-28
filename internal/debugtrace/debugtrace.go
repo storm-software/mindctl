@@ -2,10 +2,13 @@
 package debugtrace
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,6 +17,7 @@ type Trace struct {
 	file   *os.File
 	logger *slog.Logger
 	path   string
+	bodies atomic.Int64
 }
 
 // Open creates a private per-process trace file in the user cache directory.
@@ -47,3 +51,19 @@ func (t *Trace) Path() string { return t.path }
 
 // Close flushes and closes the trace file.
 func (t *Trace) Close() error { return t.file.Close() }
+
+// SaveBody writes one caller request body to a private file beside the trace
+// and returns its path. Bodies hold prompt content, so callers opt in.
+func (t *Trace) SaveBody(body []byte) (string, error) {
+	directory := strings.TrimSuffix(t.path, ".jsonl") + "-bodies"
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return "", fmt.Errorf("create debug body directory: %w", err)
+	}
+	path := filepath.Join(directory, fmt.Sprintf("%06d.json", t.bodies.Add(1)))
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return "", fmt.Errorf("create debug body: %w", err)
+	}
+	_, err = file.Write(body)
+	return path, errors.Join(err, file.Close())
+}

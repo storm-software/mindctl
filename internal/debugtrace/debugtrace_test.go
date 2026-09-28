@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,36 @@ func TestOpenCreatesPrivateJSONLTraceInXDGCache(t *testing.T) {
 	}
 	if event["msg"] != "route.test" || event["model"] != "gpt-test" {
 		t.Fatalf("trace event = %#v", event)
+	}
+}
+
+func TestSaveBodyWritesPrivateFileBesideTrace(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	trace, err := Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer trace.Close()
+	first, err := trace.SaveBody([]byte(`{"a":1}`))
+	if err != nil {
+		t.Fatalf("SaveBody: %v", err)
+	}
+	second, err := trace.SaveBody([]byte(`{"b":2}`))
+	if err != nil || first == second {
+		t.Fatalf("second=%q err=%v", second, err)
+	}
+	if want := strings.TrimSuffix(trace.Path(), ".jsonl") + "-bodies"; filepath.Dir(first) != want {
+		t.Fatalf("body directory = %q; want %q", filepath.Dir(first), want)
+	}
+	info, err := os.Stat(first)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("body file info=%v err=%v", info, err)
+	}
+	directory, err := os.Stat(filepath.Dir(first))
+	if err != nil || directory.Mode().Perm() != 0700 {
+		t.Fatalf("body directory info=%v err=%v", directory, err)
+	}
+	if body, _ := os.ReadFile(first); string(body) != `{"a":1}` {
+		t.Fatalf("body = %s", body)
 	}
 }

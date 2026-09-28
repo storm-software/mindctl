@@ -239,16 +239,23 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		},
 		Logger: debugLogger,
 	}
+	captureBodies := func(next http.Handler) http.Handler {
+		if a.debugTrace == nil || !cfg.DebugBodies {
+			return next
+		}
+		return api.CaptureFailedBodies(next, maxBodyBytes, a.debugTrace.SaveBody, debugLogger)
+	}
 	responses := api.NewResponsesHandler(a.executor, responsesConfig)
 	responses = api.CaptureClaudeOAuth(responses)
 	responses = api.CaptureChatGPTOAuth(responses)
+	responses = captureBodies(responses)
 	mux := http.NewServeMux()
 	operations := api.Operations(a.ready)
 	mux.Handle("/healthz", operations)
 	mux.Handle("/readyz", operations)
 	mux.Handle("/v1/responses", api.Authenticate(responses, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}))
 	if cfg.ClaudeMessages.Enabled {
-		messages := api.CaptureNativeClaudeOAuth(api.NewMessagesHandler(a.executor, responsesConfig))
+		messages := captureBodies(api.CaptureNativeClaudeOAuth(api.NewMessagesHandler(a.executor, responsesConfig)))
 		mux.Handle("/v1/messages", api.AuthenticateWithError(messages, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}, api.WriteMessagesError))
 	}
 	a.handler = mux

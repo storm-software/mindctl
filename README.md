@@ -287,6 +287,21 @@ selected routes, provider attempts, and stream retries. Trace files exclude
 prompt and response content, credentials, request headers, and raw provider
 errors.
 
+To reproduce rejected requests, also set top-level `debug_bodies: true` or
+export `MINDCTL_DEBUG_BODIES=true`. Every request answered with a 4xx or 5xx
+status then has its raw caller body saved to a private `*-bodies/` directory
+beside the trace file, and the trace records a `request.body.captured` event
+with the saved path. These files **contain full prompt content**; enable this
+only while debugging and delete them afterwards. Replay one with:
+
+```sh
+curl -X POST 'http://127.0.0.1:8787/v1/messages?beta=true' \
+  -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
+  -H "X-Mindctl-Token: $MINDCTL_GATEWAY_TOKEN" --data-binary @<body_path>
+```
+
+Streams that fail after their `200` header has been sent are not captured.
+
 ## Model and provider availability
 
 Mindctl can keep the routable model allow-list separate from the gateway

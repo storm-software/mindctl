@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -234,6 +235,11 @@ func decodeMessagesMessage(param string, raw json.RawMessage) ([]inference.Item,
 	if err != nil {
 		return nil, false, inference.Invalid(param+".content", err.Error())
 	}
+	// Clients replay an empty assistant turn when a model returned no content.
+	// It carries nothing, and neighbouring turns of one role merge upstream.
+	if len(blocks) == 0 {
+		return nil, false, nil
+	}
 	var pending []messagesPendingItem
 	var prefix []json.RawMessage
 	for index, raw := range blocks {
@@ -322,9 +328,9 @@ func decodeMessagesMessage(param string, raw json.RawMessage) ([]inference.Item,
 
 func messagesContentBlocks(content json.RawMessage) ([]json.RawMessage, error) {
 	var text string
-	if json.Unmarshal(content, &text) == nil {
+	if string(bytes.TrimSpace(content)) != "null" && json.Unmarshal(content, &text) == nil {
 		if text == "" {
-			return nil, errors.New("text cannot be empty")
+			return nil, nil
 		}
 		block, _ := json.Marshal(map[string]string{"type": "text", "text": text})
 		return []json.RawMessage{block}, nil
@@ -332,9 +338,6 @@ func messagesContentBlocks(content json.RawMessage) ([]json.RawMessage, error) {
 	var blocks []json.RawMessage
 	if json.Unmarshal(content, &blocks) != nil || blocks == nil {
 		return nil, errors.New("must be a string or an array of content blocks")
-	}
-	if len(blocks) == 0 {
-		return nil, errors.New("must not be empty")
 	}
 	return blocks, nil
 }

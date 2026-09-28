@@ -1227,6 +1227,11 @@ func runGateway(ctx context.Context, path string, stderr io.Writer, debugChanged
 		return err
 	}
 
+	cfg.DebugBodies, err = resolveDebugBodies(cfg.DebugBodies, os.LookupEnv)
+	if err != nil {
+		return err
+	}
+
 	application, err := app.New(ctx, cfg)
 	if err != nil {
 		return err
@@ -1280,6 +1285,20 @@ func resolveDebug(
 	enabled, err := strconv.ParseBool(value)
 	if err != nil {
 		return false, fmt.Errorf("parse MINDCTL_DEBUG: %w", err)
+	}
+
+	return enabled, nil
+}
+
+func resolveDebugBodies(configured bool, getenv func(string) (string, bool)) (bool, error) {
+	value, exists := getenv("MINDCTL_DEBUG_BODIES")
+	if !exists {
+		return configured, nil
+	}
+
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("parse MINDCTL_DEBUG_BODIES: %w", err)
 	}
 
 	return enabled, nil
