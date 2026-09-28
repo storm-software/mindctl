@@ -214,7 +214,8 @@ func codexState(home string) (harnessState, error) {
 }
 
 // setupCodex selects the Mindctl provider and automatic routing in Codex's
-// global configuration, keeping an existing [model_providers.mindctl] table.
+// global configuration, keeping an existing [model_providers.mindctl] table,
+// and installs the status and directive hooks and the toggle skills.
 func setupCodex(home string) (actionResult, error) {
 	document, err := readCodexDocument(home)
 	if err != nil {
@@ -227,14 +228,17 @@ func setupCodex(home string) (actionResult, error) {
 		codexSetting{key: "model", value: "mindctl-auto", replace: true},
 	)
 	document.addProvider()
+	notes, err := installCodexHelpers(home, document)
+	if err != nil {
+		return actionResult{}, err
+	}
+
 	if err := document.write(requireCodexRouted); err != nil {
 		return actionResult{}, err
 	}
 
-	return actionResult{
-		Changed: true,
-		Message: fmt.Sprintf("set model_provider = \"mindctl\" and model = \"mindctl-auto\" in %s", document.path),
-	}, nil
+	message := fmt.Sprintf("set model_provider = \"mindctl\" and model = \"mindctl-auto\" in %s", document.path)
+	return actionResult{Changed: true, Message: strings.Join(append([]string{message}, notes...), "; ")}, nil
 }
 
 // offCodex comments out the top-level Mindctl selection so Codex uses its
@@ -325,7 +329,7 @@ func onCodex(home string) (actionResult, error) {
 }
 
 // uninstallCodex removes the Mindctl selection, including one turned off,
-// and the [model_providers.mindctl] table.
+// the [model_providers.mindctl] table, and the hooks and skills setup added.
 func uninstallCodex(home string) (actionResult, error) {
 	document, err := readCodexDocument(home)
 	if err != nil {
@@ -333,7 +337,12 @@ func uninstallCodex(home string) (actionResult, error) {
 	}
 
 	removed := len(document.removeTopLevel(codexActiveLine)) + len(document.removeTopLevel(codexParkedLine))
-	if !document.removeProvider() && removed == 0 {
+	helpersRemoved, err := uninstallCodexHelpers(home, document)
+	if err != nil {
+		return actionResult{}, err
+	}
+
+	if !document.removeProvider() && removed == 0 && !helpersRemoved {
 		return actionResult{Message: "not set up for the router; nothing to remove"}, nil
 	}
 

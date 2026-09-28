@@ -163,9 +163,22 @@ mindctl --codex --claude  # set up both
 ```
 
 Claude Code setup sets `env.ANTHROPIC_BASE_URL` to `http://127.0.0.1:8080` in
-`~/.claude/settings.json`. Codex setup sets `model_provider = "mindctl"` and
+`~/.claude/settings.json`. It also writes a statusline script to
+`~/.mindctl/cc-statusline.sh` and points `statusLine` at it, unless another
+statusline is already configured. The statusline shows the served model, your
+Claude Code model selection, session savings priced from
+your user gateway config (`mindctl/config.yaml` in the user config directory),
+and token totals; rerun setup after changing
+model prices. `--uninstall` removes both. Codex setup sets `model_provider = "mindctl"` and
 `model = "mindctl-auto"` in `~/.codex/config.toml` and adds a
-`[model_providers.mindctl]` table unless one already exists. Other settings and
+`[model_providers.mindctl]` table unless one already exists. It also writes two
+Codex hooks to `~/.mindctl/` and registers them in `config.toml`:
+`codex-status.sh` runs on SessionStart and Stop and shows in the terminal title
+whether Codex routes through Mindctl, and `codex-directive.sh` runs on
+UserPromptSubmit and answers `$mindctl-on`, `$mindctl-off`, and
+`$mindctl-status` locally, without a model turn. Skills of the same names in
+`~/.codex/skills/` are the fallback. Files mindctl did not write are left alone.
+`--uninstall` removes the hooks and skills too. Other settings and
 comments are kept, and the original file is saved beside it with a
 `.mindctl-backup` suffix. Setup does not store the gateway token; see the
 sections below for the gateway configuration each harness needs.

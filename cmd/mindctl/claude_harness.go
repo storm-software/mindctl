@@ -54,10 +54,10 @@ func claudeState(home string) (harnessState, error) {
 	return harnessDisconnected, nil
 }
 
-// editClaudeEnv applies edit to the env object of Claude Code's global
-// settings, keeping every other setting and its order. The file is written
-// only when edit reports a change; an env object left empty is removed.
-func editClaudeEnv(home string, edit func(env *orderedObject) bool) error {
+// editClaudeSettings applies edit to Claude Code's global settings, keeping
+// every other setting and its order. The file is written only when edit
+// reports a change.
+func editClaudeSettings(home string, edit func(settings *orderedObject) (bool, error)) error {
 	path := claudeSettingsPath(home)
 	body, perm, err := readSetupFile(path)
 	if err != nil {
@@ -74,26 +74,8 @@ func editClaudeEnv(home string, edit func(env *orderedObject) bool) error {
 		return fmt.Errorf("read Claude settings: %w", err)
 	}
 
-	env := orderedObject{}
-	if raw, exists := settings.get("env"); exists && string(raw) != "null" {
-		env, err = decodeOrderedObject(raw)
-		if err != nil {
-			return fmt.Errorf("read Claude settings: env: %w", err)
-		}
-	}
-
-	if !edit(&env) {
-		return nil
-	}
-
-	if len(env.keys) == 0 {
-		settings.delete("env")
-	} else {
-		encodedEnv, err := env.marshal()
-		if err != nil {
-			return err
-		}
-		settings.set("env", encodedEnv)
+	if changed, err := edit(&settings); err != nil || !changed {
+		return err
 	}
 
 	encoded, err := settings.marshal()
@@ -114,6 +96,44 @@ func editClaudeEnv(home string, edit func(env *orderedObject) bool) error {
 	return nil
 }
 
+// editClaudeEnvObject applies edit to the env object of settings; an env
+// object left empty is removed.
+func editClaudeEnvObject(settings *orderedObject, edit func(env *orderedObject) bool) (bool, error) {
+	env := orderedObject{}
+	if raw, exists := settings.get("env"); exists && string(raw) != "null" {
+		var err error
+		env, err = decodeOrderedObject(raw)
+		if err != nil {
+			return false, fmt.Errorf("read Claude settings: env: %w", err)
+		}
+	}
+
+	if !edit(&env) {
+		return false, nil
+	}
+
+	if len(env.keys) == 0 {
+		settings.delete("env")
+		return true, nil
+	}
+
+	encodedEnv, err := env.marshal()
+	if err != nil {
+		return false, err
+	}
+
+	settings.set("env", encodedEnv)
+	return true, nil
+}
+
+// editClaudeEnv applies edit to the env object of Claude Code's global
+// settings. The file is written only when edit reports a change.
+func editClaudeEnv(home string, edit func(env *orderedObject) bool) error {
+	return editClaudeSettings(home, func(settings *orderedObject) (bool, error) {
+		return editClaudeEnvObject(settings, edit)
+	})
+}
+
 func claudeBaseURL(env *orderedObject) string {
 	var value string
 	if raw, exists := env.get("ANTHROPIC_BASE_URL"); exists {
@@ -128,13 +148,22 @@ func setClaudeRouterURL(env *orderedObject) {
 	env.set("ANTHROPIC_BASE_URL", origin)
 }
 
-// setupClaude points Claude Code's global settings at the router.
+// setupClaude points Claude Code's global settings at the router and adds
+// the Mindctl statusline unless another statusline is configured.
 func setupClaude(home string) (actionResult, error) {
-	previous := ""
-	err := editClaudeEnv(home, func(env *orderedObject) bool {
-		previous = claudeBaseURL(env)
-		setClaudeRouterURL(env)
-		return true
+	previous, statusline := "", ""
+	err := editClaudeSettings(home, func(settings *orderedObject) (bool, error) {
+		if _, err := editClaudeEnvObject(settings, func(env *orderedObject) bool {
+			previous = claudeBaseURL(env)
+			setClaudeRouterURL(env)
+			return true
+		}); err != nil {
+			return false, err
+		}
+
+		var err error
+		statusline, err = installClaudeStatusline(home, settings)
+		return true, err
 	})
 	if err != nil {
 		return actionResult{}, err
@@ -149,7 +178,7 @@ func setupClaude(home string) (actionResult, error) {
 		message += fmt.Sprintf(" (was %s)", previous)
 	}
 
-	return actionResult{Changed: true, Message: message}, nil
+	return actionResult{Changed: true, Message: message + "; " + statusline}, nil
 }
 
 // offClaude removes the router base URL so Claude Code talks to Anthropic
@@ -223,13 +252,21 @@ func uninstallClaude(home string) (actionResult, error) {
 		return actionResult{Message: "not set up for the router; nothing to remove"}, nil
 	}
 
-	err = editClaudeEnv(home, func(env *orderedObject) bool {
-		if strings.TrimSuffix(claudeBaseURL(env), "/") != routerOrigin {
-			return false
+	err = editClaudeSettings(home, func(settings *orderedObject) (bool, error) {
+		envChanged, err := editClaudeEnvObject(settings, func(env *orderedObject) bool {
+			if strings.TrimSuffix(claudeBaseURL(env), "/") != routerOrigin {
+				return false
+			}
+
+			env.delete("ANTHROPIC_BASE_URL")
+			return true
+		})
+		if err != nil {
+			return false, err
 		}
 
-		env.delete("ANTHROPIC_BASE_URL")
-		return true
+		statuslineChanged, err := uninstallClaudeStatusline(home, settings)
+		return envChanged || statuslineChanged, err
 	})
 	if err != nil {
 		return actionResult{}, err

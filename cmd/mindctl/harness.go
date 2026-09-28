@@ -56,7 +56,7 @@ var harnesses = []harness{
 	{
 		ID:          "claude",
 		Name:        "Claude Code",
-		Description: "patches ~/.claude/settings.json",
+		Description: "patches ~/.claude/settings.json and adds a statusline",
 		State:       claudeState,
 		Setup:       setupClaude,
 		Off:         offClaude,
@@ -66,7 +66,7 @@ var harnesses = []harness{
 	{
 		ID:          "codex",
 		Name:        "Codex",
-		Description: "patches ~/.codex/config.toml",
+		Description: "patches ~/.codex/config.toml and adds status and toggle hooks",
 		State:       codexState,
 		Setup:       setupCodex,
 		Off:         offCodex,
@@ -461,4 +461,57 @@ func (o *orderedObject) marshal() (json.RawMessage, error) {
 
 	body.WriteByte('}')
 	return body.Bytes(), nil
+}
+
+// managedFileOwned reports whether the file at path carries marker, which
+// mindctl writes into every file it manages. A missing file counts as owned so
+// setup can create it.
+func managedFileOwned(path, marker string) (bool, error) {
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return bytes.Contains(body, []byte(marker)), nil
+}
+
+// writeManagedFile writes body to path unless a file there lacks marker, in
+// which case the user owns it and it is left alone. It reports "added" or
+// "refreshed", or "" when it skipped the file. The previous file is mindctl's
+// own, so it is replaced without a backup.
+func writeManagedFile(path, marker string, body []byte, perm os.FileMode) (string, error) {
+	owned, err := managedFileOwned(path, marker)
+	if err != nil || !owned {
+		return "", err
+	}
+
+	_, statErr := os.Stat(path)
+	if err := writeSetupFile(path, nil, body, perm); err != nil {
+		return "", err
+	}
+
+	if statErr == nil {
+		return "refreshed", nil
+	}
+
+	return "added", nil
+}
+
+// removeManagedFile deletes path when it carries marker and reports whether
+// it did.
+func removeManagedFile(path, marker string) (bool, error) {
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	owned, err := managedFileOwned(path, marker)
+	if err != nil || !owned {
+		return false, err
+	}
+
+	return true, removeIfExists(path)
 }
