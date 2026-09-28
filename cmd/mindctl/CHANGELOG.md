@@ -2,6 +2,13 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.40](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.40) (09/27/2026)
+
+### Features
+
+- **mindctl:** Added harness on/off/uninstall commands to the CLI ([0157b2e](https://github.com/storm-software/mindctl/commit/0157b2e))
+- **mindctl:** Added the `serve` command and support for specifying harnesses for setup ([980a3e3](https://github.com/storm-software/mindctl/commit/980a3e3))
+
 ## [0.1.39](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.39) (09/27/2026)
 
 ### Bug Fixes
