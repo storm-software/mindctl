@@ -82,13 +82,13 @@ func commandCatalogConfig(t *testing.T) string {
 func TestRunRejectsBadFlagsAndMissingSecrets(t *testing.T) {
 	path := mainConfig(t)
 	t.Setenv("MAIN_ENCRYPTION_KEY", "")
-	for _, args := range [][]string{{"-unknown"}, {"unexpected"}, {"-config", path}} {
+	for _, args := range [][]string{{"-unknown"}, {"unexpected"}, {"serve", "-config", path}} {
 		var stderr bytes.Buffer
 		err := run(context.Background(), args, io.Discard, &stderr)
 		if err == nil {
 			t.Fatalf("run(%v) succeeded", args)
 		}
-		if len(args) == 2 && !strings.Contains(err.Error(), "MAIN_ENCRYPTION_KEY") {
+		if len(args) == 3 && !strings.Contains(err.Error(), "MAIN_ENCRYPTION_KEY") {
 			t.Fatalf("missing key error = %v", err)
 		}
 		if strings.Contains(err.Error()+stderr.String(), "private-") {
@@ -107,7 +107,7 @@ func TestRunReadsXDGConfigWhenConfigFlagIsOmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := run(context.Background(), nil, io.Discard, io.Discard)
+	err := run(context.Background(), []string{"serve"}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "invalid_xdg_config") {
 		t.Fatalf("omitted config error = %v; want XDG config validation error", err)
 	}
@@ -127,7 +127,7 @@ func TestRunPrefersExplicitConfigOverXDGConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := run(context.Background(), []string{"--config", explicit}, io.Discard, io.Discard)
+	err := run(context.Background(), []string{"serve", "--config", explicit}, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "invalid_explicit_config") || strings.Contains(err.Error(), "invalid_xdg_config") {
 		t.Fatalf("explicit config error = %v; want explicit config validation error rather than XDG config", err)
 	}
@@ -986,7 +986,7 @@ func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
 	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
-	for _, want := range []string{"version", "status", "--config", "--debug"} {
+	for _, want := range []string{"version", "status", "serve", "--claude", "--codex", "--config", "--debug"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
 		}
@@ -1172,7 +1172,7 @@ func TestBinarySignalsAndContentFreeStartup(t *testing.T) {
 	for _, sig := range []os.Signal{syscall.SIGINT, syscall.SIGTERM} {
 		t.Run(sig.String(), func(t *testing.T) {
 			path := mainConfig(t)
-			cmd := exec.Command(binary, "-config", path)
+			cmd := exec.Command(binary, "serve", "-config", path)
 			stderr, err := cmd.StderrPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -1237,7 +1237,7 @@ func TestBinarySignalsAndContentFreeStartup(t *testing.T) {
 	t.Run("startup failure exits nonzero", func(t *testing.T) {
 		path := mainConfig(t)
 		t.Setenv("MAIN_ENCRYPTION_KEY", "")
-		cmd := exec.Command(binary, "-config", path)
+		cmd := exec.Command(binary, "serve", "-config", path)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Run(); err == nil {

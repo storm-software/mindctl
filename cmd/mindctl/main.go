@@ -1,4 +1,5 @@
-// Command mindctl runs the gateway core and its operational endpoints.
+// Command mindctl sets up coding harnesses to use the Mindctl gateway and runs
+// the gateway core and its operational endpoints.
 package main
 
 import (
@@ -78,11 +79,35 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	settings := viper.New()
 	var debug bool
 	root := &cobra.Command{
-		Use:           "mindctl",
-		Short:         "Run the Mindctl gateway",
+		Use:   "mindctl",
+		Short: "Route coding harnesses through the Mindctl gateway",
+		Long: "Point Claude Code, Codex, or both at the Mindctl gateway. Without a harness\n" +
+			"flag, mindctl lists the harnesses and asks which ones to set up.\n\n" +
+			"Run the gateway itself with `mindctl serve`.",
+		Example:       "  mindctl\n  mindctl --claude\n  mindctl --codex --claude",
 		Args:          noArgs("unexpected positional arguments"),
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		RunE: func(command *cobra.Command, _ []string) error {
+			var requested []string
+			for _, candidate := range harnesses {
+				if enabled, _ := command.Flags().GetBool(candidate.ID); enabled {
+					requested = append(requested, candidate.ID)
+				}
+			}
+
+			return runSetup(command, requested)
+		},
+	}
+
+	for _, candidate := range harnesses {
+		root.Flags().Bool(candidate.ID, false, "set up "+candidate.Name+" to use the router")
+	}
+
+	root.AddCommand(&cobra.Command{
+		Use:   "serve",
+		Short: "Run the Mindctl gateway",
+		Args:  noArgs("unexpected arguments for serve"),
 		RunE: func(command *cobra.Command, _ []string) error {
 			path, err := selectedConfigPath(command, settings)
 			if err != nil {
@@ -102,7 +127,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 				debug,
 			)
 		},
-	}
+	})
 
 	root.SetOut(stdout)
 	root.SetErr(stderr)
@@ -215,7 +240,7 @@ func claudeConnected() (bool, error) {
 		return false, fmt.Errorf("read Claude settings: %w", err)
 	}
 
-	return settings.Env.AnthropicBaseURL == "http://127.0.0.1:8080" || settings.Env.AnthropicBaseURL == "http://127.0.0.1:8080/", nil
+	return settings.Env.AnthropicBaseURL == routerOrigin || settings.Env.AnthropicBaseURL == routerOrigin+"/", nil
 }
 
 func codexConnected() (bool, error) {

@@ -32,5 +32,5 @@ ENV XDG_CACHE_HOME=/var/cache/mindctl
 USER mindctl:mindctl
 VOLUME ["/var/cache/mindctl"]
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/mindctl"]
+ENTRYPOINT ["/usr/local/bin/mindctl", "serve"]
 CMD ["--config", "/etc/mindctl/config.yaml"]

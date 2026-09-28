@@ -97,7 +97,7 @@ against `checksums.txt`, unpack it, and run:
 
 ```sh
 ./mindctl version
-./mindctl --config ./config.yaml
+./mindctl serve --config ./config.yaml
 ```
 
 On Linux, run `sha256sum --ignore-missing --check checksums.txt`. On macOS,
@@ -141,7 +141,7 @@ go install github.com/storm-software/mindctl/cmd/mindctl@latest
 ## From source
 
 ```sh
-devenv shell -- go run ./cmd/mindctl --config ./config.yaml
+devenv shell -- go run ./cmd/mindctl serve --config ./config.yaml
 ```
 
 # Configuration
@@ -378,6 +378,23 @@ the endpoint is unavailable.
 
 The Mindctl command line interface provides several commands to manage the application, its configuration, models, and providers. A complete list of available commands can be found in the [CLI documentation](docs/cli/mindctl.md).
 
+Set up Claude Code, Codex, or both to use the Mindctl router:
+
+```sh
+mindctl                   # choose one or more harnesses from a menu
+mindctl --claude          # skip the menu, set up Claude Code
+mindctl --codex           # skip the menu, set up Codex
+mindctl --codex --claude  # set up both
+```
+
+Claude Code setup sets `env.ANTHROPIC_BASE_URL` to `http://127.0.0.1:8080` in
+`~/.claude/settings.json`. Codex setup sets `model_provider = "mindctl"` and
+`model = "mindctl-auto"` in `~/.codex/config.toml` and adds a
+`[model_providers.mindctl]` table unless one already exists. Other settings and
+comments are kept, and the original file is saved beside it with a
+`.mindctl-backup` suffix. Setup does not store the gateway token; see the
+sections below for the gateway configuration each harness needs.
+
 Check whether Codex or Claude Code is configured to use the Mindctl router:
 
 ```sh
@@ -417,7 +434,7 @@ release archives in `dist/` without publishing them.
 
 ## Development Server
 
-Run `devenv shell -- go run ./cmd/mindctl` to start the gateway with the home
+Run `devenv shell -- go run ./cmd/mindctl serve` to start the gateway with the home
 configuration when present, or pass `--config ./config.yaml` to use a project-
 local file explicitly.
 
