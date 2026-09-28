@@ -45,6 +45,17 @@ type NativeSystemBlock struct {
 	Type         string          `json:"type"`
 	Text         string          `json:"text"`
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
+	// Raw is the caller's block, forwarded verbatim when it carries fields
+	// without a typed equivalent here.
+	Raw json.RawMessage `json:"-"`
+}
+
+func (b NativeSystemBlock) MarshalJSON() ([]byte, error) {
+	if len(b.Raw) != 0 {
+		return b.Raw, nil
+	}
+	type plain NativeSystemBlock
+	return json.Marshal(plain(b))
 }
 
 type NativeToolChoice struct {

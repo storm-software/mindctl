@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,8 @@ func TestDecodeMessagesRequest(t *testing.T) {
 		{name: "null message content", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":null},{"role":"user","content":"hi"}]}`, wantError: true},
 		{name: "empty message content", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":[]},{"role":"user","content":"hi"}]}`, wantError: true},
 		{name: "invalid role", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"developer","content":"hi"}]}`, wantError: true},
+		{name: "system block extra field", body: `{"model":"mindctl-auto","max_tokens":42,"system":[{"type":"text","text":"instructions","citations":null}],"messages":[{"role":"user","content":"hi"}]}`, native: true, wantItems: 1},
+		{name: "system non-text block", body: `{"model":"mindctl-auto","max_tokens":42,"system":[{"type":"image","source":{}}],"messages":[{"role":"user","content":"hi"}]}`, wantError: true},
 		{name: "system role", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":"hi"},{"role":"system","content":"mid-conversation"}]}`, native: true, wantItems: 2},
 		{name: "unknown parameter", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":"hi"}],"temperature":0.7}`, native: true, wantItems: 1},
 		{name: "no messages", body: `{"model":"mindctl-auto","max_tokens":1,"messages":[],"temperature":0.7}`, wantError: true},
@@ -64,6 +67,17 @@ func TestDecodeMessagesNativeControlsRetainProvenance(t *testing.T) {
 	got, err := DecodeMessagesRequest(httptest.NewRecorder(), request, 1<<20)
 	if err != nil || got.RequiredProvider != "anthropic" || got.Request.Thinking == nil || got.Request.Thinking.BudgetTokens != 500 || len(got.Request.AnthropicSystem) != 1 || len(got.Request.Tools) != 1 || len(got.Request.Tools[0].CacheControl) == 0 || got.Request.AnthropicToolChoice == nil || got.Request.AnthropicToolChoice.Name != "search" {
 		t.Fatalf("decoded=%+v err=%v", got, err)
+	}
+}
+
+func TestDecodeMessagesSystemKeepsUnknownBlockFields(t *testing.T) {
+	got, err := decodeMessagesBody(t, `{"model":"mindctl-auto","max_tokens":42,"system":[{"type":"text","text":"a"},{"type":"text","text":"b","citations":null,"cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`)
+	if err != nil || got.Request.Instructions != "a\nb" || len(got.Request.AnthropicSystem) != 2 {
+		t.Fatalf("decoded=%+v err=%v", got, err)
+	}
+	encoded, err := json.Marshal(got.Request.AnthropicSystem)
+	if err != nil || string(encoded) != `[{"type":"text","text":"a"},{"type":"text","text":"b","citations":null,"cache_control":{"type":"ephemeral"}}]` {
+		t.Fatalf("encoded=%s err=%v", encoded, err)
 	}
 }
 

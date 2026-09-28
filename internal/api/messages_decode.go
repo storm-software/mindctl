@@ -135,12 +135,13 @@ func DecodeMessagesRequest(w http.ResponseWriter, r *http.Request, maxBodyBytes 
 				return DecodedMessages{}, inference.Invalid("system", "must contain text")
 			}
 		} else {
-			var blocks []messagesWireBlock
-			if err := decodeStrict(wire.System, &blocks); err != nil {
+			var blocks []json.RawMessage
+			if json.Unmarshal(wire.System, &blocks) != nil {
 				return DecodedMessages{}, inference.Invalid("system", "must contain text blocks")
 			}
-			for _, block := range blocks {
-				if block.Type != "text" || block.Text == "" {
+			for _, raw := range blocks {
+				var block messagesWireBlock
+				if json.Unmarshal(raw, &block) != nil || block.Type != "text" || block.Text == "" {
 					return DecodedMessages{}, inference.Invalid("system", "has unsupported native content")
 				}
 				if decoded.Request.Instructions != "" {
@@ -153,7 +154,13 @@ func DecodeMessagesRequest(w http.ResponseWriter, r *http.Request, maxBodyBytes 
 					}
 					decoded.Native = true
 				}
-				decoded.Request.AnthropicSystem = append(decoded.Request.AnthropicSystem, inference.NativeSystemBlock{Type: "text", Text: block.Text, CacheControl: block.CacheControl})
+				native := inference.NativeSystemBlock{Type: "text", Text: block.Text, CacheControl: block.CacheControl}
+				// Fields such as citations have no portable form; keep the block verbatim.
+				if decodeStrict(raw, &messagesWireBlock{}) != nil {
+					native.Raw = append(json.RawMessage(nil), raw...)
+					decoded.Native = true
+				}
+				decoded.Request.AnthropicSystem = append(decoded.Request.AnthropicSystem, native)
 			}
 		}
 	}
