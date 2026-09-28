@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.41](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.41) (09/28/2026)
+
+### Features
+
+- **mindctl:** Added harness hooks ([efdef5e](https://github.com/storm-software/mindctl/commit/efdef5e))
+
 ## [0.1.40](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.40) (09/27/2026)
 
 ### Features
