@@ -15,6 +15,14 @@ type SignalFloor struct {
 	Floor     domain.Tier
 }
 
+// FeedbackEvidence is the current rating aggregate for one exact routing arm.
+// Counts are content-free and safe to persist in replay snapshots.
+type FeedbackEvidence struct {
+	Provider, ModelID          string
+	TaskType                   domain.TaskType
+	ThumbsUpCount, RatingCount int64
+}
+
 // PolicyConfig contains offline policy parameters. Costs are USD; the latency
 // penalty is USD per second of model P95 latency. Zero maxima disable those
 // limits. MinClassifierConfidence defaults to 0.7 when zero. Score-based rules only
@@ -47,6 +55,9 @@ func NewPolicy(cfg PolicyConfig) *Policy {
 type DecisionInput struct {
 	Features domain.RequestFeatures
 	Models   []domain.Model
+	// FeedbackEvidence is an immutable, JSON-safe aggregate snapshot for the
+	// exact task type being routed.
+	FeedbackEvidence []FeedbackEvidence
 	// ModelID restricts selection to one configured concrete model. It lets
 	// callers honor explicit model requests while retaining all policy hard
 	// eligibility checks and rejection explanations.
@@ -85,6 +96,7 @@ type Pin struct {
 type Decision struct {
 	Tier              domain.Tier
 	ModelID, Provider string
+	TaskType          domain.TaskType
 	Reasons           []string
 	Candidates        []CandidateScore
 	Rejections        []Rejection
@@ -103,7 +115,7 @@ const (
 // compatible pin takes precedence over cost optimization. On failure, callers
 // should retain the returned decision for its reasons and rejections.
 func (p *Policy) Decide(in DecisionInput) (Decision, error) {
-	var decision Decision
+	decision := Decision{TaskType: in.TaskType}
 	if err := p.validate(in); err != nil {
 		return decision, err
 	}
@@ -184,7 +196,8 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 	}
 	candidates := make([]candidate, 0, len(eligible))
 	for _, model := range eligible {
-		score, err := scoreCandidate(model, in.Features, in.TaskType, p.config, in.Session)
+		evidence := findFeedbackEvidence(in.FeedbackEvidence, model.Provider, model.ID, in.TaskType)
+		score, err := scoreCandidate(model, in.Features, in.TaskType, evidence, p.config, in.Session)
 		if err != nil {
 			decision.Rejections = append(decision.Rejections, Rejection{ModelID: model.ID, Code: RejectEstimate, Codes: []RejectionCode{RejectEstimate}, Reasons: []string{err.Error()}})
 			continue
@@ -260,6 +273,15 @@ func (p *Policy) Decide(in DecisionInput) (Decision, error) {
 	decision.Tier, decision.ModelID, decision.Provider = chosen.Tier, chosen.ID, chosen.Provider
 	decision.Reasons = append(decision.Reasons, fmt.Sprintf("selected %s/%s at %s", chosen.Provider, chosen.ID, chosen.Tier))
 	return decision, nil
+}
+
+func findFeedbackEvidence(evidence []FeedbackEvidence, provider, modelID string, task domain.TaskType) FeedbackEvidence {
+	for _, item := range evidence {
+		if item.Provider == provider && item.ModelID == modelID && item.TaskType == task {
+			return item
+		}
+	}
+	return FeedbackEvidence{}
 }
 
 func matchesPin(model domain.Model, pin *Pin) bool {

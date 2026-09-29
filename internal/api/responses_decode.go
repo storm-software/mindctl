@@ -125,6 +125,7 @@ type wireInputItem struct {
 	ImageURL         json.RawMessage `json:"image_url"`
 	Arguments        json.RawMessage `json:"arguments"`
 	Output           json.RawMessage `json:"output"`
+	Status           string          `json:"status"`
 	Summary          json.RawMessage `json:"summary"`
 	EncryptedContent json.RawMessage `json:"encrypted_content"`
 	Tools            []wireTool      `json:"tools"`
@@ -240,6 +241,9 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 	case "custom_tool_call_output":
 		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Output: wire.Output}}, nil
 	case "additional_tools":
+		if len(wire.Tools) == 0 {
+			return nil, nil
+		}
 		item := inference.Item{ID: wire.ID, Type: wire.Type, Role: wire.Role}
 		for _, tool := range wire.Tools {
 			item.Tools = append(item.Tools, decodeWireTool(tool))

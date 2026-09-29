@@ -8,6 +8,11 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 )
 
+const (
+	feedbackMinimumSamples int64   = 10
+	feedbackPriorWeight    float64 = 20
+)
+
 // CandidateScore is the reproducible USD estimate for a hard-eligible model,
 // including models subsequently rejected by policy budgets. DirectCost is the
 // worst case for this request, with max_tokens of output. ExpectedTurnCost uses
@@ -16,15 +21,38 @@ import (
 // cost of escalation; ExpectedTotalCost weights it by failure and ranks
 // candidates.
 type CandidateScore struct {
-	ModelID, Provider                              string
-	DirectCost, FailureProbability, EscalationCost float64
-	ExpectedTurnCost, HorizonCost                  float64
-	SuccessProbability                             float64
-	LatencyPenalty, ExpectedTotalCost              float64
-	Latency                                        time.Duration
+	ModelID, Provider                                string
+	DirectCost, FailureProbability, EscalationCost   float64
+	ExpectedTurnCost, HorizonCost                    float64
+	ConfiguredSuccessProbability, SuccessProbability float64
+	FeedbackThumbsUpCount, FeedbackRatingCount       int64
+	FeedbackApplied                                  bool
+	LatencyPenalty, ExpectedTotalCost                float64
+	Latency                                          time.Duration
 }
 
-func scoreCandidate(model domain.Model, features domain.RequestFeatures, task domain.TaskType, cfg PolicyConfig, session *SessionEstimate) (CandidateScore, error) {
+// EffectiveSuccessProbability blends mature feedback evidence into the
+// configured model prior. Smaller samples leave the configured prior intact.
+func EffectiveSuccessProbability(model domain.Model, task domain.TaskType, evidence FeedbackEvidence) (configured, effective float64, applied bool, err error) {
+	configured = model.DefaultSuccessPrior
+	if taskPrior, ok := model.SuccessPriors[task]; ok {
+		configured = taskPrior
+	}
+	if !probability(configured) {
+		return configured, 0, false, fmt.Errorf("model success prior is invalid")
+	}
+	if evidence.ThumbsUpCount < 0 || evidence.RatingCount < 0 || evidence.ThumbsUpCount > evidence.RatingCount {
+		return configured, 0, false, fmt.Errorf("feedback counts are invalid")
+	}
+	if evidence.RatingCount < feedbackMinimumSamples {
+		return configured, configured, false, nil
+	}
+	effective = (configured*feedbackPriorWeight + float64(evidence.ThumbsUpCount)) /
+		(feedbackPriorWeight + float64(evidence.RatingCount))
+	return configured, effective, true, nil
+}
+
+func scoreCandidate(model domain.Model, features domain.RequestFeatures, task domain.TaskType, evidence FeedbackEvidence, cfg PolicyConfig, session *SessionEstimate) (CandidateScore, error) {
 	score := CandidateScore{ModelID: model.ID, Provider: model.Provider, Latency: model.LatencyP95, EscalationCost: cfg.FailureEscalationCost}
 	prices := []float64{model.Pricing.InputPerMillion, model.Pricing.CachedInputPerMillion, model.Pricing.OutputPerMillion, model.Pricing.PerRequestUSD}
 
@@ -37,14 +65,14 @@ func scoreCandidate(model domain.Model, features domain.RequestFeatures, task do
 		}
 	}
 
-	prior := model.DefaultSuccessPrior
-	if taskPrior, ok := model.SuccessPriors[task]; ok {
-		prior = taskPrior
-	}
-
-	if !probability(prior) || model.LatencyP95 < 0 {
+	configured, prior, applied, err := EffectiveSuccessProbability(model, task, evidence)
+	if err != nil || model.LatencyP95 < 0 {
 		return score, fmt.Errorf("model success prior or latency is invalid")
 	}
+	score.ConfiguredSuccessProbability = configured
+	score.FeedbackThumbsUpCount = evidence.ThumbsUpCount
+	score.FeedbackRatingCount = evidence.RatingCount
+	score.FeedbackApplied = applied
 
 	cached := min(features.CachedInputTokens, features.InputTokens)
 	uncached := features.InputTokens - cached

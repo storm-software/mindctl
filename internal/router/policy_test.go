@@ -29,6 +29,73 @@ func TestPolicyChoosesLowerExpectedTotalCost(t *testing.T) {
 	}
 }
 
+func TestPolicyUsesFeedbackEvidence(t *testing.T) {
+	models := []domain.Model{
+		policyModel("cheap", domain.T4, .1, .9),
+		policyModel("reliable", domain.T4, .3, .9),
+	}
+	withoutFeedback, err := NewPolicy(PolicyConfig{FailureEscalationCost: 1}).Decide(DecisionInput{
+		Models: models, TaskType: domain.TaskCoding,
+	})
+	if err != nil || withoutFeedback.ModelID != "cheap" {
+		t.Fatalf("decision without feedback=%+v err=%v", withoutFeedback, err)
+	}
+
+	withFeedback, err := NewPolicy(PolicyConfig{FailureEscalationCost: 1}).Decide(DecisionInput{
+		Models: models, TaskType: domain.TaskCoding,
+		FeedbackEvidence: []FeedbackEvidence{{
+			Provider: "provider", ModelID: "cheap", TaskType: domain.TaskCoding,
+			RatingCount: 10,
+		}},
+	})
+	if err != nil || withFeedback.ModelID != "reliable" {
+		t.Fatalf("decision with feedback=%+v err=%v", withFeedback, err)
+	}
+	score := candidate(t, withFeedback, "cheap")
+	if math.Abs(score.ConfiguredSuccessProbability-.9) > 1e-12 ||
+		math.Abs(score.SuccessProbability-.6) > 1e-12 ||
+		score.FeedbackThumbsUpCount != 0 || score.FeedbackRatingCount != 10 || !score.FeedbackApplied {
+		t.Fatalf("feedback score=%+v", score)
+	}
+}
+
+func TestFeedbackEvidenceIsolation(t *testing.T) {
+	model := policyModel("rated", domain.T4, 0, .8)
+	tests := []struct {
+		name     string
+		evidence FeedbackEvidence
+	}{
+		{name: "provider", evidence: FeedbackEvidence{Provider: "other", ModelID: model.ID, TaskType: domain.TaskCoding, RatingCount: 10}},
+		{name: "model", evidence: FeedbackEvidence{Provider: model.Provider, ModelID: "other", TaskType: domain.TaskCoding, RatingCount: 10}},
+		{name: "task", evidence: FeedbackEvidence{Provider: model.Provider, ModelID: model.ID, TaskType: domain.TaskReasoning, RatingCount: 10}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := NewPolicy(PolicyConfig{}).Decide(DecisionInput{
+				Models: []domain.Model{model}, TaskType: domain.TaskCoding,
+				FeedbackEvidence: []FeedbackEvidence{test.evidence},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			score := got.Candidates[0]
+			if score.SuccessProbability != .8 || score.FeedbackRatingCount != 0 || score.FeedbackApplied {
+				t.Fatalf("unrelated evidence changed score: %+v", score)
+			}
+		})
+	}
+}
+
+func TestDecisionRecordsTaskType(t *testing.T) {
+	got, err := NewPolicy(PolicyConfig{}).Decide(DecisionInput{
+		Models:   []domain.Model{policyModel("coding", domain.T4, 0, 1)},
+		TaskType: domain.TaskCoding,
+	})
+	if err != nil || got.TaskType != domain.TaskCoding {
+		t.Fatalf("decision=%+v err=%v", got, err)
+	}
+}
+
 func TestPolicyExcludesExplicitOnlyModelFromAutomaticSelection(t *testing.T) {
 	reviewer := policyModel("codex-auto-review", domain.T6, 0, 1)
 	reviewer.ExplicitOnly = true

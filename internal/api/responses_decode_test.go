@@ -72,6 +72,17 @@ func TestDecodeResponseRequestPreservesCodexComputerCallOutput(t *testing.T) {
 	}
 }
 
+func TestDecodeResponseRequestAcceptsCodexFunctionCallOutputStatus(t *testing.T) {
+	got, _, err := decode(t, `{
+  "model":"mindctl-auto",
+  "input":[{"type":"function_call_output","call_id":"call_spawn","output":"done","status":"completed"}]
+}`, 1<<20)
+	if err != nil || len(got.Input) != 1 || got.Input[0].Type != "function_call_output" ||
+		got.Input[0].CallID != "call_spawn" || string(got.Input[0].Output) != `"done"` {
+		t.Fatalf("request=%+v err=%v", got, err)
+	}
+}
+
 func TestDecodeResponseRequestPreservesCodexWebSearchTool(t *testing.T) {
 	got, _, err := decode(t, `{
   "model":"mindctl-auto",
@@ -79,6 +90,19 @@ func TestDecodeResponseRequestPreservesCodexWebSearchTool(t *testing.T) {
   "tools":[{"type":"web_search","external_web_access":true}]
 }`, 1<<20)
 	if err != nil || len(got.Tools) != 1 || got.Tools[0].Type != "web_search" || got.Tools[0].ExternalWebAccess == nil || !*got.Tools[0].ExternalWebAccess {
+		t.Fatalf("request=%+v err=%v", got, err)
+	}
+}
+
+func TestDecodeResponseRequestIgnoresEmptyCodexAdditionalTools(t *testing.T) {
+	got, _, err := decode(t, `{
+  "model":"mindctl-auto",
+  "input":[
+    {"type":"additional_tools","role":"developer","tools":[]},
+    {"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}
+  ]
+}`, 1<<20)
+	if err != nil || len(got.Input) != 1 || got.Input[0].Type != "message" || got.Input[0].Text != "hello" {
 		t.Fatalf("request=%+v err=%v", got, err)
 	}
 }

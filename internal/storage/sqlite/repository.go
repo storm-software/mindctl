@@ -115,17 +115,19 @@ func (tx *transaction) insertRequest(record storage.RequestRecord) error {
 		return failure("insert request", err)
 	}
 	if _, err := tx.conn.ExecContext(tx.ctx, `INSERT INTO routing_decisions
-		(request_id, tier, model_id, provider, reasons_json, rejections_json, replay_json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		record.ID, record.Decision.Tier, record.Decision.ModelID, record.Decision.Provider, string(reasons), string(rejections), string(replay)); err != nil {
+		(request_id, tier, model_id, provider, task_type, reasons_json, rejections_json, replay_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		record.ID, record.Decision.Tier, record.Decision.ModelID, record.Decision.Provider, record.Decision.TaskType, string(reasons), string(rejections), string(replay)); err != nil {
 		return failure("insert decision", err)
 	}
 	for position, score := range record.Decision.Candidates {
 		if _, err := tx.conn.ExecContext(tx.ctx, `INSERT INTO candidate_scores
 			(request_id, position, model_id, provider, direct_cost, failure_probability, escalation_cost,
-			success_probability, latency_penalty, expected_total_cost, latency_ns, expected_turn_cost, horizon_cost)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			success_probability, configured_success_probability, feedback_thumbs_up_count, feedback_rating_count, feedback_applied,
+			latency_penalty, expected_total_cost, latency_ns, expected_turn_cost, horizon_cost)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			record.ID, position, score.ModelID, score.Provider, score.DirectCost, score.FailureProbability, score.EscalationCost,
-			score.SuccessProbability, score.LatencyPenalty, score.ExpectedTotalCost, int64(score.Latency),
+			score.SuccessProbability, score.ConfiguredSuccessProbability, score.FeedbackThumbsUpCount, score.FeedbackRatingCount, score.FeedbackApplied,
+			score.LatencyPenalty, score.ExpectedTotalCost, int64(score.Latency),
 			score.ExpectedTurnCost, score.HorizonCost); err != nil {
 			return failure("insert candidate score", err)
 		}
@@ -151,10 +153,10 @@ func (db *DB) GetRequest(ctx context.Context, id string) (storage.RequestRecord,
 	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
 		var createdAt int64
 		var reasons, rejections, replay string
-		err := conn.QueryRowContext(ctx, `SELECT r.id, r.created_at, d.tier, d.model_id, d.provider,
+		err := conn.QueryRowContext(ctx, `SELECT r.id, r.created_at, d.tier, d.model_id, d.provider, d.task_type,
 			d.reasons_json, d.rejections_json, d.replay_json FROM requests r
 			JOIN routing_decisions d ON d.request_id = r.id WHERE r.id = ?`, id).Scan(
-			&record.ID, &createdAt, &record.Decision.Tier, &record.Decision.ModelID, &record.Decision.Provider,
+			&record.ID, &createdAt, &record.Decision.Tier, &record.Decision.ModelID, &record.Decision.Provider, &record.Decision.TaskType,
 			&reasons, &rejections, &replay)
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.ErrNotFound
@@ -404,7 +406,8 @@ func (db *DB) readHistoryAttempts(
 
 func readCandidates(ctx context.Context, conn *sql.Conn, record *storage.RequestRecord) error {
 	rows, err := conn.QueryContext(ctx, `SELECT model_id, provider, direct_cost, failure_probability,
-		escalation_cost, success_probability, latency_penalty, expected_total_cost, latency_ns,
+		escalation_cost, success_probability, configured_success_probability, feedback_thumbs_up_count, feedback_rating_count, feedback_applied,
+		latency_penalty, expected_total_cost, latency_ns,
 		COALESCE(expected_turn_cost, direct_cost), horizon_cost
 		FROM candidate_scores WHERE request_id = ? ORDER BY position`, record.ID)
 	if err != nil {
@@ -414,7 +417,8 @@ func readCandidates(ctx context.Context, conn *sql.Conn, record *storage.Request
 	for rows.Next() {
 		var score router.CandidateScore
 		if err := rows.Scan(&score.ModelID, &score.Provider, &score.DirectCost, &score.FailureProbability,
-			&score.EscalationCost, &score.SuccessProbability, &score.LatencyPenalty, &score.ExpectedTotalCost, &score.Latency,
+			&score.EscalationCost, &score.SuccessProbability, &score.ConfiguredSuccessProbability, &score.FeedbackThumbsUpCount, &score.FeedbackRatingCount, &score.FeedbackApplied,
+			&score.LatencyPenalty, &score.ExpectedTotalCost, &score.Latency,
 			&score.ExpectedTurnCost, &score.HorizonCost); err != nil {
 			return failure("decode candidate score", err)
 		}

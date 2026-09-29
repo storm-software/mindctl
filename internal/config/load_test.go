@@ -66,7 +66,7 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-5.6-terra":       {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-5.6-luna":        {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-5.3-codex":       {input: 3.5, cachedInput: .35, output: 28, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.3-codex":       {input: 1.75, cachedInput: .175, output: 14, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-5.3-codex-spark": {input: 0, cachedInput: 0, output: 0, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
 	}
 	wantModelCount := len(wantPrices)
@@ -86,6 +86,11 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 		}
 		if !slices.Equal(model.Capabilities, want.capabilities) {
 			t.Errorf("model %s capabilities = %v, want %v", model.ID, model.Capabilities, want.capabilities)
+		}
+		if model.ID == "gpt-5.3-codex" {
+			if model.ContextWindow != 400_000 || model.MaxOutputTokens != 128_000 {
+				t.Errorf("model %s context/output = %d/%d, want 400000/128000", model.ID, model.ContextWindow, model.MaxOutputTokens)
+			}
 		}
 	}
 	if matchedModels != wantModelCount {
@@ -128,10 +133,10 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 		context, outputLimit                   int
 		input, cachedInput, cacheWrite, output float64
 	}{
-		"claude-fable-5-1": {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, cacheWrite: 12.5, output: 50},
-		"claude-opus-5-5":  {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, cacheWrite: 5, output: 20},
-		"claude-sonnet-5":  {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .2, cacheWrite: 2.5, output: 10},
-		"claude-haiku-4-5": {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, cacheWrite: 1.25, output: 5},
+		"claude-fable-5-1":  {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, cacheWrite: 12.5, output: 50},
+		"claude-opus-5-5":   {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, cacheWrite: 5, output: 20},
+		"claude-sonnet-5-5": {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .2, cacheWrite: 2.5, output: 10},
+		"claude-haiku-4-5":  {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, cacheWrite: 1.25, output: 5},
 	}
 	for _, model := range cfg.Models {
 		want, ok := wantModels[model.ID]

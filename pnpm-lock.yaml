@@ -3709,28 +3709,17 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@storm-software/build-tools@0.158.305':
-    resolution: {integrity: sha512-jcMyhQIg4Sc4bQBdT0TCWFaDu+SsCLU69lBeO/QDSaWBPFyP5OLvbXWkIHQ1lDlOerZzm8wd1UtLNDt19+7uNw==}
+  '@storm-software/build-tools@0.158.306':
+    resolution: {integrity: sha512-2bYDOqn60bqVmmczjUx879g7zpMo2xgC4L7EQezG1ca5UZw4jejF9Gp4f68m5OgAAHfEb4SfzZ8VPJWN5zkYyg==}
     peerDependencies:
       '@nx/devkit': 23.1.1
       '@nx/js': 23.1.1
       nx: 23.1.1
       typescript: ^6.0.3
 
-  '@storm-software/config-tools@1.190.145':
-    resolution: {integrity: sha512-WxwQIy/YD4fU6QCa/BWIiK08NcyFdWWCCT8QQ3uLFhS4qzHyrEWkxhwpNJYH/Jn5NTcPEZA9znGupts0AIwV8Q==}
-    hasBin: true
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
-
   '@storm-software/config-tools@1.190.146':
     resolution: {integrity: sha512-z8Z4vp35/tzUsMvNK72Gr0ulLCCdgCC8Gggorkv4Af1PkL5r2A8kQ3BigcDdMfB/xsVTJ7qssf0C4CNqy/Gl2g==}
     hasBin: true
-    peerDependencies:
-      zod: ^3.25.0 || ^4.0.0
-
-  '@storm-software/config@1.138.81':
-    resolution: {integrity: sha512-FjKeSIGcjTJ9b0p5XUZvpB5wfssTjek3YOX4U5KYqu1e/rI3wDPf90mt6dKeExaCLqs92FUryeAJrC2R3o6T/w==}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -3856,9 +3845,6 @@ packages:
   '@storm-software/markdownlint@0.30.301':
     resolution: {integrity: sha512-ktZZ7XR88aU2bEsFPHgI31S6sQpqN0k2zfyQEqAfkQ9TRPLxMB4fkc0R2/HBUDiuHa3mNwLRpbjqlCk/GB1oAQ==}
 
-  '@storm-software/npm-tools@0.6.265':
-    resolution: {integrity: sha512-/rXHVSyaeswe3kAUekC/0agk6qGrMD3k3iSAzSZdWej1f1TwF5G86UMoDbnbEtPQUtYPSWo+TgF7M9M7+QyWMA==}
-
   '@storm-software/npm-tools@0.6.266':
     resolution: {integrity: sha512-UcgWEeZj6AWOHaKx5Pyu4HpMbwzt7bsvOx7vWSFOeMp759whwyz6MGykw4WbDYfgjKJcUIvxQXe7s9UT3ntLGQ==}
 
@@ -3868,28 +3854,6 @@ packages:
   '@storm-software/pnpm-tools@0.7.160':
     resolution: {integrity: sha512-BLRlcSobpZ7EEa9X0845rU2Upf6Ug3Q3IIOuLyMrQP2gqHcThFbdxFnKofl9JS2tw6Mf0IDpQ5GE+rYEMX1nBw==}
     hasBin: true
-
-  '@storm-software/prettier@0.59.198':
-    resolution: {integrity: sha512-bAP3RFsDrIdpqJIZA91d9B/cFgQD5mMRY2crn6Tbag1G2ZvDNzyqpV4xRT4iH2FytEoH6X7f5x6PmM6GVe2N3g==}
-    peerDependencies:
-      prettier-plugin-astro: '>=0.14.1'
-      prettier-plugin-jsdoc: '>=1.8.1'
-      prettier-plugin-organize-imports: '>=4.3.0'
-      prettier-plugin-packagejson: '>=3.0.2'
-      prettier-plugin-prisma: '>=5.0.0'
-      prettier-plugin-sh: '>=0.15.0'
-      prettier-plugin-solidity: '>=1.4.3'
-      prettier-plugin-tailwindcss: '>=0.6.14'
-      prettier-plugin-toml: '>=2.0.6'
-    peerDependenciesMeta:
-      prettier-plugin-astro:
-        optional: true
-      prettier-plugin-prisma:
-        optional: true
-      prettier-plugin-solidity:
-        optional: true
-      prettier-plugin-tailwindcss:
-        optional: true
 
   '@storm-software/prettier@0.59.199':
     resolution: {integrity: sha512-de63VUrliEZvqC1H2sL/X1Z3Blr/B3FGhTe7EJX2Tr0gARq3q+8U/7nGtmjttv1gWdGL0ofGhVpaCm3SgytL9g==}
@@ -3933,30 +3897,6 @@ packages:
   '@storm-software/untyped@0.24.288':
     resolution: {integrity: sha512-HFQvf8VmDknqj/aXU15WdXuVPgzc2NrDNgRFcBznksv6uDZsScihOcOtwwIAEOG0Mjbn6NpAULc++oIfIl+qWQ==}
     hasBin: true
-
-  '@storm-software/workspace-tools@1.297.14':
-    resolution: {integrity: sha512-saCWCv3t//rrc4EZbSO7/ysqWw1MKzpu5Zhq9jpT+dz8O+CXvxzOvpAZ7Gnoi18nUNP+Oyl4kas7Tz71vkqsiQ==}
-    peerDependencies:
-      '@napi-rs/cli': ^3.4.1
-      '@storm-software/bun-tools': '*'
-      '@storm-software/esbuild': '*'
-      '@storm-software/pnpm-tools': '*'
-      '@storm-software/tsdown': '*'
-      '@storm-software/unbuild': '*'
-      nx: '>=22.7.1'
-    peerDependenciesMeta:
-      '@napi-rs/cli':
-        optional: true
-      '@storm-software/bun-tools':
-        optional: true
-      '@storm-software/esbuild':
-        optional: true
-      '@storm-software/pnpm-tools':
-        optional: true
-      '@storm-software/tsdown':
-        optional: true
-      '@storm-software/unbuild':
-        optional: true
 
   '@storm-software/workspace-tools@1.297.15':
     resolution: {integrity: sha512-MC/kLjVpiRe4YTTeteiaLeQEohcXaqvcvUQXSCz5pelYpB/SaXjlVSKlfKfimScFNCTshsqSPZYRf1y/n+5o6Q==}
@@ -15480,9 +15420,9 @@ snapshots:
       '@donedeal0/superdiff': 3.2.0
       '@jridgewell/sourcemap-codec': 1.6.0
       '@rolldown/pluginutils': 1.0.1
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
-      '@storm-software/prettier': 0.59.198(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))
+      '@storm-software/config': 1.138.82(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
+      '@storm-software/prettier': 0.59.199(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))
       '@stryke/capnp': 0.12.145(typescript@6.0.3)(zod@4.6.5)
       '@stryke/convert': 0.7.47
       '@stryke/env': 0.20.135(zod@4.6.5)
@@ -15547,8 +15487,8 @@ snapshots:
   '@powerlines/engine@0.49.134(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(esbuild@0.28.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(typescript@6.0.3)(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)':
     dependencies:
       '@powerlines/core': 0.48.132(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(esbuild@0.28.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(typescript@6.0.3)(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
+      '@storm-software/config': 1.138.82(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
       '@stryke/async': 0.1.44
       '@stryke/convert': 0.7.47
       '@stryke/env': 0.20.135(zod@4.6.5)
@@ -15607,10 +15547,10 @@ snapshots:
   '@powerlines/nx@0.13.253(@babel/traverse@7.29.8)(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@farmfe/cli@1.0.5)(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(@storm-software/pnpm-tools@0.7.160(zod@4.6.5))(@types/node@25.9.8)(@typescript/native-preview@7.0.0-dev.20251218.3)(nx@22.7.5(debug@4.4.3))(oxc-resolver@11.24.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(tsdown@0.22.14(@typescript/native-preview@7.0.0-dev.20251218.3)(oxc-resolver@11.24.2)(tsx@4.23.15)(typescript@6.0.3))(typescript@6.0.3)(valibot@1.5.0(typescript@6.0.3))(verdaccio@6.0.5(typanion@3.14.0))(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)':
     dependencies:
       '@nx/devkit': 23.2.1(nx@22.7.5(debug@4.4.3))
-      '@storm-software/build-tools': 0.158.305(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
-      '@storm-software/workspace-tools': 1.297.14(@babel/traverse@7.29.8)(@storm-software/pnpm-tools@0.7.160(zod@4.6.5))(@types/node@25.9.8)(nx@22.7.5(debug@4.4.3))(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))
+      '@storm-software/build-tools': 0.158.306(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
+      '@storm-software/config': 1.138.82(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
+      '@storm-software/workspace-tools': 1.297.15(@babel/traverse@7.29.8)(@storm-software/pnpm-tools@0.7.160(zod@4.6.5))(@types/node@25.9.8)(nx@22.7.5(debug@4.4.3))(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))
       '@stryke/env': 0.20.135(zod@4.6.5)
       '@stryke/fs': 0.33.118(zod@4.6.5)
       '@stryke/hash': 0.13.71(zod@4.6.5)
@@ -15713,7 +15653,7 @@ snapshots:
       '@rollup/plugin-inject': 5.0.5(rollup@4.63.5)
       '@rollup/plugin-node-resolve': 16.0.3(rollup@4.63.5)
       '@rollup/plugin-replace': 6.0.3(rollup@4.63.5)
-      '@storm-software/build-tools': 0.158.305(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
+      '@storm-software/build-tools': 0.158.306(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)
       '@stryke/convert': 0.7.47
       '@stryke/env': 0.20.135(zod@4.6.5)
       '@stryke/fs': 0.33.118(zod@4.6.5)
@@ -16030,12 +15970,12 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@storm-software/build-tools@0.158.305(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)':
+  '@storm-software/build-tools@0.158.306(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(nx@22.7.5(debug@4.4.3))(typescript@6.0.3)(zod@4.6.5)':
     dependencies:
       '@nx/devkit': 23.2.1(nx@22.7.5(debug@4.4.3))
       '@nx/js': 22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0))
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
+      '@storm-software/config': 1.138.82(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
       '@swc/core': 1.7.26
       glob: 11.1.0
       nx: 22.7.5(debug@4.4.3)
@@ -16047,22 +15987,6 @@ snapshots:
       - '@swc/helpers'
       - magicast
       - zod
-
-  '@storm-software/config-tools@1.190.145(zod@4.6.5)':
-    dependencies:
-      '@ltd/j-toml': 1.38.0
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      c12: 2.0.4
-      chalk: 4.1.2
-      commander: 12.1.0
-      date-fns: 4.4.0
-      defu: 6.1.7
-      giget: 1.2.5
-      jiti: 2.7.0
-      sqlite: 5.1.1
-      zod: 4.6.5
-    transitivePeerDependencies:
-      - magicast
 
   '@storm-software/config-tools@1.190.146(zod@4.6.5)':
     dependencies:
@@ -16079,10 +16003,6 @@ snapshots:
       zod: 4.6.5
     transitivePeerDependencies:
       - magicast
-
-  '@storm-software/config@1.138.81(zod@4.6.5)':
-    dependencies:
-      zod: 4.6.5
 
   '@storm-software/config@1.138.82(zod@4.6.5)':
     dependencies:
@@ -16297,16 +16217,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@storm-software/npm-tools@0.6.265(zod@4.6.5)':
-    dependencies:
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
-      semver: 7.8.5
-      strip-ansi: 7.2.0
-    transitivePeerDependencies:
-      - magicast
-      - zod
-
   '@storm-software/npm-tools@0.6.266(zod@4.6.5)':
     dependencies:
       '@storm-software/config': 1.138.82(zod@4.6.5)
@@ -16357,15 +16267,6 @@ snapshots:
       - uploadthing
       - zod
 
-  '@storm-software/prettier@0.59.198(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))':
-    dependencies:
-      prettier: 3.9.9
-      prettier-plugin-jsdoc: 1.8.1(prettier@3.9.9)
-      prettier-plugin-organize-imports: 4.3.0(prettier@3.9.9)(typescript@6.0.3)
-      prettier-plugin-packagejson: 3.0.2(prettier@3.9.9)
-      prettier-plugin-sh: 0.15.0(prettier@3.9.9)
-      prettier-plugin-toml: 2.0.4(prettier@3.9.9)
-
   '@storm-software/prettier@0.59.199(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))':
     dependencies:
       prettier: 3.9.9
@@ -16397,59 +16298,6 @@ snapshots:
     transitivePeerDependencies:
       - magicast
       - zod
-
-  '@storm-software/workspace-tools@1.297.14(@babel/traverse@7.29.8)(@storm-software/pnpm-tools@0.7.160(zod@4.6.5))(@types/node@25.9.8)(nx@22.7.5(debug@4.4.3))(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))':
-    dependencies:
-      '@actions/core': 3.0.1
-      '@ltd/j-toml': 1.38.0
-      '@microsoft/api-extractor': 7.59.2(@types/node@25.9.8)
-      '@nx/devkit': 23.1.1(nx@22.7.5(debug@4.4.3))
-      '@nx/js': 23.1.1(@babel/traverse@7.29.8)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0))
-      '@samchon/openapi': 2.5.3
-      '@size-limit/esbuild': 11.2.0(size-limit@11.2.0)
-      '@size-limit/esbuild-why': 11.2.0(size-limit@11.2.0)
-      '@size-limit/file': 11.2.0(size-limit@11.2.0)
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
-      '@storm-software/npm-tools': 0.6.265(zod@4.6.5)
-      '@storm-software/prettier': 0.59.198(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))
-      defu: 6.1.7
-      esbuild: 0.25.12
-      fs-extra: 11.4.1
-      glob: 11.1.0
-      jiti: 2.7.0
-      markdownlint-cli2: 0.17.2
-      micromatch: 4.0.8
-      nx: 22.7.5(debug@4.4.3)
-      pkg-types: 1.3.1
-      prettier: 3.9.9
-      semver: 7.8.5
-      size-limit: 11.2.0
-      tsx: 4.23.15
-      typia: 7.6.4(@samchon/openapi@2.5.3)(@types/node@25.9.8)(typescript@6.0.3)
-      untyped: 2.0.0
-      zod: 4.6.5
-    optionalDependencies:
-      '@storm-software/pnpm-tools': 0.7.160(zod@4.6.5)
-    transitivePeerDependencies:
-      - '@babel/traverse'
-      - '@swc-node/register'
-      - '@swc/cli'
-      - '@swc/core'
-      - '@types/node'
-      - magicast
-      - prettier-plugin-astro
-      - prettier-plugin-jsdoc
-      - prettier-plugin-organize-imports
-      - prettier-plugin-packagejson
-      - prettier-plugin-prisma
-      - prettier-plugin-sh
-      - prettier-plugin-solidity
-      - prettier-plugin-tailwindcss
-      - prettier-plugin-toml
-      - supports-color
-      - typescript
-      - verdaccio
 
   '@storm-software/workspace-tools@1.297.15(@babel/traverse@7.29.8)(@storm-software/pnpm-tools@0.7.160(zod@4.6.5))(@types/node@25.9.8)(nx@22.7.5(debug@4.4.3))(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(typescript@6.0.3)(verdaccio@6.0.5(typanion@3.14.0))':
     dependencies:
@@ -16510,8 +16358,8 @@ snapshots:
 
   '@stryke/capnp@0.12.145(typescript@6.0.3)(zod@4.6.5)':
     dependencies:
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
+      '@storm-software/config': 1.138.82(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
       '@stryke/convert': 0.7.47
       '@stryke/fs': 0.33.118(zod@4.6.5)
       '@stryke/path': 0.29.43
@@ -16546,7 +16394,7 @@ snapshots:
   '@stryke/fs@0.33.118(zod@4.6.5)':
     dependencies:
       '@antfu/install-pkg': 1.1.0
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
       '@stryke/convert': 0.7.47
       '@stryke/helpers': 0.10.56
       '@stryke/json': 0.15.40
@@ -24363,8 +24211,8 @@ snapshots:
       '@powerlines/core': 0.48.132(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(esbuild@0.28.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(typescript@6.0.3)(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)
       '@powerlines/engine': 0.49.134(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(esbuild@0.28.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(typescript@6.0.3)(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)
       '@powerlines/unplugin': 0.0.180(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@farmfe/cli@1.0.5)(@nx/devkit@23.2.1(nx@22.7.5(debug@4.4.3)))(@nx/js@22.7.5(@babel/traverse@7.29.8)(debug@4.4.3)(nx@22.7.5(debug@4.4.3))(verdaccio@6.0.5(typanion@3.14.0)))(@typescript/native-preview@7.0.0-dev.20251218.3)(esbuild@0.28.2)(nx@22.7.5(debug@4.4.3))(oxc-resolver@11.24.2)(prettier-plugin-jsdoc@1.8.1(prettier@3.9.9))(prettier-plugin-organize-imports@4.3.0(prettier@3.9.9)(typescript@6.0.3))(prettier-plugin-packagejson@3.0.2(prettier@3.9.9))(prettier-plugin-sh@0.15.0(prettier@3.9.9))(prettier-plugin-toml@2.0.4(prettier@3.9.9))(rolldown@1.2.11)(rollup@4.63.5)(tsdown@0.22.14(@typescript/native-preview@7.0.0-dev.20251218.3)(oxc-resolver@11.24.2)(tsx@4.23.15)(typescript@6.0.3))(typescript@6.0.3)(vite@8.3.1(@types/node@25.9.8)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.5)
-      '@storm-software/config': 1.138.81(zod@4.6.5)
-      '@storm-software/config-tools': 1.190.145(zod@4.6.5)
+      '@storm-software/config': 1.138.82(zod@4.6.5)
+      '@storm-software/config-tools': 1.190.146(zod@4.6.5)
       '@stryke/convert': 0.7.47
       '@stryke/env': 0.20.135(zod@4.6.5)
       '@stryke/fs': 0.33.118(zod@4.6.5)

@@ -215,12 +215,12 @@ models:
     provider: openai
     tier: T4
     capabilities: [chat, tools, images, json_schema, web_search]
-    context_window: 128000
-    max_output_tokens: 16384
+    context_window: 400000
+    max_output_tokens: 128000
     available: true
-    input_price: 3.5
-    cached_input_price_usd_per_million: 0.35
-    output_price: 28
+    input_price: 1.75
+    cached_input_price_usd_per_million: 0.175
+    output_price: 14
     per_request_price_usd: 0
     latency_p95: 0s
     success_prior: 1
@@ -283,7 +283,7 @@ models:
     task_success_priors:
       coding: 1
 
-  - id: claude-sonnet-5
+  - id: claude-sonnet-5-5
     provider: anthropic
     tier: T4
     capabilities: [chat, tools, images, json_schema]
