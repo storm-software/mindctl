@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
@@ -615,10 +616,41 @@ func historyItems(label string, items []inference.Item, full bool) (string, erro
 			}
 		}
 
-		values = append(values, value)
+		values = append(values, strings.Join(strings.Fields(value), " "))
 	}
 
-	return truncateHistoryValue(strings.Join(values, " "), full), nil
+	joined := strings.Join(values, " ")
+	if full || len(values) < 3 || utf8.RuneCountInString(joined) <= historyTruncateThreshold {
+		return joined, nil
+	}
+
+	headEnd := 1
+	headLength := utf8.RuneCountInString(values[0])
+	for headEnd < len(values)-1 {
+		nextLength := 1 + utf8.RuneCountInString(values[headEnd])
+		if headLength+nextLength > historyTruncateHeadLength {
+			break
+		}
+		headLength += nextLength
+		headEnd++
+	}
+
+	tailStart := len(values) - 1
+	tailLength := utf8.RuneCountInString(values[tailStart])
+	for tailStart > headEnd+1 {
+		previousLength := 1 + utf8.RuneCountInString(values[tailStart-1])
+		if tailLength+previousLength > historyTruncateTailLength {
+			break
+		}
+		tailLength += previousLength
+		tailStart--
+	}
+
+	if headEnd >= tailStart {
+		return joined, nil
+	}
+
+	return strings.Join(values[:headEnd], " ") + " ... " + strings.Join(values[tailStart:], " "), nil
 }
 
 // stripHistorySignatures removes signature fields, such as an Anthropic

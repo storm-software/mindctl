@@ -15,18 +15,18 @@ catalog:
   "@powerlines/nx": ^0.13.253
   "@powerlines/tsconfig": ^0.4.257
   "@powerlines/tsdoc": ^0.2.205
-  "@storm-software/config": ^1.138.81
-  "@storm-software/config-tools": ^1.190.145
-  "@storm-software/cspell": ^0.46.212
-  "@storm-software/eslint": ^0.170.180
-  "@storm-software/git-tools": ^2.132.2
-  "@storm-software/linting-tools": ^1.134.75
-  "@storm-software/markdownlint": ^0.30.300
-  "@storm-software/pnpm-tools": ^0.7.159
-  "@storm-software/prettier": ^0.59.198
-  "@storm-software/tsconfig": ^0.48.211
-  "@storm-software/untyped": ^0.24.287
-  "@storm-software/workspace-tools": ^1.297.14
+  "@storm-software/config": ^1.138.82
+  "@storm-software/config-tools": ^1.190.146
+  "@storm-software/cspell": ^0.46.213
+  "@storm-software/eslint": ^0.170.181
+  "@storm-software/git-tools": ^2.132.3
+  "@storm-software/linting-tools": ^1.134.76
+  "@storm-software/markdownlint": ^0.30.301
+  "@storm-software/pnpm-tools": ^0.7.160
+  "@storm-software/prettier": ^0.59.199
+  "@storm-software/tsconfig": ^0.48.212
+  "@storm-software/untyped": ^0.24.288
+  "@storm-software/workspace-tools": ^1.297.15
   "@swc-node/register": ^1.11.1
   "@swc/core": ^1.15.41
   "@swc/helpers": ^0.5.23

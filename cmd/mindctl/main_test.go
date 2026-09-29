@@ -665,7 +665,7 @@ func TestWriteHistoryTable(t *testing.T) {
 			created.Local().Format(historyCreatedLayout), "resp_1", "failed", "", "anthropic/claude-small", "T2", "failed",
 			strings.Repeat("a", 39) + ".", "error: timeout",
 		},
-		{"", "", "", "", "", "", "", "...", ""},
+		{"", "", "", "", "", "", "", "middle.", ""},
 		{"", "", "", "", "", "", "", strings.Repeat("b", 39) + ".", ""},
 		{"", "", "", "", "openai/gpt-large", "T4", "started", "", "[pending]"},
 	} {
@@ -743,6 +743,48 @@ func TestHistoryItemsOmitsSignatures(t *testing.T) {
 
 	if !strings.Contains(got, `"thinking":"plan"`) || !strings.Contains(got, `"Name":"lookup"`) {
 		t.Errorf("historyItems() = %q, want other fields kept", got)
+	}
+}
+
+func TestHistoryItemsKeepsWholeMessages(t *testing.T) {
+	first := "<system-reminder> Codebase and user instructions are shown below. " + strings.TrimSpace(strings.Repeat("instructions ", 12)) + "."
+	middle := "tool payload: " + strings.Repeat(`{"command":"echo value"}`, 8) + "."
+	last := "tool result: " + strings.TrimSpace(strings.Repeat("finished ", 12)) + ". Final status confirmed."
+
+	for _, test := range []struct {
+		name  string
+		items []inference.Item
+		want  string
+	}{
+		{"single long message", []inference.Item{{Text: first + " " + middle + " " + last}}, first + " " + middle + " " + last},
+		{"two long messages", []inference.Item{{Text: first}, {Text: last}}, first + " " + last},
+		{"omit whole middle message", []inference.Item{{Text: first}, {Text: middle}, {Text: last}}, first + " ... " + last},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := historyItems("request", test.items, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Errorf("historyItems() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestHistoryAttemptResponseKeepsWholeMessage(t *testing.T) {
+	message := "First sentence. " + strings.Repeat("Response text with details. ", 12) + "Final sentence."
+	attempt := storage.HistoryAttempt{
+		Status: "completed", ContentRetained: true,
+		Result: &inference.Result{Output: []inference.Item{{Type: "message", Role: "assistant", Text: message}}},
+	}
+
+	got, err := historyAttemptResponse(attempt, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != message {
+		t.Errorf("historyAttemptResponse() = %q, want %q", got, message)
 	}
 }
 

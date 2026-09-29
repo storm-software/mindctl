@@ -46,11 +46,11 @@
 ## Table of Contents
 
 - [Install](#install)
-  - [npm](#npm)
+  - [Npm Package](#npm-package)
+  - [Go Package](#go-package)
   - [Native binary](#native-binary)
   - [Homebrew](#homebrew)
   - [Container](#container)
-  - [Go Install](#go-install)
   - [From source](#from-source)
 - [Command Line Interface](#command-line-interface)
   - [ChatGPT subscription routing](#chatgpt-subscription-routing)
@@ -80,20 +80,30 @@
 
 The following installation methods are available for setting up Mindctl:
 
-## npm
+## Npm Package
 
 Install the native CLI through npm:
 
 ```sh
-npm install --global mindctl
+// Install the Mindctl CLI globally using npm
+npm install --global @mindctl/cli
 mindctl version
 
-npx mindctl version
+// Check the version of the globally installed Mindctl CLI
+npx @mindctl/cli version
 ```
 
 The npm package includes the supported Linux, macOS, and Windows native
 binaries. Gateway mode still requires a runtime configuration file and the
 required environment variables.
+
+## Go Package
+
+Install Mindctl using the Go toolchain:
+
+```sh
+go install github.com/storm-software/mindctl/cmd/mindctl@latest
+```
 
 ## Native binary
 
@@ -135,19 +145,14 @@ The GHCR package is public after its first release: an organization owner must
 set the package visibility to **Public** in GitHub Packages before advertising
 the image. Confirm an anonymous `docker pull` succeeds for the release tag.
 
-## Go Install
-
-Install Mindctl using the Go toolchain:
-
-```sh
-go install github.com/storm-software/mindctl/cmd/mindctl@latest
-```
-
 ## From source
 
 ```sh
 devenv shell -- go run ./cmd/mindctl serve --config ./config.yaml
 ```
+
+<div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
+<br />
 
 # Command Line Interface
 
