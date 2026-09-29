@@ -66,7 +66,7 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-5.6-terra":       {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-5.6-luna":        {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-5.3-codex":       {input: 1.75, cachedInput: .175, output: 14, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.3-codex":       {input: 1.75, cachedInput: .175, output: 14, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
 		"gpt-5.3-codex-spark": {input: 0, cachedInput: 0, output: 0, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
 	}
 	wantModelCount := len(wantPrices)
