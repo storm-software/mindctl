@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.42](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.42) (09/29/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue truncating request/responses ([62b1e20](https://github.com/storm-software/mindctl/commit/62b1e20))
+
 ## [0.1.41](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.41) (09/28/2026)
 
 ### Features
