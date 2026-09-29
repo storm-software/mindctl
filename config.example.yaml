@@ -217,7 +217,7 @@ models:
     capabilities: [chat, tools, images, json_schema, web_search]
     context_window: 400000
     max_output_tokens: 128000
-    available: true
+    available: false
     input_price: 1.75
     cached_input_price_usd_per_million: 0.175
     output_price: 14
