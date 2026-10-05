@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.45](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.45) (10/05/2026)
+
+### Bug Fixes
+
+- **mindctl:** Apply fix for unmarshalled JSON types ([81a256f](https://github.com/storm-software/mindctl/commit/81a256f))
+
 ## [0.1.42](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.42) (09/29/2026)
 
 ### Bug Fixes
