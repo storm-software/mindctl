@@ -143,6 +143,37 @@ func TestOpenAIChatGPTOAuthExecuteAndStreamUseRequestCredential(t *testing.T) {
 	}
 }
 
+func TestOpenAIChatGPTOAuthPreservesTextFormatStrictFalse(t *testing.T) {
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body struct {
+			Text struct {
+				Format map[string]json.RawMessage `json:"format"`
+			} `json:"text"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := body.Text.Format["strict"]; !ok || string(got) != "false" {
+			t.Fatalf("text.format.strict = %s, present = %t; want explicit false", got, ok)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"id":"upstream","status":"completed","model":"gpt-test","output":[]}`)),
+		}, nil
+	})
+	client := NewChatGPTOAuthClient("https://provider.example", &http.Client{Transport: transport})
+	request := textRequest()
+	request.TextFormat = &inference.JSONSchemaFormat{
+		Type: "json_schema", Name: "guardian_assessment",
+		Schema: json.RawMessage(`{"type":"object","properties":{"outcome":{"type":"string"},"reason":{"type":"string"}},"required":["outcome"]}`),
+		Strict: false,
+	}
+	ctx := upstreamauth.WithChatGPT(context.Background(), upstreamauth.ChatGPTCredential{AccessToken: "oauth.jwt", AccountID: "account-1"})
+	if _, err := client.Execute(ctx, openAIModel(), request); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenAIChatGPTOAuthRequiresRequestCredentialBeforeNetwork(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))

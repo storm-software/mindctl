@@ -73,7 +73,7 @@ type responseTextFormat struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Schema      json.RawMessage `json:"schema"`
-	Strict      bool            `json:"strict,omitempty"`
+	Strict      bool            `json:"strict"`
 }
 
 type responseInputItem struct {

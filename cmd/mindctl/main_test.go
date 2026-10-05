@@ -34,6 +34,7 @@ import (
 
 func mainConfig(t *testing.T) string {
 	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("MAIN_GATEWAY_TOKEN", "private-gateway-token")
 	t.Setenv("MAIN_LAYA_TOKEN", "private-laya-token")
 	t.Setenv("MAIN_PROVIDER_KEY", "private-provider-key")
