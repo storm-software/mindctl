@@ -2,26 +2,32 @@ package headroom
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
+	"github.com/storm-software/mindctl/internal/savings"
 )
 
 func TestRealHeadroomCompressionContract(t *testing.T) {
 	if os.Getenv("MINDCTL_HEADROOM_INTEGRATION") != "1" {
 		t.Skip("set MINDCTL_HEADROOM_INTEGRATION=1 to run the pinned Headroom contract")
 	}
-	cache := t.TempDir()
-	executable, err := NewProvisioner(cache, &http.Client{}, nil).Ensure(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	executable := os.Getenv("MINDCTL_HEADROOM_EXECUTABLE")
+	if executable == "" {
+		var err error
+		executable, err = NewProvisioner(t.TempDir(), &http.Client{}, nil).Ensure(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -42,27 +48,43 @@ func TestRealHeadroomCompressionContract(t *testing.T) {
 	}()
 	baseURL := "http://127.0.0.1:" + strconv.Itoa(port)
 	client := NewClient(baseURL, "integration-token", &http.Client{Timeout: 10 * time.Second})
-	readyContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	readyContext, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	var lastReadyErr error
 	for readyContext.Err() == nil {
-		if err := client.Ready(readyContext); err == nil {
+		lastReadyErr = client.Ready(readyContext)
+		if lastReadyErr == nil {
 			break
 		}
 		select {
 		case <-readyContext.Done():
-			t.Fatal("Headroom proxy did not become ready")
+			t.Fatalf("Headroom proxy did not become ready: %v", lastReadyErr)
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
 	request := inference.Request{Input: []inference.Item{
-		{Type: "message", Role: "assistant", Text: "A long assistant context that should be safely compressed."},
-		{Type: "function_call_output", Text: "A string tool result that should survive the round trip."},
+		{Type: "message", Role: "user", Text: "Summarize the tool output."},
+		{Type: "function_call_output", CallID: "call-1", Output: jsonString(t, strings.Repeat("INFO 2026-01-01 request completed successfully, duration=12ms, status=200\n", 1500))},
 	}}
-	compressed, _, err := client.Compress(context.Background(), domain.Model{UpstreamID: "integration-model"}, "conversation", "provider", request)
+	model := domain.Model{UpstreamID: "gpt-4o", Pricing: domain.Pricing{InputPerMillion: 1}}
+	compressed, metrics, err := client.Compress(context.Background(), model, "conversation", "provider", request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if compressed.Input[0].Text == "" || compressed.Input[1].Text == "" {
-		t.Fatal("Headroom returned empty protected text")
+	if compressed.Input[0].Text != request.Input[0].Text || len(compressed.Input[1].Output) == 0 || string(compressed.Input[1].Output) == string(request.Input[1].Output) || metrics.TokensSaved <= 0 || metrics.TokensBefore-metrics.TokensAfter != metrics.TokensSaved {
+		t.Fatalf("Headroom did not compress eligible tool output: metrics=%+v", metrics)
 	}
+	record := savings.Compute(savings.Input{Served: model, Compression: savings.Compression{TokensBefore: metrics.TokensBefore, TokensSaved: metrics.TokensSaved}})
+	if record.CompressionTokensSaved <= 0 || record.CompressionSavings <= 0 {
+		t.Fatalf("nonzero savings not recorded: %+v", record)
+	}
+}
+
+func jsonString(t *testing.T, value string) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }

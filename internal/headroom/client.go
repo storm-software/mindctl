@@ -58,9 +58,13 @@ func NewClient(baseURL, token string, httpClient *http.Client) *Client {
 func (c *Client) Ready(ctx context.Context) error {
 	request := compressionRequest{Model: "", Config: compressionConfig{SessionID: "readiness"}, Messages: []compressionMessage{}}
 	response, err := c.do(ctx, request)
-	if err == nil && response.Skipped {
+	if err != nil {
+		return err
+	}
+	if response.Skipped || response.Messages == nil || len(response.Messages) != 0 {
 		return unavailable(errors.New("readiness compression skipped"))
 	}
+	_, err = response.metrics()
 	return err
 }
 
@@ -88,13 +92,14 @@ func (c *Client) Compress(ctx context.Context, model domain.Model, conversationI
 	if response.Skipped || len(response.Messages) != len(messages) {
 		return inference.Request{}, Metrics{}, unavailable(errors.New("compression skipped or incomplete"))
 	}
+	metrics, err := response.metrics()
+	if err != nil {
+		return inference.Request{}, Metrics{}, err
+	}
 	if err := applyMessages(&copyRequest, response.Messages); err != nil {
 		return inference.Request{}, Metrics{}, unavailable(err)
 	}
-	if response.Metrics.TokensBefore < 0 || response.Metrics.TokensAfter < 0 || response.Metrics.TokensSaved < 0 || response.Metrics.TokensAfter > response.Metrics.TokensBefore || response.Metrics.TokensSaved != response.Metrics.TokensBefore-response.Metrics.TokensAfter {
-		return inference.Request{}, Metrics{}, unavailable(errors.New("invalid compression metrics"))
-	}
-	return copyRequest, response.Metrics, nil
+	return copyRequest, metrics, nil
 }
 
 type compressionRequest struct {
@@ -108,15 +113,24 @@ type compressionConfig struct {
 }
 
 type compressionMessage struct {
-	Index int    `json:"index"`
-	Role  string `json:"role"`
-	Text  string `json:"text"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
 type compressionResponse struct {
-	Skipped  bool                 `json:"compression_skipped"`
-	Messages []compressionMessage `json:"messages"`
-	Metrics  Metrics              `json:"metrics"`
+	Skipped      bool                 `json:"compression_skipped"`
+	Messages     []compressionMessage `json:"messages"`
+	TokensBefore *int64               `json:"tokens_before"`
+	TokensAfter  *int64               `json:"tokens_after"`
+	TokensSaved  *int64               `json:"tokens_saved"`
+}
+
+func (response compressionResponse) metrics() (Metrics, error) {
+	if response.TokensBefore == nil || response.TokensAfter == nil || response.TokensSaved == nil || *response.TokensBefore < 0 || *response.TokensAfter < 0 || *response.TokensSaved < 0 || *response.TokensAfter > *response.TokensBefore || *response.TokensSaved != *response.TokensBefore-*response.TokensAfter {
+		return Metrics{}, unavailable(errors.New("invalid compression metrics"))
+	}
+	return Metrics{TokensBefore: *response.TokensBefore, TokensAfter: *response.TokensAfter, TokensSaved: *response.TokensSaved}, nil
 }
 
 func (c *Client) do(ctx context.Context, payload compressionRequest) (compressionResponse, error) {

@@ -51,7 +51,7 @@ func (runner slowRunner) Start(_ context.Context, _ string, args []string, _ []s
 	}
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"messages":[],"metrics":{}}`))
+		_, _ = w.Write([]byte(`{"messages":[],"tokens_before":0,"tokens_after":0,"tokens_saved":0}`))
 	})}
 	process := &fakeProcess{done: make(chan struct{}), stop: func() { _ = server.Close() }}
 	if runner.exitNow {
