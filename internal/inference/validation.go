@@ -96,6 +96,24 @@ func validateItem(item Item) error {
 		if len(item.Summary) != 0 && !json.Valid(item.Summary) {
 			return errors.New("reasoning summary must be valid JSON")
 		}
+	case "agent_message":
+		if item.ID == "" || item.Author == "" || item.Recipient == "" || len(item.Content) == 0 {
+			return errors.New("agent message requires id, author, recipient, and content")
+		}
+		for _, part := range item.Content {
+			switch part.Type {
+			case "input_text", "output_text":
+				if part.Text == "" {
+					return errors.New("agent message text is required")
+				}
+			case "encrypted_content":
+				if part.EncryptedContent == "" {
+					return errors.New("agent message encrypted content is required")
+				}
+			default:
+				return fmt.Errorf("unsupported agent message content type %q", part.Type)
+			}
+		}
 	case "function_call":
 		if item.CallID == "" || item.Name == "" || len(item.Arguments) == 0 {
 			return errors.New("function call requires call_id, name, and arguments")

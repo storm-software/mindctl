@@ -12,21 +12,21 @@ catalog:
   "@nx/vite": 22.7.5
   "@nx/vitest": 22.7.5
   "@nx/workspace": 22.7.5
-  "@powerlines/nx": ^0.13.253
-  "@powerlines/tsconfig": ^0.4.257
-  "@powerlines/tsdoc": ^0.2.205
-  "@storm-software/config": ^1.138.82
-  "@storm-software/config-tools": ^1.190.146
-  "@storm-software/cspell": ^0.46.213
-  "@storm-software/eslint": ^0.170.181
-  "@storm-software/git-tools": ^2.132.3
-  "@storm-software/linting-tools": ^1.134.76
-  "@storm-software/markdownlint": ^0.30.301
-  "@storm-software/pnpm-tools": ^0.7.160
-  "@storm-software/prettier": ^0.59.199
-  "@storm-software/tsconfig": ^0.48.212
-  "@storm-software/untyped": ^0.24.288
-  "@storm-software/workspace-tools": ^1.297.15
+  "@powerlines/nx": ^0.13.254
+  "@powerlines/tsconfig": ^0.4.258
+  "@powerlines/tsdoc": ^0.2.206
+  "@storm-software/config": ^1.138.83
+  "@storm-software/config-tools": ^1.190.147
+  "@storm-software/cspell": ^0.46.214
+  "@storm-software/eslint": ^0.170.182
+  "@storm-software/git-tools": ^2.132.4
+  "@storm-software/linting-tools": ^1.134.77
+  "@storm-software/markdownlint": ^0.30.302
+  "@storm-software/pnpm-tools": ^0.7.161
+  "@storm-software/prettier": ^0.59.200
+  "@storm-software/tsconfig": ^0.48.213
+  "@storm-software/untyped": ^0.24.289
+  "@storm-software/workspace-tools": ^1.297.16
   "@swc-node/register": ^1.11.1
   "@swc/core": ^1.15.41
   "@swc/helpers": ^0.5.23
@@ -45,7 +45,7 @@ catalog:
   tsdown: ^0.22.14
   typescript: ^6.0.3
   verdaccio: 6.0.5
-  vite: ^8.3.2
+  vite: ^8.3.3
   vitest: ~4.1.11
   zx: ^8.8.5
 overrides:

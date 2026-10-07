@@ -80,6 +80,8 @@ type responseInputItem struct {
 	ID               string            `json:"id,omitempty"`
 	Type             string            `json:"type"`
 	Role             string            `json:"role,omitempty"`
+	Author           string            `json:"author,omitempty"`
+	Recipient        string            `json:"recipient,omitempty"`
 	Content          []responseContent `json:"content,omitempty"`
 	CallID           string            `json:"call_id,omitempty"`
 	Name             string            `json:"name,omitempty"`
@@ -93,9 +95,10 @@ type responseInputItem struct {
 }
 
 type responseContent struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	ImageURL json.RawMessage `json:"image_url,omitempty"`
+	Type             string          `json:"type"`
+	Text             string          `json:"text,omitempty"`
+	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	ImageURL         json.RawMessage `json:"image_url,omitempty"`
 }
 
 type responsesResponse struct {
@@ -237,6 +240,17 @@ func toResponseInput(item inference.Item) responseInputItem {
 			encoded.Tools = append(encoded.Tools, encodeTool(tool))
 		}
 		return encoded
+	case "agent_message":
+		content := make([]responseContent, 0, len(item.Content))
+		for _, part := range item.Content {
+			content = append(content, responseContent{
+				Type: part.Type, Text: part.Text, EncryptedContent: part.EncryptedContent,
+			})
+		}
+		return responseInputItem{
+			ID: item.ID, Type: item.Type, Author: item.Author, Recipient: item.Recipient,
+			Content: content,
+		}
 	case "custom_tool_call":
 		return responseInputItem{ID: item.ID, Type: item.Type, CallID: item.CallID, Name: item.Name, Namespace: item.Namespace, Input: nonEmptyStringPointer(item.Input)}
 	case "custom_tool_call_output":

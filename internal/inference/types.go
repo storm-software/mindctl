@@ -85,6 +85,7 @@ type AccessPrograms struct {
 // recorded internally so adapters never forward it to another provider.
 type Item struct {
 	ID, Type, Role, Text, CallID, Name, Namespace, Input string
+	Author, Recipient                                    string
 	ContinuationProvider                                 string
 	// Raw JSON fields omit empty values so a JSON copy keeps them absent
 	// instead of turning them into a non-empty null literal.
@@ -98,12 +99,13 @@ type Item struct {
 	ProviderData     json.RawMessage `json:",omitempty"`
 }
 
-// ContentPart preserves the ordering and shape of a Responses message's
-// content array while the gateway derives portable text and image features.
+// ContentPart preserves the ordering and shape of a Responses message or
+// agent message content array while the gateway derives portable features.
 type ContentPart struct {
-	Type     string
-	Text     string
-	ImageURL json.RawMessage `json:",omitempty"`
+	Type             string
+	Text             string
+	EncryptedContent string
+	ImageURL         json.RawMessage `json:",omitempty"`
 }
 
 // Tool describes a custom function tool.

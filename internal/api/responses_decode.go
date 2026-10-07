@@ -116,6 +116,8 @@ type wireInputItem struct {
 	ID               string          `json:"id"`
 	Type             string          `json:"type"`
 	Role             string          `json:"role"`
+	Author           string          `json:"author"`
+	Recipient        string          `json:"recipient"`
 	Text             string          `json:"text"`
 	CallID           string          `json:"call_id"`
 	Name             string          `json:"name"`
@@ -132,9 +134,10 @@ type wireInputItem struct {
 }
 
 type wireContentPart struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`
-	ImageURL json.RawMessage `json:"image_url"`
+	Type             string          `json:"type"`
+	Text             string          `json:"text"`
+	EncryptedContent string          `json:"encrypted_content"`
+	ImageURL         json.RawMessage `json:"image_url"`
 }
 
 func (wire responseRequest) request() (inference.Request, error) {
@@ -236,6 +239,8 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 			ID: wire.ID, Type: wire.Type, Summary: append(json.RawMessage(nil), wire.Summary...), EncryptedContent: append(json.RawMessage(nil), wire.EncryptedContent...),
 			ContinuationProvider: "openai",
 		}}, nil
+	case "agent_message":
+		return decodeAgentMessage(wire)
 	case "custom_tool_call":
 		return []inference.Item{{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Namespace: wire.Namespace, Input: wire.Input}}, nil
 	case "custom_tool_call_output":
@@ -255,6 +260,32 @@ func (wire wireInputItem) canonical() ([]inference.Item, error) {
 		}
 		return nil, fmt.Errorf("unsupported item type %q", wire.Type)
 	}
+}
+
+func decodeAgentMessage(wire wireInputItem) ([]inference.Item, error) {
+	var parts []json.RawMessage
+	if err := decodeStrict(wire.Content, &parts); err != nil || len(parts) == 0 {
+		return nil, errors.New("agent message content must be a non-empty array")
+	}
+	item := inference.Item{
+		ID: wire.ID, Type: wire.Type, Author: wire.Author, Recipient: wire.Recipient,
+		ContinuationProvider: "openai",
+	}
+	for _, raw := range parts {
+		var part wireContentPart
+		if err := decodeStrict(raw, &part); err != nil {
+			return nil, errors.New("agent message content contains an unknown or malformed field")
+		}
+		switch part.Type {
+		case "input_text", "output_text":
+			item.Content = append(item.Content, inference.ContentPart{Type: part.Type, Text: part.Text})
+		case "encrypted_content":
+			item.Content = append(item.Content, inference.ContentPart{Type: part.Type, EncryptedContent: part.EncryptedContent})
+		default:
+			return nil, fmt.Errorf("unsupported agent message content type %q", part.Type)
+		}
+	}
+	return []inference.Item{item}, nil
 }
 
 func decodeMessage(wire wireInputItem) ([]inference.Item, error) {

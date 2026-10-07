@@ -200,6 +200,31 @@ func TestTranscriptForDoesNotForwardReasoningContinuationAcrossProviders(t *test
 	}
 }
 
+func TestTranscriptForDoesNotForwardCodexAgentMessageAcrossProviders(t *testing.T) {
+	svc := testConversationService(t)
+	request := requestWithText("continue")
+	request.Input = append(request.Input, inference.Item{
+		ID: "amsg_1", Type: "agent_message", Author: "/root/research", Recipient: "/root",
+		Content:              []inference.ContentPart{{Type: "input_text", Text: "subagent result"}},
+		ContinuationProvider: "openai",
+	})
+	turn, err := svc.Start(context.Background(), "client-a", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := svc.Resume(context.Background(), "client-a", turn.ResponseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resumed.TranscriptFor("openai"); len(got) != 2 || got[1].Author != "/root/research" ||
+		got[1].Recipient != "/root" || len(got[1].Content) != 1 || got[1].Content[0].Text != "subagent result" {
+		t.Fatalf("same-provider transcript=%+v", got)
+	}
+	if got := resumed.TranscriptFor("anthropic"); len(got) != 1 || got[0].Type != "message" {
+		t.Fatalf("cross-provider transcript=%+v", got)
+	}
+}
+
 func TestResumeRejectsUnknownAndForeignResponse(t *testing.T) {
 	svc := testConversationService(t)
 	if _, err := svc.Resume(context.Background(), "client-a", "resp_missing"); !errors.Is(err, conversation.ErrNotFound) {

@@ -384,6 +384,41 @@ func TestOpenAICodexCustomToolContinuationUsesOutput(t *testing.T) {
 	}
 }
 
+func TestOpenAICodexAgentMessageContinuationPreservesAttribution(t *testing.T) {
+	for _, content := range []inference.ContentPart{
+		{Type: "input_text", Text: "subagent result"},
+		{Type: "encrypted_content", EncryptedContent: "opaque-agent-message"},
+	} {
+		body, err := toCodexResponsesRequest(openAIModel(), inference.Request{
+			Model: "gateway-model",
+			Input: []inference.Item{{
+				ID: "amsg_1", Type: "agent_message", Author: "/root/research", Recipient: "/root",
+				Content: []inference.ContentPart{content}, ContinuationProvider: "openai",
+			}},
+		}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var encoded map[string]any
+		if err := json.Unmarshal(body.Input[0], &encoded); err != nil {
+			t.Fatal(err)
+		}
+		wantPart := map[string]any{"type": content.Type}
+		if content.Type == "encrypted_content" {
+			wantPart["encrypted_content"] = content.EncryptedContent
+		} else {
+			wantPart["text"] = content.Text
+		}
+		want := map[string]any{
+			"id": "amsg_1", "type": "agent_message", "author": "/root/research", "recipient": "/root",
+			"content": []any{wantPart},
+		}
+		if !reflect.DeepEqual(encoded, want) {
+			t.Fatalf("encoded agent message=%v, want=%v", encoded, want)
+		}
+	}
+}
+
 func TestOpenAIContinuationCallOutputsUseAuthSpecificFields(t *testing.T) {
 	tests := []struct {
 		name       string

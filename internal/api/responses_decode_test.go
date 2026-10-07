@@ -62,6 +62,33 @@ func TestDecodeResponseRequestPreservesCodexReasoningContinuation(t *testing.T) 
 	}
 }
 
+func TestDecodeResponseRequestPreservesCodexAgentMessage(t *testing.T) {
+	for _, test := range []struct {
+		content          string
+		typeName, text   string
+		encryptedContent string
+	}{
+		{content: `[{"type":"input_text","text":"subagent result"}]`, typeName: "input_text", text: "subagent result"},
+		{content: `[{"type":"encrypted_content","encrypted_content":"opaque-agent-message"}]`, typeName: "encrypted_content", encryptedContent: "opaque-agent-message"},
+	} {
+		body := `{"model":"mindctl-auto","input":[{"id":"amsg_1","type":"agent_message","author":"/root/research","recipient":"/root","content":` + test.content + `}]}`
+		got, _, err := decode(t, body, 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Input) != 1 {
+			t.Fatalf("agent message was not preserved: %+v", got.Input)
+		}
+		item := got.Input[0]
+		if item.Type != "agent_message" || item.ID != "amsg_1" || item.Author != "/root/research" ||
+			item.Recipient != "/root" || item.ContinuationProvider != "openai" || len(item.Content) != 1 ||
+			item.Content[0].Type != test.typeName || item.Content[0].Text != test.text ||
+			item.Content[0].EncryptedContent != test.encryptedContent {
+			t.Fatalf("agent message fields were lost: %+v", item)
+		}
+	}
+}
+
 func TestDecodeResponseRequestPreservesCodexComputerCallOutput(t *testing.T) {
 	got, _, err := decode(t, `{
   "model":"mindctl-auto",
