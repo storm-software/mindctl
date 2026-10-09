@@ -92,6 +92,10 @@ func (c *Client) Compress(ctx context.Context, model domain.Model, conversationI
 	if response.Skipped || len(response.Messages) != len(messages) {
 		return inference.Request{}, Metrics{}, unavailable(errors.New("compression skipped or incomplete"))
 	}
+	// Headroom can inflate a prompt by a few tokens; keep the original then.
+	if response.TokensBefore != nil && response.TokensAfter != nil && *response.TokensBefore >= 0 && *response.TokensAfter >= *response.TokensBefore {
+		return copyRequest, Metrics{TokensBefore: *response.TokensBefore, TokensAfter: *response.TokensBefore}, nil
+	}
 	metrics, err := response.metrics()
 	if err != nil {
 		return inference.Request{}, Metrics{}, err

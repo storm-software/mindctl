@@ -81,6 +81,20 @@ func TestClientRejectsMissingOrInvalidMetrics(t *testing.T) {
 	}
 }
 
+func TestClientKeepsOriginalWhenCompressionInflates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"messages":[{"role":"assistant","content":"longer text"}],"tokens_before":3018,"tokens_after":3019,"tokens_saved":0}`))
+	}))
+	defer server.Close()
+	compressed, metrics, err := NewClient(server.URL, "token", nil).Compress(context.Background(), domain.Model{UpstreamID: "model"}, "conversation", "provider", inference.Request{Input: []inference.Item{{Type: "message", Role: "assistant", Text: "text"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compressed.Input[0].Text != "text" || metrics != (Metrics{TokensBefore: 3018, TokensAfter: 3018}) {
+		t.Fatalf("compressed = %+v, metrics = %+v", compressed.Input, metrics)
+	}
+}
+
 func TestClientReadyRequiresTopLevelMetrics(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"messages":[],"metrics":{"tokens_before":0,"tokens_after":0,"tokens_saved":0}}`))
