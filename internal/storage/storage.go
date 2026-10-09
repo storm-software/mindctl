@@ -104,13 +104,22 @@ type ConversationTurn struct {
 	SessionUsage *SessionUsage
 }
 
+// RequestContext is the request-level content sent ahead of the transcript:
+// instructions, which include Anthropic system text, and tool schemas.
+type RequestContext struct {
+	Instructions string
+	Tools        []inference.Tool
+}
+
 // NewTurn creates a response in a conversation. A non-empty SessionKey binds a
 // new conversation to that routing session and seeds its pin and floor unless
 // the session has been idle longer than SessionIdleTTL; zero never expires.
+// A nil Context records no request context.
 type NewTurn struct {
 	Conversation   ConversationRecord
 	Response       ResponseRecord
 	Input          []inference.Item
+	Context        *RequestContext
 	SessionKey     string
 	SessionIdleTTL time.Duration
 }
@@ -130,11 +139,16 @@ type ProviderAttempt struct {
 // same provider attempt. Zero times and a zero limit leave those bounds open.
 // A non-nil ExplicitModel matches only requests with that recorded selection,
 // so it excludes requests recorded before selection was tracked.
+// ConversationID matches that conversation and every other conversation in its
+// routing session, since stateless clients start one conversation per request.
+// WithContext also reads each record's Context and Prior content.
 type HistoryFilter struct {
-	Provider, ModelID, Status string
-	ExplicitModel             *bool
-	Since, Until              time.Time
-	Limit                     int
+	Provider, ModelID, Status  string
+	ResponseID, ConversationID string
+	ExplicitModel              *bool
+	Since, Until               time.Time
+	Limit                      int
+	WithContext                bool
 }
 
 // HistoryAttempt contains one model selection and its retained outcome.
@@ -152,12 +166,17 @@ type HistoryAttempt struct {
 
 // HistoryRecord is one client request and every model attempt made for it.
 // ExplicitModel is nil for requests recorded before selection was tracked.
+// Context and Prior are read only with HistoryFilter.WithContext: Context is
+// nil when none was recorded or retained, and Prior is the transcript of
+// earlier responses in the conversation that a continuation resends.
 type HistoryRecord struct {
 	ResponseID, ConversationID, Status string
 	CreatedAt                          time.Time
 	ExplicitModel                      *bool
 	Request                            []inference.Item
 	RequestContentRetained             bool
+	Context                            *RequestContext
+	Prior                              []inference.Item
 	Attempts                           []HistoryAttempt
 }
 

@@ -228,6 +228,16 @@ func (db *DB) ListHistory(ctx context.Context, filter storage.HistoryFilter) ([]
 			query += " AND r.explicit_model = ?"
 			args = append(args, *filter.ExplicitModel)
 		}
+		if filter.ResponseID != "" {
+			query += " AND r.id = ?"
+			args = append(args, filter.ResponseID)
+		}
+		if filter.ConversationID != "" {
+			query += ` AND r.conversation_id IN (SELECT c.id FROM conversations c JOIN conversations target
+				ON target.client_id = c.client_id AND (target.id = c.id OR target.session_key = c.session_key)
+				WHERE target.id = ?)`
+			args = append(args, filter.ConversationID)
+		}
 		if !filter.Since.IsZero() {
 			query += " AND r.created_at >= ?"
 			args = append(args, filter.Since.UnixNano())
@@ -283,6 +293,11 @@ func (db *DB) ListHistory(ctx context.Context, filter storage.HistoryFilter) ([]
 			if err := db.readHistoryAttempts(ctx, conn, &records[index]); err != nil {
 				return err
 			}
+			if filter.WithContext {
+				if err := db.readHistoryContext(ctx, conn, &records[index]); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
@@ -297,12 +312,57 @@ func (db *DB) readHistoryRequest(
 	conn *sql.Conn,
 	record *storage.HistoryRecord,
 ) error {
-	rows, err := conn.QueryContext(ctx, `SELECT key_id, version, nonce, ciphertext
+	items, err := db.readItems(ctx, conn, "history request", `SELECT key_id, version, nonce, ciphertext
 		FROM transcript_items WHERE response_id = ? AND provider = '' ORDER BY position`, record.ResponseID)
 	if err != nil {
-		return failure("read history request", err)
+		return err
+	}
+	record.Request = append(record.Request, items...)
+	record.RequestContentRetained = len(items) > 0
+	return nil
+}
+
+// readHistoryContext reads the record's request context and the transcript of
+// earlier responses in its conversation.
+func (db *DB) readHistoryContext(
+	ctx context.Context,
+	conn *sql.Conn,
+	record *storage.HistoryRecord,
+) error {
+	var envelope contentcrypto.Envelope
+	err := conn.QueryRowContext(ctx, `SELECT c.key_id, c.version, c.nonce, c.ciphertext
+		FROM responses r JOIN request_contexts c ON c.digest = r.context_digest WHERE r.id = ?`, record.ResponseID).Scan(
+		&envelope.KeyID, &envelope.Version, &envelope.Nonce, &envelope.Ciphertext)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return failure("read history context", err)
+	default:
+		plain, err := db.keyring.Decrypt(envelope)
+		if err != nil {
+			return failure("decrypt history context", err)
+		}
+		record.Context = new(storage.RequestContext)
+		if err := json.Unmarshal(plain, record.Context); err != nil {
+			return failure("decode history context", err)
+		}
+	}
+	record.Prior, err = db.readItems(ctx, conn, "history prior transcript", `SELECT i.key_id, i.version, i.nonce, i.ciphertext
+		FROM transcript_items i JOIN responses r ON r.id = i.response_id
+		WHERE r.conversation_id = ? AND r.sequence < (SELECT sequence FROM responses WHERE id = ?)
+		ORDER BY r.sequence, i.position`, record.ConversationID, record.ResponseID)
+	return err
+}
+
+// readItems decrypts the transcript items selected by query, which must select
+// key_id, version, nonce, and ciphertext. op names the content in failures.
+func (db *DB) readItems(ctx context.Context, conn *sql.Conn, op, query string, args ...any) ([]inference.Item, error) {
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, failure("read "+op, err)
 	}
 	defer rows.Close()
+	var items []inference.Item
 	for rows.Next() {
 		var envelope contentcrypto.Envelope
 		if err := rows.Scan(
@@ -311,23 +371,22 @@ func (db *DB) readHistoryRequest(
 			&envelope.Nonce,
 			&envelope.Ciphertext,
 		); err != nil {
-			return failure("decode history request envelope", err)
+			return nil, failure("decode "+op+" envelope", err)
 		}
 		plain, err := db.keyring.Decrypt(envelope)
 		if err != nil {
-			return failure("decrypt history request", err)
+			return nil, failure("decrypt "+op, err)
 		}
 		var item inference.Item
 		if err := json.Unmarshal(plain, &item); err != nil {
-			return failure("decode history request", err)
+			return nil, failure("decode "+op, err)
 		}
-		record.Request = append(record.Request, item)
-		record.RequestContentRetained = true
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return failure("iterate history request", err)
+		return nil, failure("iterate "+op, err)
 	}
-	return nil
+	return items, nil
 }
 
 func (db *DB) readHistoryAttempts(
@@ -481,6 +540,7 @@ func (db *DB) DeleteExpiredContent(ctx context.Context, retention time.Duration,
 		for _, statement := range []string{
 			"DELETE FROM content_blobs WHERE created_at < ?",
 			"DELETE FROM transcript_items WHERE created_at < ?",
+			"DELETE FROM request_contexts WHERE created_at < ?",
 			`UPDATE provider_attempts SET key_id = NULL, version = NULL, nonce = NULL, ciphertext = NULL
 				WHERE created_at < ? AND ciphertext IS NOT NULL`,
 		} {
@@ -546,12 +606,47 @@ func (db *DB) CreateTurn(ctx context.Context, turn storage.NewTurn) error {
 		if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence) + 1, 0) FROM responses WHERE conversation_id = ?", turn.Conversation.ID).Scan(&sequence); err != nil {
 			return failure("allocate response sequence", err)
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO responses (id, conversation_id, sequence, created_at, status, explicit_model)
-			VALUES (?, ?, ?, ?, 'pending', ?)`, turn.Response.ID, turn.Conversation.ID, sequence, created.UnixNano(), turn.Response.ExplicitModel); err != nil {
+		var contextDigest any
+		if turn.Context != nil {
+			digest, err := insertRequestContext(ctx, conn, db.keyring, *turn.Context, created)
+			if err != nil {
+				return err
+			}
+			contextDigest = digest
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO responses (id, conversation_id, sequence, created_at, status, explicit_model, context_digest)
+			VALUES (?, ?, ?, ?, 'pending', ?, ?)`, turn.Response.ID, turn.Conversation.ID, sequence, created.UnixNano(), turn.Response.ExplicitModel, contextDigest); err != nil {
 			return failure("insert response", err)
 		}
 		return insertTranscriptItems(ctx, conn, db.keyring, turn.Response.ID, "", turn.Input, created)
 	})
+}
+
+// insertRequestContext stores an encrypted request context once per digest and
+// returns the digest. Reuse refreshes created_at so retention keeps it while
+// clients still send it.
+func insertRequestContext(
+	ctx context.Context,
+	conn *sql.Conn,
+	keyring *contentcrypto.Keyring,
+	requestContext storage.RequestContext,
+	created time.Time,
+) (string, error) {
+	plain, err := json.Marshal(requestContext)
+	if err != nil {
+		return "", failure("encode request context", err)
+	}
+	envelope, err := keyring.Encrypt(plain)
+	if err != nil {
+		return "", failure("encrypt request context", err)
+	}
+	digest := keyring.Digest(plain)
+	if _, err := conn.ExecContext(ctx, `INSERT INTO request_contexts (digest, key_id, version, nonce, ciphertext, created_at)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(digest) DO UPDATE SET created_at = MAX(created_at, excluded.created_at)`,
+		digest, envelope.KeyID, envelope.Version, envelope.Nonce, envelope.Ciphertext, created.UnixNano()); err != nil {
+		return "", failure("insert request context", err)
+	}
+	return digest, nil
 }
 
 func (db *DB) GetConversationTurn(ctx context.Context, clientID, responseID string) (storage.ConversationTurn, error) {

@@ -700,6 +700,20 @@ func TestWriteHistoryTable(t *testing.T) {
 	if got := rows[1][2]; got != "" {
 		t.Errorf("untracked user-specified = %q, want blank", got)
 	}
+
+	stdout.Reset()
+	if err := writeHistory(&stdout, []storage.HistoryRecord{{
+		ResponseID: "resp_3", ConversationID: "conv_3", Status: "completed", CreatedAt: created,
+	}}, historyOptions{ResponseID: true, ConversationID: true}); err != nil {
+		t.Fatal(err)
+	}
+	rows = historyTableRows(stdout.String())
+	if got, want := rows[0][:3], []string{"CREATED", "RESPONSE ID", "CONVERSATION ID"}; !slices.Equal(got, want) {
+		t.Errorf("history header with IDs = %q", got)
+	}
+	if got, want := rows[1][1:3], []string{"resp_3", "conv_3"}; !slices.Equal(got, want) {
+		t.Errorf("history ID columns = %q", got)
+	}
 }
 
 func TestWrapHistoryValue(t *testing.T) {

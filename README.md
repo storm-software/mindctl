@@ -60,6 +60,7 @@
   - [Managed Headroom compression](#managed-headroom-compression)
   - [Session affinity](#session-affinity)
   - [Token usage savings](#token-usage-savings)
+  - [Request cost x-ray](#request-cost-x-ray)
   - [Debug router traces](#debug-router-traces)
   - [Model and provider availability](#model-and-provider-availability)
   - [Laya system 1 sidecar](#laya-system-1-sidecar)
@@ -482,6 +483,47 @@ savings:
 ```
 
 Savings rows are kept after content retention deletes the request content.
+
+## Request cost x-ray
+
+`mindctl xray` shows what each request actually sent to OpenAI or Anthropic
+and what each part cost. It attributes the provider's reported usage to:
+
+- **static** parts sent with every request: instructions (including the
+  Anthropic system prompt) and tool schemas,
+- **messages**: user, developer, and assistant text, images, tool calls, tool
+  results, and replayed reasoning,
+- **output**: response text, tool calls, and reasoning.
+
+Each part is estimated locally, then scaled so the parts sum exactly to the
+provider's reported usage. Input is split into cache reads, cache writes, and
+fresh tokens along the prompt prefix (tool schemas, then instructions, then
+messages) and priced at the serving model's configured rates, so the totals
+match `mindctl savings`. Output tokens not covered by visible text and tool
+calls are shown as reasoning. A tool table prices each tool's schema against
+its calls and results, groups MCP tools by server (`mcp:<server>`), and marks
+tools that were sent but never called as `unused`.
+
+```sh
+mindctl xray                                   # latest 100 requests (--limit 0 for all)
+mindctl xray --conversation conv_abc           # one conversation or routing session
+mindctl xray --provider anthropic --since 2026-10-01T00:00:00Z
+mindctl xray resp_abc                          # one request; IDs from `mindctl history --response-id`
+```
+
+`--conversation` also matches the other requests in that conversation's
+routing session, since stateless clients such as Claude Code start a new
+conversation for every request. A single-request breakdown shows its
+conversation ID, as does `mindctl history --conversation-id`.
+
+Instructions and tool schemas are stored encrypted, once per distinct
+content, and follow the same retention as other request content. Requests
+recorded before they were stored show no static parts, and requests whose
+content has expired are counted as without retained usage.
+
+The approach is adapted from
+[cost-xray](https://github.com/tigerless-labs/cost-xray) by Tigerless Labs
+(MIT License). Thanks to its authors for the attribution and calibration model.
 
 ## Debug router traces
 

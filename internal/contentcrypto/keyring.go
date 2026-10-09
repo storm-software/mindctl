@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 )
@@ -29,8 +32,9 @@ func (*UnknownKeyError) Error() string {
 // Keyring is immutable after construction and safe for concurrent use.
 // Keep old keys in the configuration until their envelopes no longer need reading.
 type Keyring struct {
-	active string
-	keys   map[string]cipher.AEAD
+	active    string
+	keys      map[string]cipher.AEAD
+	digestKey []byte
 }
 
 // New builds a keyring using only AES-256 keys. Caller maps and key bytes are not retained.
@@ -41,6 +45,8 @@ func New(active string, keys map[string][]byte) (*Keyring, error) {
 	if _, ok := keys[active]; !ok {
 		return nil, errors.New("contentcrypto: active key is missing")
 	}
+	derive := hmac.New(sha256.New, keys[active])
+	derive.Write([]byte("mindctl content digest"))
 	decryptors := make(map[string]cipher.AEAD, len(keys))
 	for id, key := range keys {
 		if len(key) != 32 {
@@ -58,7 +64,16 @@ func New(active string, keys map[string][]byte) (*Keyring, error) {
 		}
 		decryptors[id] = aead
 	}
-	return &Keyring{active: active, keys: decryptors}, nil
+	return &Keyring{active: active, keys: decryptors, digestKey: derive.Sum(nil)}, nil
+}
+
+// Digest returns a hex HMAC-SHA256 of plaintext under a key derived from the
+// active key, so equal content can be deduplicated without storing a digest
+// that could be matched against guessed content.
+func (k *Keyring) Digest(plaintext []byte) string {
+	mac := hmac.New(sha256.New, k.digestKey)
+	mac.Write(plaintext)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // Encrypt creates a version 1 envelope using the active key and a fresh random nonce.

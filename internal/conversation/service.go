@@ -138,6 +138,11 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 		}
 	}
 
+	var requestContext *storage.RequestContext
+	if request.Instructions != "" || len(request.Tools) > 0 {
+		requestContext = &storage.RequestContext{Instructions: request.Instructions, Tools: request.Tools}
+	}
+
 	if err := s.store.CreateTurn(ctx, storage.NewTurn{
 		Conversation: storage.ConversationRecord{ID: conversationID, ClientID: clientID, CreatedAt: now},
 		Response: storage.ResponseRecord{
@@ -145,6 +150,7 @@ func (s *service) Start(ctx context.Context, clientID string, request inference.
 			ExplicitModel: request.Model != "" && request.Model != inference.AutomaticModel,
 		},
 		Input:      input,
+		Context:    requestContext,
 		SessionKey: sessionKey, SessionIdleTTL: s.options.SessionIdleTTL,
 	}); err != nil {
 		return Turn{}, err

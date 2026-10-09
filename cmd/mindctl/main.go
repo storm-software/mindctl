@@ -168,6 +168,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		newProviderCommand(settings),
 		newHistoryCommand(settings),
 		newSavingsCommand(settings),
+		newXrayCommand(settings),
 	)
 
 	return root
@@ -286,6 +287,7 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 
 	command.Flags().StringVar(&filter.Provider, "provider", "", "filter by selected provider")
 	command.Flags().StringVar(&filter.ModelID, "model", "", "filter by selected model")
+	command.Flags().StringVar(&filter.ConversationID, "conversation", "", "filter by conversation, including its routing session")
 	command.Flags().StringVar(&filter.Status, "status", "", "filter by attempt status")
 	command.Flags().StringVar(&selection, "selection", "", "filter by model selection (explicit or auto)")
 	command.Flags().StringVar(&since, "since", "", "include requests at or after an RFC3339 timestamp")
@@ -293,14 +295,16 @@ func newHistoryCommand(settings *viper.Viper) *cobra.Command {
 	command.Flags().IntVar(&filter.Limit, "limit", 20, "maximum requests to return (0 means all)")
 	command.Flags().BoolVar(&options.Full, "full", false, "show full request and response content instead of truncating")
 	command.Flags().BoolVar(&options.ResponseID, "response-id", false, "show the response ID column")
+	command.Flags().BoolVar(&options.ConversationID, "conversation-id", false, "show the conversation ID column")
 
 	return command
 }
 
 // historyOptions controls how the history table is rendered.
 type historyOptions struct {
-	Full       bool
-	ResponseID bool
+	Full           bool
+	ResponseID     bool
+	ConversationID bool
 }
 
 const (
@@ -481,6 +485,9 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 	if options.ResponseID {
 		header = append(header, "RESPONSE ID")
 	}
+	if options.ConversationID {
+		header = append(header, "CONVERSATION ID")
+	}
 
 	header = append(header, "STATUS", "USER-SPECIFIED", "MODEL", "TIER", "ATTEMPT", "REQUEST", "RESPONSE")
 
@@ -500,6 +507,9 @@ func writeHistory(output io.Writer, records []storage.HistoryRecord, options his
 		columns := []string{record.CreatedAt.Local().Format(historyCreatedLayout)}
 		if options.ResponseID {
 			columns = append(columns, record.ResponseID)
+		}
+		if options.ConversationID {
+			columns = append(columns, record.ConversationID)
 		}
 
 		columns = append(columns, record.Status, historyUserSpecified(record.ExplicitModel))
