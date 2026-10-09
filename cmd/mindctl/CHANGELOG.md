@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.48](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.48) (10/08/2026)
+
+### Features
+
+- **mindctl:** Added the `xray` command to CLI application ([96b163b](https://github.com/storm-software/mindctl/commit/96b163b))
+
 ## [0.1.45](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.45) (10/05/2026)
 
 ### Bug Fixes
