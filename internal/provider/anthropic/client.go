@@ -128,11 +128,7 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveVa
 	}
 	if c.auth == authClaudeOAuth {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
-		beta := claudeCredential.Beta
-		if beta == "" {
-			beta = claudeOAuthBetaHeader
-		}
-		request.Header.Set("anthropic-beta", beta)
+		request.Header.Set("anthropic-beta", oauthBeta(claudeCredential.Beta))
 	} else {
 		request.Header.Set("x-api-key", accessToken)
 		if beta := apiKeyBeta(upstreamauth.AnthropicBeta(ctx)); beta != "" {
@@ -218,6 +214,21 @@ func apiKeyBeta(beta string) string {
 		}
 	}
 	return strings.Join(flags, ",")
+}
+
+// oauthBeta ensures the OAuth flag subscription tokens require. Callers that
+// authenticated to the gateway another way (e.g. a placeholder token while the
+// gateway holds the subscription) do not send it.
+func oauthBeta(beta string) string {
+	for _, flag := range strings.Split(beta, ",") {
+		if strings.TrimSpace(flag) == claudeOAuthBetaHeader {
+			return beta
+		}
+	}
+	if beta == "" {
+		return claudeOAuthBetaHeader
+	}
+	return beta + "," + claudeOAuthBetaHeader
 }
 
 func errorKind(status int) provider.ErrorKind {

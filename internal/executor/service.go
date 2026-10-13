@@ -194,6 +194,25 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 	return s.executeDecision(ctx, in, turn, decision)
 }
 
+// compress returns the original request when Headroom fails, so a compression
+// problem degrades savings instead of failing the turn.
+func (s *Service) compress(ctx context.Context, model domain.Model, turn conversation.Turn, providerID, attemptID string, request inference.Request) (inference.Request, headroom.Metrics) {
+	if s.compressor == nil {
+		return request, headroom.Metrics{}
+	}
+	compressed, metrics, err := s.compressor.Compress(ctx, model, turn.AffinityID(), providerID, request)
+	if err != nil {
+		s.trace("route.compression.failed",
+			"response_id", turn.ResponseID,
+			"attempt_id", attemptID,
+			"provider", providerID,
+			"error", err.Error(),
+		)
+		return request, headroom.Metrics{}
+	}
+	return compressed, metrics
+}
+
 func (s *Service) executeDecision(ctx context.Context, in Input, turn conversation.Turn, decision router.Decision) (Output, error) {
 	model, ok := selectedModel(in.Models, decision)
 	if !ok {
@@ -220,17 +239,7 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.PreviousResponseID = ""
 	request.Input = turn.TranscriptFor(decision.Provider)
 	request = providerScopedRequest(request, decision.Provider)
-	var compression headroom.Metrics
-	if s.compressor != nil {
-		compressed, metrics, compressErr := s.compressor.Compress(ctx, model, turn.AffinityID(), decision.Provider, request)
-		if compressErr != nil {
-			if failErr := s.conversations.FailAttempt(ctx, attempt, "", compressErr); failErr != nil {
-				return Output{}, errors.Join(compressErr, failErr)
-			}
-			return Output{}, compressErr
-		}
-		request, compression = compressed, metrics
-	}
+	request, compression := s.compress(ctx, model, turn, decision.Provider, attempt.ID, request)
 	result, err := adapter.Execute(providerScopedContext(ctx, decision.Provider), model, request)
 	if err != nil {
 		attributes := []any{

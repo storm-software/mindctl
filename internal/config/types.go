@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -225,6 +226,14 @@ type ProviderConfig struct {
 	BaseURL   string `yaml:"base_url"`
 	Auth      string `yaml:"auth"`
 	APIKeyEnv string `yaml:"api_key_env"`
+	// CredentialEnv names a gateway-held Claude subscription token (from
+	// `claude setup-token`) used instead of any caller credential. Only valid
+	// with claude_oauth_passthrough.
+	CredentialEnv string `yaml:"credential_env"`
+	// CredentialFile is an absolute path to a Codex auth.json whose ChatGPT
+	// login is used instead of any caller credential. Only valid with
+	// chatgpt_oauth_passthrough.
+	CredentialFile string `yaml:"credential_file"`
 }
 
 // AuthMode returns the configured upstream authentication mode while retaining
@@ -381,6 +390,9 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		switch provider.AuthMode() {
 		case ProviderAuthAPIKey:
 			requireEnv("provider "+provider.ID, provider.APIKeyEnv)
+			if provider.CredentialEnv != "" || provider.CredentialFile != "" {
+				errs = append(errs, fmt.Errorf("provider %s must not configure credential_env or credential_file with API keys", provider.ID))
+			}
 		case ProviderAuthChatGPTOAuthPassthrough:
 			chatGPTOAuthConfigured = true
 			if provider.ID != "openai" {
@@ -389,6 +401,12 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			if provider.APIKeyEnv != "" {
 				errs = append(errs, fmt.Errorf("provider %s must not configure api_key_env with ChatGPT OAuth passthrough", provider.ID))
 			}
+			if provider.CredentialEnv != "" {
+				errs = append(errs, fmt.Errorf("provider %s must not configure credential_env with ChatGPT OAuth passthrough", provider.ID))
+			}
+			if provider.CredentialFile != "" && !filepath.IsAbs(provider.CredentialFile) {
+				errs = append(errs, fmt.Errorf("provider %s credential_file must be an absolute path", provider.ID))
+			}
 		case ProviderAuthClaudeOAuthPassthrough:
 			claudeOAuthConfigured = true
 			if provider.ID != "anthropic" {
@@ -396,6 +414,12 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			}
 			if provider.APIKeyEnv != "" {
 				errs = append(errs, fmt.Errorf("provider %s must not configure api_key_env with Claude OAuth passthrough", provider.ID))
+			}
+			if provider.CredentialFile != "" {
+				errs = append(errs, fmt.Errorf("provider %s must not configure credential_file with Claude OAuth passthrough", provider.ID))
+			}
+			if provider.CredentialEnv != "" {
+				requireEnv("provider "+provider.ID+" credential", provider.CredentialEnv)
 			}
 		default:
 			errs = append(errs, fmt.Errorf("unknown provider authentication mode for %s: %s", provider.ID, provider.Auth))

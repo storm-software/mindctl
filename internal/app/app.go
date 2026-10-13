@@ -115,6 +115,7 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	a.safeFallbackTier, _ = domain.ParseTier(fallback)
 	chatGPTOAuthProviders := make(map[string]bool)
 	claudeOAuthProviders := make(map[string]bool)
+	gatewayClaudeToken, gatewayCodexAuthFile := "", ""
 	for _, providerConfig := range cfg.Providers {
 		switch providerConfig.AuthMode() {
 		case config.ProviderAuthAPIKey:
@@ -123,9 +124,13 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		case config.ProviderAuthChatGPTOAuthPassthrough:
 			a.providerCredentials[providerConfig.ID] = true
 			chatGPTOAuthProviders[providerConfig.ID] = true
+			gatewayCodexAuthFile = providerConfig.CredentialFile
 		case config.ProviderAuthClaudeOAuthPassthrough:
 			a.providerCredentials[providerConfig.ID] = true
 			claudeOAuthProviders[providerConfig.ID] = true
+			if providerConfig.CredentialEnv != "" {
+				gatewayClaudeToken, _ = getenv(providerConfig.CredentialEnv)
+			}
 		}
 		a.providerAvailability[providerConfig.ID] = validEndpoint(providerConfig.BaseURL)
 	}
@@ -246,6 +251,7 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		return api.CaptureFailedBodies(next, maxBodyBytes, a.debugTrace.SaveBody, debugLogger)
 	}
 	responses := api.NewResponsesHandler(a.executor, responsesConfig)
+	responses = api.UseGatewayCredentials(responses, gatewayClaudeToken, gatewayCodexAuthFile)
 	responses = api.CaptureClaudeOAuth(responses)
 	responses = api.CaptureChatGPTOAuth(responses)
 	responses = captureBodies(responses)
@@ -255,7 +261,8 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	mux.Handle("/readyz", operations)
 	mux.Handle("/v1/responses", api.Authenticate(responses, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}))
 	if cfg.ClaudeMessages.Enabled {
-		messages := captureBodies(api.CaptureNativeClaudeOAuth(api.NewMessagesHandler(a.executor, responsesConfig)))
+		messages := api.UseGatewayCredentials(api.NewMessagesHandler(a.executor, responsesConfig), gatewayClaudeToken, gatewayCodexAuthFile)
+		messages = captureBodies(api.CaptureNativeClaudeOAuth(messages))
 		mux.Handle("/v1/messages", api.AuthenticateWithError(messages, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}, api.WriteMessagesError))
 	}
 	a.handler = mux

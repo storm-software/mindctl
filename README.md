@@ -302,8 +302,8 @@ request context only, makes subscription-backed Anthropic models eligible for
 that request, and forwards it to the configured Anthropic endpoint as a bearer
 credential. Mindctl does not store, refresh, or log the token.
 
-The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5, and Haiku
-4.5 with comparable Claude API prices for routing decisions. Actual usage is
+The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5,
+and Haiku 4.5 with comparable Claude API prices for routing decisions. Actual usage is
 governed by the selected Claude subscription's model access and plan limits,
 not API token billing.
 
@@ -349,6 +349,37 @@ roll back, restore Headroom's `ANTHROPIC_BASE_URL` and remove the launcher
 header. Mindctl does not change the managed settings automatically. Confirm
 the actual login and a streamed tool round-trip in a live Claude Code session
 before relying on the connection.
+
+### Gateway-held subscription credentials (opt-in)
+
+To let remote clients (for example ephemeral VMs on a tailnet) use your
+subscriptions without signing in themselves, give the passthrough providers a
+credential the gateway holds:
+
+```yaml
+providers:
+  - id: openai
+    base_url: https://chatgpt.com/backend-api/codex
+    auth: chatgpt_oauth_passthrough
+    credential_file: /home/you/.codex/auth.json
+  - id: anthropic
+    base_url: https://api.anthropic.com
+    auth: claude_oauth_passthrough
+    credential_env: CLAUDE_CODE_OAUTH_TOKEN # from `claude setup-token`
+```
+
+When set, Mindctl uses these instead of any credential the caller sends, and
+keeps the caller's `anthropic-beta`, `anthropic-version`, `Originator`, and
+`User-Agent` headers. `credential_file` must be absolute and is re-read on
+every request so Codex's own refreshes on the gateway machine take effect;
+Mindctl never refreshes it, so run Codex there occasionally to keep it fresh.
+If the file is unreadable, a caller's own ChatGPT login is used instead.
+
+Clients then need only the gateway token. Claude Code sets
+`ANTHROPIC_AUTH_TOKEN` to any placeholder (it is replaced, never forwarded);
+Codex sets `requires_openai_auth = false` on the Mindctl provider. Anyone
+holding the gateway token can now spend both subscriptions, so keep the
+gateway on a private network.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />

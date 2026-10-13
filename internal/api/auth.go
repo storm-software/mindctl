@@ -176,6 +176,33 @@ func CaptureClaudeOAuth(next http.Handler) http.Handler {
 	})
 }
 
+// UseGatewayCredentials replaces caller-managed subscription credentials with
+// ones this gateway holds, so remote clients need no login of their own. It
+// runs after the capture middleware and keeps the caller's protocol headers.
+// The Codex auth file is re-read per request to follow Codex's own refreshes;
+// if it is unreadable, any caller credential is left in place.
+func UseGatewayCredentials(next http.Handler, claudeToken, codexAuthFile string) http.Handler {
+	if claudeToken == "" && codexAuthFile == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if claudeToken != "" {
+			credential, _ := upstreamauth.Claude(ctx)
+			credential.AccessToken = claudeToken
+			ctx = upstreamauth.WithClaude(upstreamauth.WithoutClaude(ctx), credential)
+		}
+		if codexAuthFile != "" {
+			if credential, err := upstreamauth.ReadCodexAuthFile(codexAuthFile); err == nil {
+				credential.Originator = protocolHeader(r, "Originator")
+				credential.UserAgent = protocolHeader(r, "User-Agent")
+				ctx = upstreamauth.WithChatGPT(ctx, credential)
+			}
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func protocolHeader(r *http.Request, name string) string {
 	values := r.Header.Values(name)
 	if len(values) != 1 || strings.TrimSpace(values[0]) != values[0] || strings.ContainsAny(values[0], "\r\n") {

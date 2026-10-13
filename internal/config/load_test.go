@@ -651,6 +651,18 @@ func TestValidateAcceptsClaudeOAuthWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsGatewayHeldCredentials(t *testing.T) {
+	cfg := validConfig()
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	cfg.Providers = []ProviderConfig{
+		{ID: "openai", BaseURL: "https://chatgpt.com/backend-api/codex", Auth: string(ProviderAuthChatGPTOAuthPassthrough), CredentialFile: "/home/user/.codex/auth.json"},
+		{ID: "anthropic", BaseURL: "https://api.anthropic.com", Auth: string(ProviderAuthClaudeOAuthPassthrough), CredentialEnv: "GATEWAY_TOKEN"},
+	}
+	if err := cfg.Validate(testEnv); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateRejectsInvalidAuthenticationCombinations(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -691,6 +703,19 @@ func TestValidateRejectsInvalidAuthenticationCombinations(t *testing.T) {
 			c.Providers[0].APIKeyEnv = ""
 		}, "conflicts with ChatGPT OAuth"},
 		{"invalid header", func(c *Config) { c.ClientAuth.Header = "Bad Header" }, "invalid client authentication header"},
+		{"credential with API key", func(c *Config) { c.Providers[0].CredentialFile = "/home/user/.codex/auth.json" }, "must not configure credential_env or credential_file"},
+		{"relative Codex credential file", func(c *Config) {
+			c.ClientAuth.Header = "X-Mindctl-Token"
+			c.Providers[0].Auth = string(ProviderAuthChatGPTOAuthPassthrough)
+			c.Providers[0].APIKeyEnv = ""
+			c.Providers[0].CredentialFile = "~/.codex/auth.json"
+		}, "credential_file must be an absolute path"},
+		{"Claude credential file", func(c *Config) {
+			c.Providers[0] = ProviderConfig{ID: "anthropic", Auth: string(ProviderAuthClaudeOAuthPassthrough), CredentialFile: "/auth.json"}
+		}, "must not configure credential_file with Claude OAuth"},
+		{"missing Claude credential", func(c *Config) {
+			c.Providers[0] = ProviderConfig{ID: "anthropic", Auth: string(ProviderAuthClaudeOAuthPassthrough), CredentialEnv: "UNSET_CLAUDE_TOKEN"}
+		}, "missing environment variable for provider anthropic credential"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := validConfig()

@@ -108,6 +108,18 @@ func TestClaudeOAuthForwardsCallerBetaAndVersionOnlyToAnthropic(t *testing.T) {
 	}
 }
 
+func TestOAuthBetaAddsMissingFlag(t *testing.T) {
+	for beta, want := range map[string]string{
+		"":                           "oauth-2025-04-20",
+		"context-1":                  "context-1,oauth-2025-04-20",
+		"context-1,oauth-2025-04-20": "context-1,oauth-2025-04-20",
+	} {
+		if got := oauthBeta(beta); got != want {
+			t.Fatalf("oauthBeta(%q)=%q, want %q", beta, got, want)
+		}
+	}
+}
+
 func TestAnthropicClaudeOAuthRejectsMissingRequestCredential(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))

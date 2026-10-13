@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/storm-software/mindctl/internal/upstreamauth"
@@ -146,6 +148,52 @@ func TestAuthenticateWithErrorKeepsExistingResponsesShape(t *testing.T) {
 				t.Fatalf("Responses unauthorized envelope missing: %d", response.Code)
 			}
 		})
+	}
+}
+
+func TestUseGatewayCredentialsReplacesCallerCredentials(t *testing.T) {
+	authFile := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(authFile, []byte(`{"tokens":{"access_token":"gateway-chatgpt","account_id":"gateway-account"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var claude upstreamauth.ClaudeCredential
+	var chatGPT upstreamauth.ChatGPTCredential
+	var hasClaude, hasChatGPT bool
+	next := http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		claude, hasClaude = upstreamauth.Claude(request.Context())
+		chatGPT, hasChatGPT = upstreamauth.ChatGPT(request.Context())
+	})
+
+	// A placeholder bearer is replaced; the caller's protocol headers are kept.
+	handler := CaptureNativeClaudeOAuth(UseGatewayCredentials(next, "gateway-claude", authFile))
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Set("Authorization", "Bearer placeholder")
+	request.Header.Set("anthropic-beta", "context-1")
+	request.Header.Set("anthropic-version", "2023-06-01")
+	request.Header.Set("Originator", "codex_cli_rs")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if !hasClaude || claude != (upstreamauth.ClaudeCredential{AccessToken: "gateway-claude", Beta: "context-1", Version: "2023-06-01"}) {
+		t.Fatalf("claude=%+v present=%v", claude, hasClaude)
+	}
+	if !hasChatGPT || chatGPT.AccessToken != "gateway-chatgpt" || chatGPT.AccountID != "gateway-account" || chatGPT.Originator != "codex_cli_rs" {
+		t.Fatalf("chatgpt=%+v present=%v", chatGPT, hasChatGPT)
+	}
+
+	// Callers without credentials of their own still get the gateway's.
+	handler = UseGatewayCredentials(next, "gateway-claude", authFile)
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/responses", nil))
+	if !hasClaude || claude.AccessToken != "gateway-claude" || !hasChatGPT {
+		t.Fatalf("claude=%+v chatgpt present=%v", claude, hasChatGPT)
+	}
+
+	// An unreadable auth file leaves the caller's own ChatGPT login in place.
+	handler = CaptureChatGPTOAuth(UseGatewayCredentials(next, "", filepath.Join(t.TempDir(), "missing.json")))
+	request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	request.Header.Set("Authorization", "Bearer caller-chatgpt")
+	request.Header.Set("ChatGPT-Account-Id", "caller-account")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if !hasChatGPT || chatGPT.AccessToken != "caller-chatgpt" || hasClaude {
+		t.Fatalf("chatgpt=%+v claude present=%v", chatGPT, hasClaude)
 	}
 }
 

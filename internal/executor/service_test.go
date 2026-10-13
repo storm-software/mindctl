@@ -458,10 +458,31 @@ func (f *fakeConversations) RaiseFloor(context.Context, conversation.Turn, domai
 	return nil
 }
 
-type fakeCompressor struct{ metrics headroom.Metrics }
+type fakeCompressor struct {
+	metrics headroom.Metrics
+	err     error
+}
 
 func (f fakeCompressor) Compress(_ context.Context, _ domain.Model, _, _ string, request inference.Request) (inference.Request, headroom.Metrics, error) {
+	if f.err != nil {
+		return inference.Request{}, headroom.Metrics{}, f.err
+	}
 	return request, f.metrics, nil
+}
+
+func TestExecuteFallsBackToUncompressedRequestWhenHeadroomFails(t *testing.T) {
+	deps := fakeDeps()
+	deps.Executor = NewWithCompressor(deps.Classifier, router.NewPolicy(router.PolicyConfig{}),
+		provider.NewRegistry(map[string]provider.Provider{"openai": deps.OpenAI, "anthropic": deps.Anthropic}), deps.Conversations,
+		fakeCompressor{err: headroom.ErrUnavailable}, nil)
+
+	got, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput()))
+	if err != nil || got.Decision.ModelID != "gpt-test" {
+		t.Fatalf("decision=%+v err=%v", got.Decision, err)
+	}
+	if deps.Conversations.FailCalls != 0 || deps.Conversations.CommitCalls != 1 {
+		t.Fatalf("fail calls=%d commit calls=%d; want the turn to complete", deps.Conversations.FailCalls, deps.Conversations.CommitCalls)
+	}
 }
 
 func TestExecuteRecordsRoutingAndCompressionSavings(t *testing.T) {

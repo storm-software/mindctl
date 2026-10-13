@@ -88,6 +88,9 @@ providers:
   - id: openai
     base_url: https://chatgpt.com/backend-api/codex
     auth: chatgpt_oauth_passthrough
+    # Optional: use this machine's Codex login instead of the caller's, so
+    # remote clients need no login of their own. Re-read on every request.
+    # credential_file: /home/you/.codex/auth.json
   # API-key alternative (auth defaults to api_key when omitted):
   # - id: openai
   #   base_url: https://api.openai.com
@@ -99,6 +102,8 @@ providers:
   - id: anthropic
     base_url: https://api.anthropic.com
     auth: claude_oauth_passthrough
+    # Optional: use a gateway-held `claude setup-token` instead of the caller's.
+    # credential_env: CLAUDE_CODE_OAUTH_TOKEN
   # DeepSeek's OpenAI-compatible API. V4 Flash and Pro provide both Thinking
   # and Non-Thinking modes; set DEEPSEEK_API_TOKEN before starting Mindctl.
   - id: deepseek
@@ -299,6 +304,24 @@ models:
     success_prior: 1
     task_success_priors:
       coding: 1
+
+  # Prices are for prompts up to 100K tokens; longer prompts bill at
+  # 0.50 / 2.50.
+  - id: claude-haiku-5-5
+    provider: anthropic
+    tier: T2
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1000000
+    max_output_tokens: 128000
+    available: true
+    input_price: 0.1
+    cached_input_price_usd_per_million: 0.01
+    cache_write_input_price_usd_per_million: 0.125
+    output_price: 0.5
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
 
   - id: claude-haiku-4-5
     provider: anthropic
