@@ -4,21 +4,23 @@ packages:
   - docs/*
 catalog:
   "@ls-lint/ls-lint": ^2.3.1
-  "@nx/devkit": ^22.7.12
-  "@nx/docker": 22.7.5
-  "@nx/eslint-plugin": 22.7.5
-  "@nx/js": 22.7.5
-  "@nx/plugin": 22.7.5
-  "@nx/vite": 22.7.5
-  "@nx/vitest": 22.7.5
-  "@nx/workspace": 22.7.5
+  "@nx/devkit": 23.3.0
+  "@nx/docker": 23.3.0
+  "@nx/eslint-plugin": 23.3.0
+  "@nx/js": 23.3.0
+  "@nx/plugin": 23.3.0
+  "@nx/vite": 23.3.0
+  "@nx/vitest": 23.3.0
+  "@nx/workspace": 23.3.0
   "@powerlines/nx": ^0.13.254
   "@powerlines/tsconfig": ^0.4.258
   "@powerlines/tsdoc": ^0.2.206
+  "@sourcebook/config": ^0.0.11
   "@storm-software/config": ^1.138.86
   "@storm-software/config-tools": ^1.190.150
   "@storm-software/cspell": ^0.46.217
   "@storm-software/eslint": ^0.170.185
+  "@storm-software/eslint-plugin-pnpm": ^0.0.113
   "@storm-software/git-tools": ^2.132.7
   "@storm-software/linting-tools": ^1.134.80
   "@storm-software/markdownlint": ^0.30.305
@@ -38,7 +40,7 @@ catalog:
   eslint: ^10.12.0
   lefthook: ^1.13.6
   log4brains: ^1.1.0
-  nx: 22.7.5
+  nx: 23.3.0
   prettier: ^3.9.10
   rimraf: ^6.1.3
   sherif: ^1.0.0

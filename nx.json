@@ -6,7 +6,9 @@
       "router": {
         "projects": ["mindctl"],
         "projectsRelationship": "fixed",
-        "releaseTag": { "pattern": "v{version}" },
+        "releaseTag": {
+          "pattern": "v{version}"
+        },
         "version": {
           "currentVersionResolver": "git-tag",
           "fallbackCurrentVersionResolver": "disk",
@@ -36,5 +38,6 @@
     "applyChanges": true,
     "globalGenerators": ["@nx/js:typescript-sync"]
   },
-  "analytics": false
+  "analytics": false,
+  "nxCloudId": "6ace227f571582b74c4e6888"
 }

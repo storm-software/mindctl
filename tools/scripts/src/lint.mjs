@@ -1,7 +1,7 @@
 #!/usr/bin/env zx
 /* -------------------------------------------------------------------
 
-            ⚡ Storm Software - Mindctl
+                      🗲 Storm Software - Mindctl
 
  This code was released as part of the Mindctl project. Mindctl
  is maintained by Storm Software under the Apache-2.0 license, and is

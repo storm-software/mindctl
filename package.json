@@ -28,12 +28,7 @@
     "node": ">=26.3.0",
     "pnpm": ">=11.1.2"
   },
-  "keywords": [
-    "ai-agents",
-    "llm",
-    "ai-router",
-    "storm-software"
-  ],
+  "keywords": ["ai-agents", "llm", "ai-router", "storm-software"],
   "scripts": {
     "adr": "pnpm log4brains adr new",
     "adr-preview": "pnpm log4brains preview",
@@ -72,10 +67,12 @@
     "@powerlines/nx": "catalog:",
     "@powerlines/tsconfig": "catalog:",
     "@powerlines/tsdoc": "catalog:",
+    "@sourcebook/config": "catalog:",
     "@storm-software/config": "catalog:",
     "@storm-software/config-tools": "catalog:",
     "@storm-software/cspell": "catalog:",
     "@storm-software/eslint": "catalog:",
+    "@storm-software/eslint-plugin-pnpm": "catalog:",
     "@storm-software/git-tools": "catalog:",
     "@storm-software/linting-tools": "catalog:",
     "@storm-software/markdownlint": "catalog:",
