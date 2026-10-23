@@ -12,4 +12,3 @@ import{t as e}from"./_format-BTht7T7g.mjs";var t=Object.create,n=Object.definePr
 `+a,i=n.join(e);r=`[
 `+a+i+`,
 `+t+`]`}return i.pop(),a=t,r}}})),m=l(f(),1);l(p(),1);function h(t,n){let r=(0,m.default)(t,n?.reviver);return e(t,r,n),r}export{h as parseJSON5};
-//# sourceMappingURL=json5-CR6PzvNA.mjs.map

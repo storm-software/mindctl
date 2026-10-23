@@ -91,24 +91,27 @@ We also have different audiences in mind when writing docs:
 - Benchmarks - Reference documents linking to external resources.
 - Reference - Reference documents.
 
-## Markdown syntax available
+## Page fields
 
-The default markdown syntax is supported when writing documentation.
+`@sourcebook/core` compiles each Markdown page. Write YAML front matter at the top of every generated page. These fields are required:
 
-### Front matter
+- `title`: the page title.
+- `description`: one or two sentences.
+- `documentType`: the Diataxis kind. Use `getting-started`, `tutorial`, `concept`, `recipe`, or `reference`. Map a Getting Started overview to `getting-started`, a concept guide to `concept`, a core-feature page to `recipe`, and benchmarks to `reference`.
 
-Front matter is used to add metadata to your Markdown file (`title`, `description`, and `tags`). It is provided at the very top of the file, enclosed by three dashes `---`. The content is parsed as `YAML`.
+`tags` is optional. Use a YAML list or a comma-separated string, and only tags the page has earned. Do not invent tags.
 
-If no Front matter is detected, the metadata will be populated with the following:
-
-- `title`: first main title detected
-- `description`: first paragraph detected
-- `tags`: comma-separated list of tags detected
+The compiler can derive a missing `title` from the first level-1 heading and a missing `description` from the first paragraph. `documentType` has no fallback. Write all three explicitly so a generated page does not depend on that fallback.
 
 ```markdown
 ---
-title: This is a custom title
-description: This is a custom description
-tags: api end-point, graphql
+title: Run the service locally
+description: Install dependencies, start the service, and confirm it responds.
+documentType: getting-started
+tags: [setup]
 ---
 ```
+
+## Markdown the compiler understands
+
+The compiler uses remark and rehype. Write GitHub Flavored Markdown, including tables, task lists, strikethrough, footnotes, and GitHub alerts (`> [!NOTE]`). `:::note` blocks closed by `:::` become admonitions; a bracketed title such as `:::tip[Fast path]` sets the label. End a heading with `[#custom-id]` to choose its id. End a heading with `[!toc]` to keep it out of the table of contents, or `[toc]` to include it and omit it from the body. Level-1 headings are the page title and stay out of the table of contents unless marked `[toc]`.

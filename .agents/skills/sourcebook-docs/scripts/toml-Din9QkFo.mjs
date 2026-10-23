@@ -242,4 +242,3 @@ function T(e,t,n,r){let i=t,a=n,o,s=!1,c;for(let t=0;t<e.length;t++){if(t){if(i=
 * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 function D(t){let n=E(t);return e(t,n,{preserveIndentation:!1}),n}export{D as parseTOML};
-//# sourceMappingURL=toml-Din9QkFo.mjs.map
