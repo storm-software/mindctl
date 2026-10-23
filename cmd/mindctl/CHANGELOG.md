@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.53](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.53) (10/23/2026)
+
+### Features
+
+- **mindctl:** Added account management inspired by CLIProxyAPI to router ([54e5703](https://github.com/storm-software/mindctl/commit/54e5703))
+
 ## [0.1.52](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.52) (10/23/2026)
 
 ### Bug Fixes
