@@ -127,12 +127,12 @@ type NewTurn struct {
 // ProviderAttempt is written before any provider I/O. Decision is telemetry;
 // successful Result and failed Error bodies are encrypted by the repository.
 type ProviderAttempt struct {
-	ID, ClientID, ResponseID, Status string
-	Sequence                         int
-	Decision                         router.Decision
-	CreatedAt, CompletedAt           time.Time
-	Result                           *inference.Result
-	Error                            []byte
+	ID, ClientID, ResponseID, Status, AccountID string
+	Sequence                                    int
+	Decision                                    router.Decision
+	CreatedAt, CompletedAt                      time.Time
+	Result                                      *inference.Result
+	Error                                       []byte
 }
 
 // HistoryFilter selects response history. Attempt filters must all match the

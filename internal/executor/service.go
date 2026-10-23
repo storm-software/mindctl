@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/storm-software/mindctl/internal/accounts"
 	"github.com/storm-software/mindctl/internal/classifier"
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
@@ -44,6 +45,10 @@ type Input struct {
 	ExpectedOutputTokens int64
 	// Session prices a session-bound request's model over future turns.
 	Session SessionSettings
+	// AccountSessionKey binds a named model to an account. It is independent
+	// of the automatic routing-session model pin.
+	AccountSessionKey, ParentSessionKey string
+	Guardian                            bool
 }
 
 // SessionSettings configures how session-bound requests are priced.
@@ -62,6 +67,9 @@ type Service struct {
 	conversations conversation.Service
 	compressor    headroom.Compressor
 	logger        *slog.Logger
+	selector      accounts.Selector
+	aliases       []accounts.Alias
+	protocols     func(string) (provider.Provider, bool)
 }
 
 // New composes the dependencies needed for one routed execution path.
@@ -101,6 +109,26 @@ func NewWithCompressor(
 	}
 }
 
+// SetAccountRouting installs named-model account selection. A nil selector
+// leaves named models on the single configured credential.
+func (s *Service) SetAccountRouting(selector accounts.Selector, aliases []accounts.Alias) {
+	if s == nil {
+		return
+	}
+	s.selector = selector
+	s.aliases = append([]accounts.Alias(nil), aliases...)
+}
+
+// SetProtocolClients supplies adapters used only when a named model's account
+// speaks a different protocol than the provider registered for that model.
+// Automatic routing never calls the factory.
+func (s *Service) SetProtocolClients(factory func(protocol string) (provider.Provider, bool)) {
+	if s == nil {
+		return
+	}
+	s.protocols = factory
+}
+
 // Output is returned only after the encrypted result and conversation pin have
 // committed successfully. Result.ID is always the gateway-owned response ID.
 type Output struct {
@@ -121,6 +149,7 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 	if s == nil || s.policy == nil || s.providers == nil || s.conversations == nil {
 		return Output{}, errors.New("executor: dependencies are required")
 	}
+	s.applyAlias(&in)
 
 	turn, err := s.conversations.Start(ctx, in.ClientID, in.Request)
 	if err != nil {
@@ -156,6 +185,10 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 		if err != nil {
 			s.traceDecision(turn.ResponseID, decision, false)
 			return Output{}, explicitError(in.Request.Model, decision, err)
+		}
+		if s.selector != nil {
+			s.traceDecision(turn.ResponseID, decision, true)
+			return s.executeNamed(ctx, in, turn, decision)
 		}
 	} else {
 		pin := turnPin(turn)
@@ -217,8 +250,11 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	if !ok {
 		return Output{}, fmt.Errorf("executor: selected model %q is not configured", decision.ModelID)
 	}
-	adapter, ok := s.providers.Get(decision.Provider)
+	adapter, ok := protocolAdapterFrom(ctx)
 	if !ok {
+		adapter, ok = s.providers.Get(decision.Provider)
+	}
+	if !ok || adapter == nil {
 		return Output{}, fmt.Errorf("executor: provider %q is unavailable", decision.Provider)
 	}
 	attempt, err := s.conversations.BeginAttempt(ctx, turn, decision)

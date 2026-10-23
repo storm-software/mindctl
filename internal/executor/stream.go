@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/storm-software/mindctl/internal/accounts"
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
@@ -47,6 +48,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 	if s == nil || s.policy == nil || s.providers == nil || s.conversations == nil || writer == nil {
 		return errors.New("executor: dependencies and event writer are required")
 	}
+	s.applyAlias(&in)
 
 	turn, decision, err := s.streamDecision(ctx, in)
 	if err != nil {
@@ -65,6 +67,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 	}
 	emitted := false
 	var lastErr error
+	accountTried := map[string][]string{}
 	for index := 0; index < len(decisions); index++ {
 		candidate := decisions[index]
 		model, ok := selectedModel(in.Models, candidate)
@@ -77,7 +80,45 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 			lastErr = fmt.Errorf("executor: provider %q is unavailable", candidate.Provider)
 			break
 		}
-		attempt, err := s.conversations.BeginAttempt(ctx, turn, candidate)
+		attemptCtx := providerScopedContext(ctx, candidate.Provider)
+		var selection accounts.Selection
+		if s.selector != nil && namedModel(in.Request.Model) {
+			identity := candidate.Provider + "\x00" + candidate.ModelID
+			selected, selectErr := s.selector.Select(ctx, s.accountRequest(in, candidate, 0, accountTried[identity]))
+			if selectErr != nil {
+				lastErr = selectErr
+				var cooling *accounts.UnavailableError
+				if errors.As(selectErr, &cooling) {
+					if cooling.RetryAfter > 0 && !emitted {
+						if waitErr := waitCooldown(ctx, cooling.RetryAfter); waitErr != nil {
+							return waitErr
+						}
+						index--
+						continue
+					}
+					return selectErr
+				}
+				if errors.Is(selectErr, accounts.ErrNone) {
+					delete(accountTried, identity)
+					continue
+				}
+				return selectErr
+			}
+			selection = selected
+			accountTried[identity] = append(accountTried[identity], selection.Account.ID)
+			scoped, scopeErr := s.attemptContext(ctx, selection)
+			if scopeErr != nil {
+				s.selector.ReportFailure(ctx, in.AccountSessionKey, selection.Account.ID, accounts.FailureAuth)
+				return scopeErr
+			}
+			attemptCtx = providerScopedContext(scoped, candidate.Provider)
+			if replacement, replaceErr := s.protocolAdapter(candidate.Provider, selection.Account); replaceErr != nil {
+				return replaceErr
+			} else if replacement != nil {
+				adapter = replacement
+			}
+		}
+		attempt, err := s.conversations.BeginAttempt(attemptCtx, turn, candidate)
 		if err != nil {
 			return err
 		}
@@ -104,7 +145,7 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, Provider: candidate.Provider, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
 			return s.failStreamAttempt(ctx, attempt, "", err)
 		}
-		stream, err := adapter.Stream(providerScopedContext(ctx, candidate.Provider), model, request)
+		stream, err := adapter.Stream(attemptCtx, model, request)
 		var result inference.Result
 		if err == nil {
 			var completion inference.Event
@@ -124,6 +165,9 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 				}
 				cancel()
 				if err == nil {
+					if selection.Account.ID != "" {
+						s.selector.ReportSuccess(ctx, in.AccountSessionKey, selection.Account.ID)
+					}
 					completion.ResponseID = turn.ResponseID
 					completion.Status = result.Status
 					completion.Usage = result.Usage
@@ -149,6 +193,9 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		}
 
 		lastErr = err
+		if selection.Account.ID != "" {
+			s.selector.ReportFailure(ctx, in.AccountSessionKey, selection.Account.ID, failureClass(err))
+		}
 		observedProviderRequestID := result.ProviderRequestID
 		if observedProviderRequestID == "" {
 			observedProviderRequestID = providerRequestID(err)
@@ -180,6 +227,19 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 				}
 			}
 			return lastErr
+		}
+		if selection.Account.ID != "" && retryableStreamError(err) {
+			identity := candidate.Provider + "\x00" + candidate.ModelID
+			if s.selector.HasEligible(s.accountRequest(in, candidate, 0, accountTried[identity])) {
+				tail := append([]router.Decision{candidate}, decisions[index+1:]...)
+				decisions = append(decisions[:index+1], tail...)
+				s.trace("route.stream.account_retry",
+					"response_id", turn.ResponseID,
+					"account_id", selection.Account.ID,
+					"model", candidate.ModelID,
+				)
+				continue
+			}
 		}
 		if retryableStreamError(err) && index == len(decisions)-1 && !explicitAlternativesExpanded {
 			explicitAlternativesExpanded = true

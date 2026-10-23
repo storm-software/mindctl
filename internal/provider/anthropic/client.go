@@ -106,13 +106,38 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 }
 
 func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveValues []string) (*http.Response, string, error) {
-	if strings.TrimSpace(c.baseURL) == "" {
+	baseURL := c.baseURL
+	accessToken := c.apiKey
+	auth := c.auth
+	httpClient := c.http
+	attempt, hasAttempt := upstreamauth.AttemptFrom(ctx)
+	if hasAttempt {
+		if attempt.BaseURL != "" {
+			baseURL = strings.TrimRight(attempt.BaseURL, "/")
+		}
+		if attempt.ProxyURL != "" {
+			proxied, proxyErr := upstreamauth.ProxyClient(c.http, attempt.ProxyURL)
+			if proxyErr != nil {
+				return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid account proxy")}
+			}
+			httpClient = proxied
+		}
+		if attempt.Claude != nil {
+			auth = authClaudeOAuth
+		} else if attempt.APIKey != "" {
+			accessToken = attempt.APIKey
+			auth = authAPIKey
+		}
+	}
+	if strings.TrimSpace(baseURL) == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
-	accessToken := c.apiKey
 	var claudeCredential upstreamauth.ClaudeCredential
-	if c.auth == authClaudeOAuth {
+	if auth == authClaudeOAuth {
 		credential, ok := upstreamauth.Claude(ctx)
+		if hasAttempt && attempt.Claude != nil {
+			credential, ok = *attempt.Claude, true
+		}
 		if !ok {
 			return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 		}
@@ -122,11 +147,11 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveVa
 	if accessToken == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/messages", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid provider endpoint")}
 	}
-	if c.auth == authClaudeOAuth {
+	if auth == authClaudeOAuth {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
 		request.Header.Set("anthropic-beta", oauthBeta(claudeCredential.Beta))
 	} else {
@@ -136,7 +161,7 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveVa
 		}
 	}
 	version := anthropicVersion
-	if c.auth == authClaudeOAuth && claudeCredential.Version != "" {
+	if auth == authClaudeOAuth && claudeCredential.Version != "" {
 		version = claudeCredential.Version
 	}
 	request.Header.Set("anthropic-version", version)
@@ -144,7 +169,17 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveVa
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
 	}
-	response, err := c.http.Do(request)
+	if hasAttempt {
+		if attempt.UserAgent != "" {
+			request.Header.Set("User-Agent", attempt.UserAgent)
+		}
+		for name, value := range attempt.Headers {
+			if name != "" && value != "" && request.Header.Get(name) == "" {
+				request.Header.Set(name, value)
+			}
+		}
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorRetryable, Err: err}
 	}

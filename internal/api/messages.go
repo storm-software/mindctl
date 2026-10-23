@@ -67,6 +67,7 @@ func (h *messagesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SavingsBaseline:      h.config.SavingsBaseline,
 		ExpectedOutputTokens: h.config.ExpectedOutputTokens, Session: h.config.Session,
 	}
+	applyAccountSession(r, &input)
 	if decoded.Request.Stream {
 		writer := &messagesSSEWriter{response: w}
 		if err := h.service.Stream(ctx, input, writer); err != nil && !writer.wrote {

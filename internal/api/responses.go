@@ -80,6 +80,7 @@ func (h *responsesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
+	applyAccountSession(r, &input)
 	if request.Stream {
 		writer := &responseSSEWriter{response: w}
 		if err := h.service.Stream(r.Context(), input, writer); err != nil && !writer.wrote {

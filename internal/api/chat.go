@@ -61,6 +61,7 @@ func (h *chatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		SavingsBaseline:      h.config.SavingsBaseline,
 		ExpectedOutputTokens: h.config.ExpectedOutputTokens, Session: h.config.Session,
 	}
+	applyAccountSession(r, &input)
 	if request.Stream {
 		writer := &chatSSEWriter{response: w, created: time.Now().Unix()}
 		if err := h.service.Stream(r.Context(), input, writer); err != nil && !writer.wrote {

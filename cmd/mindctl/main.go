@@ -118,7 +118,9 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		newHarnessActionCommand("uninstall", "Remove the router settings from harnesses", uninstallAction),
 	)
 
-	root.AddCommand(&cobra.Command{
+	var homeJWT string
+	var homeDisableCluster bool
+	serve := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the Mindctl gateway",
 		Args:  noArgs("unexpected arguments for serve"),
@@ -139,9 +141,14 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 				stderr,
 				command.Flags().Changed("debug"),
 				debug,
+				homeJWT,
+				homeDisableCluster,
 			)
 		},
-	})
+	}
+	serve.Flags().StringVar(&homeJWT, "home-jwt", "", "delegate named-model accounts to Home using this bootstrap JWT")
+	serve.Flags().BoolVar(&homeDisableCluster, "home-disable-cluster-discovery", false, "skip Home cluster discovery")
+	root.AddCommand(serve)
 
 	root.SetOut(stdout)
 	root.SetErr(stderr)
@@ -169,6 +176,10 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 		newHistoryCommand(settings),
 		newSavingsCommand(settings),
 		newXrayCommand(settings),
+		newLoginCommand(),
+		newCredentialsCommand(),
+		newVertexCommand(),
+		newDiscoverCommand(),
 	)
 
 	return root
@@ -1233,10 +1244,22 @@ func noArgs(message string) cobra.PositionalArgs {
 	}
 }
 
-func runGateway(ctx context.Context, path string, stderr io.Writer, debugChanged, debugFlag bool) (err error) {
+func runGateway(ctx context.Context, path string, stderr io.Writer, debugChanged, debugFlag bool, homeJWT string, homeDisableCluster bool) (err error) {
 	cfg, err := loadGatewayConfig(path)
 	if err != nil {
 		return err
+	}
+	if cfg.OAuth.AuthDir == "" {
+		cfg.OAuth.AuthDir, err = config.DefaultAuthDir()
+		if err != nil {
+			return err
+		}
+	}
+	if homeJWT != "" {
+		cfg.Home.JWT = homeJWT
+	}
+	if homeDisableCluster {
+		cfg.Home.DisableClusterDiscovery = true
 	}
 
 	cfg.Debug, err = resolveDebug(cfg.Debug, debugChanged, debugFlag, os.LookupEnv)

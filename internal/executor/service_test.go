@@ -393,15 +393,20 @@ func (f *fakeClassifier) Classify(_ context.Context, input classifier.Input) (do
 }
 
 type fakeProvider struct {
-	Calls   int
-	Result  inference.Result
-	Err     error
-	Request inference.Request
+	Calls    int
+	Failures int
+	Result   inference.Result
+	Err      error
+	Request  inference.Request
 }
 
 func (f *fakeProvider) Execute(_ context.Context, _ domain.Model, request inference.Request) (inference.Result, error) {
 	f.Calls++
 	f.Request = request
+	if f.Failures > 0 {
+		f.Failures--
+		return inference.Result{}, &provider.Error{Kind: provider.ErrorRateLimit, Status: 429}
+	}
 	return f.Result, f.Err
 }
 
@@ -416,6 +421,7 @@ type fakeConversations struct {
 	BeginCalls      int
 	CommitCalls     int
 	FailCalls       int
+	AccountIDs      []string
 	Committed       inference.Result
 	Savings         []savings.Record
 }
@@ -430,8 +436,11 @@ func (f *fakeConversations) Resume(context.Context, string, string) (conversatio
 	return f.Turn, nil
 }
 
-func (f *fakeConversations) BeginAttempt(_ context.Context, turn conversation.Turn, _ router.Decision) (conversation.Attempt, error) {
+func (f *fakeConversations) BeginAttempt(ctx context.Context, turn conversation.Turn, _ router.Decision) (conversation.Attempt, error) {
 	f.BeginCalls++
+	if accountID := conversation.AccountID(ctx); accountID != "" {
+		f.AccountIDs = append(f.AccountIDs, accountID)
+	}
 	if f.BeginAttemptErr != nil {
 		return conversation.Attempt{}, f.BeginAttemptErr
 	}

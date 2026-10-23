@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/storm-software/mindctl/internal/accounts"
 	"github.com/storm-software/mindctl/internal/api"
 	"github.com/storm-software/mindctl/internal/classifier"
 	"github.com/storm-software/mindctl/internal/classifier/laya"
@@ -22,7 +23,11 @@ import (
 	"github.com/storm-software/mindctl/internal/debugtrace"
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/executor"
+	"github.com/storm-software/mindctl/internal/forward"
 	"github.com/storm-software/mindctl/internal/headroom"
+	"github.com/storm-software/mindctl/internal/home"
+	"github.com/storm-software/mindctl/internal/oauth"
+	"github.com/storm-software/mindctl/internal/pluginhost"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/provider/anthropic"
 	"github.com/storm-software/mindctl/internal/provider/gemini"
@@ -131,6 +136,9 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 			if providerConfig.CredentialEnv != "" {
 				gatewayClaudeToken, _ = getenv(providerConfig.CredentialEnv)
 			}
+		case config.ProviderAuthOAuth:
+			value, exists := getenv(providerConfig.APIKeyEnv)
+			a.providerCredentials[providerConfig.ID] = providerConfig.APIKeyEnv == "" || (exists && value != "")
 		}
 		a.providerAvailability[providerConfig.ID] = validEndpoint(providerConfig.BaseURL)
 	}
@@ -218,6 +226,34 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		}
 		compressor = a.headroomManager
 	}
+	pool, err := accountPool(cfg, getenv)
+	if err != nil {
+		a.httpClient.CloseIdleConnections()
+		_ = a.store.Close()
+		return nil, err
+	}
+	selector := accounts.Selector(pool)
+	if cfg.Home.JWT != "" {
+		delegated, homeErr := home.Connect(ctx, cfg.Home.JWT, cfg.Home.DisableClusterDiscovery, a.httpClient)
+		if homeErr != nil {
+			a.httpClient.CloseIdleConnections()
+			_ = a.store.Close()
+			return nil, homeErr
+		}
+		selector = delegated
+	}
+	plugins := pluginhost.New(cfg.Plugins.Enabled)
+	if cfg.Plugins.Enabled && cfg.Plugins.Path != "" {
+		if err := plugins.Load(cfg.Plugins.Path); err != nil {
+			a.httpClient.CloseIdleConnections()
+			_ = a.store.Close()
+			return nil, err
+		}
+	}
+	aliases := make([]accounts.Alias, 0, len(cfg.Routing.Aliases))
+	for _, alias := range cfg.Routing.Aliases {
+		aliases = append(aliases, accounts.Alias{Name: alias.Name, Alias: alias.Alias, Provider: alias.Provider})
+	}
 	a.executor = executor.NewWithCompressor(
 		a.classifier,
 		a.policy,
@@ -226,6 +262,8 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		compressor,
 		debugLogger,
 	)
+	a.executor.SetAccountRouting(selector, aliases)
+	a.executor.SetProtocolClients(protocolFactory(a.httpClient))
 	clientToken, _ := getenv(cfg.ClientAuth.TokenEnv)
 	maxBodyBytes := cfg.ClientAuth.MaxBodyBytes
 	if maxBodyBytes == 0 {
@@ -259,12 +297,34 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	operations := api.Operations(a.ready)
 	mux.Handle("/healthz", operations)
 	mux.Handle("/readyz", operations)
-	mux.Handle("/v1/responses", api.Authenticate(responses, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}))
+	named := &api.Named{
+		Executor: a.executor,
+		Forward: &forward.Forwarder{
+			Selector: selector, Aliases: aliases, Models: append([]domain.Model(nil), a.catalog...), HTTP: a.httpClient,
+		},
+		Config: responsesConfig, Aliases: aliases, Models: append([]domain.Model(nil), a.catalog...),
+	}
+	clientAuth := api.Authenticate(named.Responses(responses), cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}})
+	mux.Handle("/v1/responses", clientAuth)
 	// Cursor's OpenAI override can only send Authorization. Keep that check on
 	// this route so the configured header can stay a separate gateway token
 	// for Claude and Codex.
 	chat := captureBodies(api.NewChatHandler(a.executor, responsesConfig))
 	mux.Handle("/v1/chat/completions", api.Authenticate(chat, api.ChatAuthorizationHeader, appTokens{{ID: "configured-client", Value: clientToken}}))
+	wrapClient := func(handler http.Handler) http.Handler {
+		return api.Authenticate(handler, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}})
+	}
+	named.Mount(mux, wrapClient)
+	mux.Handle("/auth/callback", oauth.Callbacks.Handler())
+	mux.Handle("/callback", oauth.Callbacks.Handler())
+	if cfg.Management.Enabled {
+		managementToken, _ := getenv(cfg.Management.TokenEnv)
+		management := &api.Management{
+			ConfigPath: cfg.Path, AuthDir: cfg.OAuth.AuthDir, Config: cfg,
+			Pool: pool, Plugins: plugins, Models: append([]domain.Model(nil), a.catalog...),
+		}
+		mux.Handle("/v8/management/", api.Authenticate(management.Handler(), "Authorization", appTokens{{ID: "management", Value: managementToken}}))
+	}
 	if cfg.ClaudeMessages.Enabled {
 		messages := api.UseGatewayCredentials(api.NewMessagesHandler(a.executor, responsesConfig), gatewayClaudeToken, gatewayCodexAuthFile)
 		messages = captureBodies(api.CaptureNativeClaudeOAuth(messages))
@@ -281,35 +341,129 @@ func (tokens appTokens) Tokens() []api.Token { return tokens }
 func configuredProviders(configs []config.ProviderConfig, getenv func(string) (string, bool), httpClient *http.Client) (map[string]provider.Provider, error) {
 	entries := make(map[string]provider.Provider, len(configs))
 	for _, cfg := range configs {
+		key, _ := getenv(cfg.APIKeyEnv)
+		client, err := providerClient(cfg, key, httpClient)
+		if err != nil {
+			return nil, err
+		}
+		entries[cfg.ID] = client
+	}
+	return entries, nil
+}
+
+func providerClient(cfg config.ProviderConfig, key string, httpClient *http.Client) (provider.Provider, error) {
+	protocol := cfg.Protocol
+	if protocol == "" {
 		switch cfg.ID {
-		case "openai":
-			if cfg.AuthMode() == config.ProviderAuthChatGPTOAuthPassthrough {
-				entries[cfg.ID] = openai.NewChatGPTOAuthClient(cfg.BaseURL, httpClient)
-			} else {
-				key, _ := getenv(cfg.APIKeyEnv)
-				entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
-			}
-		case "deepseek":
-			key, _ := getenv(cfg.APIKeyEnv)
-			entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
-		case "meta":
-			key, _ := getenv(cfg.APIKeyEnv)
-			entries[cfg.ID] = openai.NewClient(cfg.BaseURL, key, httpClient)
 		case "anthropic":
-			if cfg.AuthMode() == config.ProviderAuthClaudeOAuthPassthrough {
-				entries[cfg.ID] = anthropic.NewClaudeOAuthClient(cfg.BaseURL, httpClient)
-			} else {
-				key, _ := getenv(cfg.APIKeyEnv)
-				entries[cfg.ID] = anthropic.NewClient(cfg.BaseURL, key, httpClient)
-			}
+			protocol = "anthropic"
 		case "gemini":
-			key, _ := getenv(cfg.APIKeyEnv)
-			entries[cfg.ID] = gemini.NewClient(cfg.BaseURL, key, httpClient)
+			protocol = "gemini"
+		case "openai", "deepseek", "meta":
+			protocol = "openai"
 		default:
 			return nil, errors.New("unsupported configured provider")
 		}
 	}
-	return entries, nil
+	switch accounts.ProtocolFamily(protocol) {
+	case "anthropic":
+		if cfg.AuthMode() == config.ProviderAuthClaudeOAuthPassthrough {
+			return anthropic.NewClaudeOAuthClient(cfg.BaseURL, httpClient), nil
+		}
+		return anthropic.NewClient(cfg.BaseURL, key, httpClient), nil
+	case "gemini":
+		return gemini.NewClient(cfg.BaseURL, key, httpClient), nil
+	case "openai":
+		if cfg.AuthMode() == config.ProviderAuthChatGPTOAuthPassthrough {
+			return openai.NewChatGPTOAuthClient(cfg.BaseURL, httpClient), nil
+		}
+		return openai.NewClient(cfg.BaseURL, key, httpClient), nil
+	default:
+		return nil, errors.New("unsupported configured provider")
+	}
+}
+
+func protocolFactory(httpClient *http.Client) func(string) (provider.Provider, bool) {
+	return func(protocol string) (provider.Provider, bool) {
+		switch accounts.ProtocolFamily(protocol) {
+		case "anthropic":
+			return anthropic.NewClient("", "", httpClient), true
+		case "gemini":
+			return gemini.NewClient("", "", httpClient), true
+		case "openai":
+			return openai.NewClient("", "", httpClient), true
+		default:
+			return nil, false
+		}
+	}
+}
+
+func accountPool(cfg config.Config, getenv func(string) (string, bool)) (*accounts.Pool, error) {
+	static := make([]accounts.StaticAccount, 0, len(cfg.Providers))
+	for _, providerConfig := range cfg.Providers {
+		if account, ok := staticAccount(providerConfig, getenv); ok {
+			static = append(static, account)
+		}
+	}
+	return accounts.NewPool(accountSettings(cfg.Routing.Accounts), cfg.OAuth.AuthDir, static)
+}
+
+func staticAccount(cfg config.ProviderConfig, getenv func(string) (string, bool)) (accounts.StaticAccount, bool) {
+	key, _ := getenv(cfg.APIKeyEnv)
+	kind := accounts.KindAPIKey
+	secret := accounts.Secret{}
+	switch cfg.AuthMode() {
+	case config.ProviderAuthChatGPTOAuthPassthrough, config.ProviderAuthClaudeOAuthPassthrough:
+		kind = accounts.KindPassthrough
+	case config.ProviderAuthOAuth:
+		kind = accounts.KindOAuth
+		if key == "" {
+			return accounts.StaticAccount{}, false
+		}
+		secret.APIKey = key
+	default:
+		if key == "" {
+			return accounts.StaticAccount{}, false
+		}
+		secret.APIKey = key
+	}
+	protocol := cfg.Protocol
+	if protocol == "" {
+		protocol = nativeProviderProtocol(cfg.ID)
+	}
+	return accounts.StaticAccount{Account: accounts.Account{
+		ID: "config:" + cfg.ID, Provider: cfg.ID, Protocol: protocol, Kind: kind,
+		BaseURL: cfg.BaseURL, Prefix: cfg.Prefix, Enabled: true, Weight: 1,
+	}, Secret: secret}, true
+}
+
+func nativeProviderProtocol(providerID string) string {
+	switch providerID {
+	case "anthropic":
+		return "anthropic"
+	case "gemini":
+		return "gemini"
+	default:
+		return "openai"
+	}
+}
+
+func accountSettings(cfg config.AccountRoutingConfig) accounts.Settings {
+	settings := accounts.Settings{
+		Strategy: accounts.Strategy(cfg.Strategy), SessionAffinity: cfg.SessionAffinity,
+		SessionAffinityTTL: cfg.SessionAffinityTTL, RebindOn: accounts.RebindMode(cfg.RebindOn),
+		MaxRetryCredentials: cfg.MaxRetryCredentials, MaxRetryInterval: cfg.MaxRetryInterval,
+		DisableCooling: cfg.DisableCooling, ForceModelPrefix: cfg.ForceModelPrefix,
+	}
+	if cfg.RequestRetry != nil {
+		settings.RequestRetry = *cfg.RequestRetry
+		settings.RequestRetryConfigured = true
+	}
+	if cfg.Subagents != nil {
+		settings.Subagents = *cfg.Subagents
+		settings.SubagentsConfigured = true
+	}
+	return settings
 }
 
 func policyConfig(cfg config.RoutingConfig) router.PolicyConfig {

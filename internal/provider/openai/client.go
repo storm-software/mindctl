@@ -140,24 +140,52 @@ func usesResponsesLite(request inference.Request) bool {
 }
 
 func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bool, sensitiveValues []string) (*http.Response, string, error) {
-	if strings.TrimSpace(c.baseURL) == "" {
+	baseURL := c.baseURL
+	accessToken := c.apiKey
+	accountID, originator, userAgent := "", "", ""
+	auth := c.auth
+	httpClient := c.http
+	attempt, hasAttempt := upstreamauth.AttemptFrom(ctx)
+	if hasAttempt {
+		if attempt.BaseURL != "" {
+			baseURL = strings.TrimRight(attempt.BaseURL, "/")
+		}
+		if attempt.ProxyURL != "" {
+			proxied, proxyErr := upstreamauth.ProxyClient(c.http, attempt.ProxyURL)
+			if proxyErr != nil {
+				return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid account proxy")}
+			}
+			httpClient = proxied
+		}
+		if attempt.ChatGPT != nil {
+			auth = authChatGPTOAuth
+		} else if attempt.APIKey != "" {
+			accessToken = attempt.APIKey
+			auth = authAPIKey
+		}
+		if attempt.UserAgent != "" {
+			userAgent = attempt.UserAgent
+		}
+	}
+	if strings.TrimSpace(baseURL) == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
 	path := "/v1/responses"
 	// OpenAI-compatible base URLs are commonly configured with the version
 	// segment (for example https://api.meta.ai/v1); avoid requesting /v1/v1.
-	if strings.HasSuffix(c.baseURL, "/v1") {
+	if strings.HasSuffix(baseURL, "/v1") {
 		path = "/responses"
 	}
-	accessToken := c.apiKey
-	accountID, originator, userAgent := "", "", ""
-	switch c.auth {
+	switch auth {
 	case authAPIKey:
 		if accessToken == "" {
 			return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 		}
 	case authChatGPTOAuth:
 		credential, ok := upstreamauth.ChatGPT(ctx)
+		if hasAttempt && attempt.ChatGPT != nil {
+			credential, ok = *attempt.ChatGPT, true
+		}
 		if !ok {
 			return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 		}
@@ -165,16 +193,18 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 		accessToken = credential.AccessToken
 		accountID = credential.AccountID
 		originator = credential.Originator
-		userAgent = credential.UserAgent
+		if credential.UserAgent != "" {
+			userAgent = credential.UserAgent
+		}
 	default:
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid provider endpoint")}
 	}
 	request.Header.Set("Authorization", "Bearer "+accessToken)
-	if c.auth == authChatGPTOAuth {
+	if auth == authChatGPTOAuth {
 		request.Header.Set("ChatGPT-Account-Id", accountID)
 		if originator == "" {
 			originator = "mindctl"
@@ -192,7 +222,14 @@ func (c *Client) post(ctx context.Context, body []byte, stream, responsesLite bo
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
 	}
-	response, err := c.http.Do(request)
+	if hasAttempt {
+		for name, value := range attempt.Headers {
+			if name != "" && value != "" && request.Header.Get(name) == "" {
+				request.Header.Set(name, value)
+			}
+		}
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorRetryable, Err: err}
 	}

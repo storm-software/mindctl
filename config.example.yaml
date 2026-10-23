@@ -84,10 +84,30 @@ routing:
     horizon_turns: 3
     # Cache hit ratio assumed until the session's first response is observed.
     default_cache_hit_ratio: 0.8
+  # Named models skip the classifier and use this account pool. Omit the block
+  # to keep round-robin, affinity off, three retry rounds, and in-memory cooldown.
+  # accounts:
+  #   strategy: round-robin
+  #   session_affinity: false
+  #   session_affinity_ttl: 1h
+  #   rebind_on: any
+  #   request_retry: 3
+  #   disable_cooling: false
+  # aliases: []
+
+# oauth:
+#   auth_dir: /home/you/.config/mindctl/auth
+# management:
+#   enabled: false
+#   token_env: MINDCTL_MANAGEMENT_TOKEN
+# plugins:
+#   enabled: false
 
 providers:
-  # Supported provider IDs are openai, anthropic, gemini, deepseek, and meta. Authentication
-  # modes are exclusive. ChatGPT OAuth passthrough needs no OPENAI_API_KEY;
+  # Supported provider IDs are openai, anthropic, gemini, deepseek, and meta.
+  # Other IDs set protocol to openai, openai-compatible, codex, anthropic, or gemini.
+  # auth: oauth reads tokens from oauth.auth_dir instead of an API key.
+  # Authentication modes are exclusive. ChatGPT OAuth passthrough needs no OPENAI_API_KEY;
   # Codex supplies its caller-managed credential on each request.
   - id: openai
     base_url: https://chatgpt.com/backend-api/codex

@@ -778,9 +778,9 @@ func (db *DB) BeginProviderAttempt(ctx context.Context, attempt storage.Provider
 			created = time.Now().UTC()
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO provider_attempts
-			(id, response_id, sequence, provider, model_id, tier, decision_json, status, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'started', ?)`, attempt.ID, attempt.ResponseID, sequence, attempt.Decision.Provider,
-			attempt.Decision.ModelID, attempt.Decision.Tier, string(decision), created.UnixNano()); err != nil {
+			(id, response_id, sequence, provider, model_id, tier, decision_json, status, created_at, account_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)`, attempt.ID, attempt.ResponseID, sequence, attempt.Decision.Provider,
+			attempt.Decision.ModelID, attempt.Decision.Tier, string(decision), created.UnixNano(), attempt.AccountID); err != nil {
 			return failure("insert provider attempt", err)
 		}
 		return nil

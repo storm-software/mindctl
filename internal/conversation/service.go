@@ -191,9 +191,29 @@ func (s *service) resume(ctx context.Context, clientID, responseID string) (Turn
 	return turn, nil
 }
 
+type accountIDKey struct{}
+
+// WithAccountID records the account chosen for a named-model attempt.
+// The identifier is not a secret.
+func WithAccountID(ctx context.Context, accountID string) context.Context {
+	if accountID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, accountIDKey{}, accountID)
+}
+
+// AccountID returns the account identifier attached by WithAccountID.
+func AccountID(ctx context.Context) string {
+	accountID, _ := ctx.Value(accountIDKey{}).(string)
+	return accountID
+}
+
 func (s *service) BeginAttempt(ctx context.Context, turn Turn, decision router.Decision) (Attempt, error) {
 	attempt := Attempt{ID: randomID("att_"), ResponseID: turn.ResponseID, ClientID: turn.ClientID}
-	err := s.store.BeginProviderAttempt(ctx, storage.ProviderAttempt{ID: attempt.ID, ClientID: turn.ClientID, ResponseID: turn.ResponseID, Decision: decision, CreatedAt: time.Now().UTC()})
+	err := s.store.BeginProviderAttempt(ctx, storage.ProviderAttempt{
+		ID: attempt.ID, ClientID: turn.ClientID, ResponseID: turn.ResponseID, Decision: decision,
+		AccountID: AccountID(ctx), CreatedAt: time.Now().UTC(),
+	})
 	if errors.Is(err, storage.ErrNotFound) {
 		return Attempt{}, ErrNotFound
 	}

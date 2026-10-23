@@ -4,9 +4,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
+
+// DefaultAuthDir is the local credential directory used when oauth.auth_dir
+// is omitted. Serve fills it in; library callers that leave it empty load no
+// auth files.
+func DefaultAuthDir() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config directory: %w", err)
+	}
+	return filepath.Join(dir, "mindctl", "auth"), nil
+}
 
 // Read decodes one strict YAML configuration document without resolving or
 // validating its referenced secrets. It is used by offline catalog commands.

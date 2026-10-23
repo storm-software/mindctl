@@ -13,6 +13,7 @@ import (
 	"github.com/storm-software/mindctl/internal/domain"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
+	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
 const maxResponseBytes = 16 << 20
@@ -81,23 +82,45 @@ func (c *Client) Stream(ctx context.Context, model domain.Model, request inferen
 }
 
 func (c *Client) post(ctx context.Context, modelID string, body []byte, stream bool) (*http.Response, string, error) {
-	if strings.TrimSpace(c.baseURL) == "" || c.apiKey == "" {
+	baseURL := c.baseURL
+	apiKey := c.apiKey
+	httpClient := c.http
+	attempt, hasAttempt := upstreamauth.AttemptFrom(ctx)
+	if hasAttempt {
+		if attempt.BaseURL != "" {
+			baseURL = strings.TrimRight(attempt.BaseURL, "/")
+		}
+		if attempt.APIKey != "" {
+			apiKey = attempt.APIKey
+		}
+		if attempt.ProxyURL != "" {
+			proxied, proxyErr := upstreamauth.ProxyClient(c.http, attempt.ProxyURL)
+			if proxyErr != nil {
+				return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid account proxy")}
+			}
+			httpClient = proxied
+		}
+	}
+	if strings.TrimSpace(baseURL) == "" || apiKey == "" {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("provider client is not configured")}
 	}
 	path := "/v1beta/models/" + modelID + ":generateContent"
 	if stream {
 		path = "/v1beta/models/" + modelID + ":streamGenerateContent?alt=sse"
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorInvalidRequest, Err: errors.New("invalid provider endpoint")}
 	}
-	request.Header.Set("x-goog-api-key", c.apiKey)
+	request.Header.Set("x-goog-api-key", apiKey)
 	request.Header.Set("Content-Type", "application/json")
 	if stream {
 		request.Header.Set("Accept", "text/event-stream")
 	}
-	response, err := c.http.Do(request)
+	if hasAttempt && attempt.UserAgent != "" {
+		request.Header.Set("User-Agent", attempt.UserAgent)
+	}
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, "", &provider.Error{Kind: provider.ErrorRetryable, Err: err}
 	}

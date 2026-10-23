@@ -20,13 +20,21 @@ type Trace struct {
 	bodies atomic.Int64
 }
 
-// Open creates a private per-process trace file in the user cache directory.
-func Open() (*Trace, error) {
+// LogDirectory is the user-cache folder that holds request traces.
+func LogDirectory() (string, error) {
 	cacheHome, err := os.UserCacheDir()
 	if err != nil {
-		return nil, fmt.Errorf("resolve user cache directory: %w", err)
+		return "", fmt.Errorf("resolve user cache directory: %w", err)
 	}
-	directory := filepath.Join(cacheHome, "mindctl", "logs")
+	return filepath.Join(cacheHome, "mindctl", "logs"), nil
+}
+
+// Open creates a private per-process trace file in the user cache directory.
+func Open() (*Trace, error) {
+	directory, err := LogDirectory()
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, fmt.Errorf("create debug log directory: %w", err)
 	}

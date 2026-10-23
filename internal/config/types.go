@@ -24,6 +24,7 @@ type ProviderAuthMode string
 
 const (
 	ProviderAuthAPIKey                  ProviderAuthMode = "api_key"
+	ProviderAuthOAuth                   ProviderAuthMode = "oauth"
 	ProviderAuthChatGPTOAuthPassthrough ProviderAuthMode = "chatgpt_oauth_passthrough"
 	ProviderAuthClaudeOAuthPassthrough  ProviderAuthMode = "claude_oauth_passthrough"
 )
@@ -43,8 +44,14 @@ type Config struct {
 	SQLite         SQLiteConfig         `yaml:"sqlite"`
 	Encryption     EncryptionConfig     `yaml:"encryption"`
 	Routing        RoutingConfig        `yaml:"routing"`
+	OAuth          OAuthConfig          `yaml:"oauth"`
+	Management     ManagementConfig     `yaml:"management"`
+	Plugins        PluginsConfig        `yaml:"plugins"`
+	Home           HomeConfig           `yaml:"home"`
 	Providers      []ProviderConfig     `yaml:"providers"`
 	Models         []ModelConfig        `yaml:"models"`
+	// Path is the file New was given. It is not part of the YAML document.
+	Path string `yaml:"-"`
 }
 
 // HeadroomConfig controls the optional locally managed compression sidecar.
@@ -137,8 +144,63 @@ type RoutingConfig struct {
 	UnderspecificationFloors   []SignalFloorConfig `yaml:"underspecification_floors"`
 	// ExpectedOutputTokens ranks candidates by this output size when no
 	// session usage has been observed. Zero keeps the legacy max_tokens estimate.
-	ExpectedOutputTokens int64         `yaml:"expected_output_tokens"`
-	Session              SessionConfig `yaml:"session"`
+	ExpectedOutputTokens int64                `yaml:"expected_output_tokens"`
+	Session              SessionConfig        `yaml:"session"`
+	Accounts             AccountRoutingConfig `yaml:"accounts"`
+	Aliases              []AliasConfig        `yaml:"aliases"`
+}
+
+// OAuthConfig points at the local directory of account auth files.
+// An empty AuthDir means the caller has not chosen one; the serve command
+// fills the user-config default. Secrets in that directory are never copied
+// into this struct.
+type OAuthConfig struct {
+	AuthDir string `yaml:"auth_dir"`
+}
+
+// AccountRoutingConfig is the named-model account pool policy.
+// Zero values are not defaults; accounts.Settings.Normalize applies those
+// when a pool is built. An empty strategy is valid.
+type AccountRoutingConfig struct {
+	Strategy            string        `yaml:"strategy"`
+	SessionAffinity     bool          `yaml:"session_affinity"`
+	SessionAffinityTTL  time.Duration `yaml:"session_affinity_ttl"`
+	Subagents           *bool         `yaml:"subagents"`
+	RebindOn            string        `yaml:"rebind_on"`
+	RequestRetry        *int          `yaml:"request_retry"`
+	MaxRetryCredentials int           `yaml:"max_retry_credentials"`
+	MaxRetryInterval    time.Duration `yaml:"max_retry_interval"`
+	DisableCooling      bool          `yaml:"disable_cooling"`
+	ForceModelPrefix    bool          `yaml:"force_model_prefix"`
+}
+
+// AliasConfig maps a client model name to one catalog model.
+type AliasConfig struct {
+	Name     string `yaml:"name"`
+	Alias    string `yaml:"alias"`
+	Provider string `yaml:"provider"`
+}
+
+// ManagementConfig exposes the authenticated control API when Enabled.
+type ManagementConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	TokenEnv string `yaml:"token_env"`
+}
+
+// PluginsConfig loads optional executors and translators.
+// The host stays disabled until Enabled is set, and a plugin cannot replace
+// the classifier.
+type PluginsConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
+}
+
+// HomeConfig delegates named-model account choice when a bootstrap JWT is set.
+// The classifier still chooses the model when the request does not name one.
+type HomeConfig struct {
+	Endpoint                string `yaml:"endpoint"`
+	DisableClusterDiscovery bool   `yaml:"disable_cluster_discovery"`
+	JWT                     string `yaml:"-"`
 }
 
 // Session defaults. MaxSessionHorizonTurns bounds how far ahead a sticky
@@ -234,6 +296,12 @@ type ProviderConfig struct {
 	// login is used instead of any caller credential. Only valid with
 	// chatgpt_oauth_passthrough.
 	CredentialFile string `yaml:"credential_file"`
+	// Protocol selects the native adapter used for this provider. Empty keeps
+	// the built-in protocol for openai, anthropic, gemini, deepseek, and meta.
+	// openai-compatible covers subscription gateways such as OpenRouter.
+	Protocol string `yaml:"protocol"`
+	// Prefix limits the configured credential to model IDs with this prefix.
+	Prefix string `yaml:"prefix"`
 }
 
 // AuthMode returns the configured upstream authentication mode while retaining
@@ -407,6 +475,13 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			if provider.CredentialFile != "" && !filepath.IsAbs(provider.CredentialFile) {
 				errs = append(errs, fmt.Errorf("provider %s credential_file must be an absolute path", provider.ID))
 			}
+		case ProviderAuthOAuth:
+			if provider.APIKeyEnv != "" {
+				requireEnv("provider "+provider.ID, provider.APIKeyEnv)
+			}
+			if provider.CredentialEnv != "" || provider.CredentialFile != "" {
+				errs = append(errs, fmt.Errorf("provider %s must not configure credential_env or credential_file with oauth", provider.ID))
+			}
 		case ProviderAuthClaudeOAuthPassthrough:
 			claudeOAuthConfigured = true
 			if provider.ID != "anthropic" {
@@ -424,6 +499,19 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		default:
 			errs = append(errs, fmt.Errorf("unknown provider authentication mode for %s: %s", provider.ID, provider.Auth))
 		}
+		if !validProviderProtocol(provider.Protocol) {
+			errs = append(errs, fmt.Errorf("unknown protocol for provider %s: %s", provider.ID, provider.Protocol))
+		}
+		switch provider.ID {
+		case "openai", "anthropic", "gemini", "deepseek", "meta":
+		default:
+			if provider.Protocol == "" {
+				errs = append(errs, fmt.Errorf("provider %s requires a protocol", provider.ID))
+			}
+		}
+	}
+	if cfg.Management.Enabled {
+		requireEnv("management", cfg.Management.TokenEnv)
 	}
 	if chatGPTOAuthConfigured && (strings.EqualFold(clientAuthHeader, "Authorization") || strings.EqualFold(clientAuthHeader, "ChatGPT-Account-Id")) {
 		errs = append(errs, fmt.Errorf("client authentication header %s conflicts with ChatGPT OAuth", clientAuthHeader))
@@ -528,6 +616,45 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		if !probability(session.DefaultCacheHitRatio) {
 			errs = append(errs, errors.New("routing session default_cache_hit_ratio must be finite and in [0, 1]"))
 		}
+		switch cfg.Routing.Accounts.Strategy {
+		case "", "round-robin", "weighted-round-robin", "fill-first":
+		default:
+			errs = append(errs, fmt.Errorf("unknown account routing strategy: %s", cfg.Routing.Accounts.Strategy))
+		}
+		switch cfg.Routing.Accounts.RebindOn {
+		case "", "any", "quota":
+		default:
+			errs = append(errs, fmt.Errorf("unknown account rebind mode: %s", cfg.Routing.Accounts.RebindOn))
+		}
+		if cfg.Routing.Accounts.SessionAffinityTTL < 0 {
+			errs = append(errs, errors.New("account session affinity ttl must not be negative"))
+		}
+		if cfg.Routing.Accounts.RequestRetry != nil && *cfg.Routing.Accounts.RequestRetry < 0 {
+			errs = append(errs, errors.New("account request retry must not be negative"))
+		}
+		if cfg.Routing.Accounts.MaxRetryCredentials < 0 {
+			errs = append(errs, errors.New("account max retry credentials must not be negative"))
+		}
+		if cfg.Routing.Accounts.MaxRetryInterval < 0 {
+			errs = append(errs, errors.New("account max retry interval must not be negative"))
+		}
+		aliases := make(map[string]struct{}, len(cfg.Routing.Aliases))
+		for _, alias := range cfg.Routing.Aliases {
+			if alias.Name == "" || alias.Alias == "" {
+				errs = append(errs, errors.New("model alias requires name and alias"))
+				continue
+			}
+			if _, exists := aliases[alias.Alias]; exists {
+				errs = append(errs, fmt.Errorf("duplicate model alias: %s", alias.Alias))
+			}
+			aliases[alias.Alias] = struct{}{}
+			if !aliasModelExists(cfg, alias.Name) {
+				errs = append(errs, fmt.Errorf("model alias %s references missing model %s", alias.Alias, alias.Name))
+			}
+			if alias.Provider != "" && !catalogHasProvider(cfg, alias.Provider) {
+				errs = append(errs, fmt.Errorf("model alias %s references missing provider %s", alias.Alias, alias.Provider))
+			}
+		}
 		for _, rules := range []struct {
 			name  string
 			rules []SignalFloorConfig
@@ -591,6 +718,24 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func validProviderProtocol(protocol string) bool {
+	switch protocol {
+	case "", "openai", "openai-compatible", "codex", "anthropic", "gemini":
+		return true
+	default:
+		return false
+	}
+}
+
+func aliasModelExists(cfg Config, id string) bool {
+	for _, model := range cfg.Models {
+		if model.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func validClassifierEndpoint(raw string) bool {
