@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.52](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.52) (10/23/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue with missing headroom compression on streams ([ab08784](https://github.com/storm-software/mindctl/commit/ab08784))
+
 ## [0.1.51](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.51) (10/23/2026)
 
 ### Features
