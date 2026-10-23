@@ -94,7 +94,13 @@ func (s *Service) Stream(ctx context.Context, in Input, writer EventWriter) erro
 		request.ID, request.Model, request.PreviousResponseID = turn.ResponseID, candidate.ModelID, ""
 		request.Input = turn.TranscriptFor(candidate.Provider)
 		request = providerScopedRequest(request, candidate.Provider)
-		request, compression := s.compress(ctx, model, turn, candidate.Provider, attempt.ID, request)
+		request, compression, err := s.compress(ctx, model, turn, candidate.Provider, attempt.ID, request)
+		if err != nil {
+			if failErr := s.failStreamAttempt(ctx, attempt, "", err); failErr != nil {
+				return errors.Join(err, failErr)
+			}
+			return err
+		}
 		if err := writer.Start(StreamMetadata{ResponseID: turn.ResponseID, Model: candidate.ModelID, Provider: candidate.Provider, DecisionID: attempt.ID, Tier: candidate.Tier, Attempts: index + 1}); err != nil {
 			return s.failStreamAttempt(ctx, attempt, "", err)
 		}

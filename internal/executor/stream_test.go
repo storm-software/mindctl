@@ -13,6 +13,7 @@ import (
 	"github.com/storm-software/mindctl/internal/contentcrypto"
 	"github.com/storm-software/mindctl/internal/conversation"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/headroom"
 	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/provider"
 	"github.com/storm-software/mindctl/internal/router"
@@ -25,6 +26,18 @@ func TestStreamRetriesBeforeFirstVisibleEvent(t *testing.T) {
 	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
 	if err != nil || deps.writer.text() != "ok" || deps.provider.calls != 2 || deps.conversations.failCalls != 1 {
 		t.Fatalf("text=%q calls=%d failed=%d err=%v", deps.writer.text(), deps.provider.calls, deps.conversations.failCalls, err)
+	}
+}
+
+func TestStreamDoesNotForwardUncompressedRequestWhenHeadroomFails(t *testing.T) {
+	deps := newStreamDependencies(successfulStream("unexpected"))
+	deps.executor.compressor = fakeCompressor{err: headroom.ErrUnavailable}
+	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
+	if !errors.Is(err, headroom.ErrUnavailable) {
+		t.Fatalf("error = %v, want Headroom unavailable", err)
+	}
+	if deps.provider.calls != 0 || deps.conversations.failCalls != 1 || deps.writer.text() != "" {
+		t.Fatalf("provider calls=%d fail calls=%d text=%q", deps.provider.calls, deps.conversations.failCalls, deps.writer.text())
 	}
 }
 

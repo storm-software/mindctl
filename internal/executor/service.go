@@ -194,11 +194,10 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 	return s.executeDecision(ctx, in, turn, decision)
 }
 
-// compress returns the original request when Headroom fails, so a compression
-// problem degrades savings instead of failing the turn.
-func (s *Service) compress(ctx context.Context, model domain.Model, turn conversation.Turn, providerID, attemptID string, request inference.Request) (inference.Request, headroom.Metrics) {
+// compress prevents an uncompressed provider request when enabled Headroom fails.
+func (s *Service) compress(ctx context.Context, model domain.Model, turn conversation.Turn, providerID, attemptID string, request inference.Request) (inference.Request, headroom.Metrics, error) {
 	if s.compressor == nil {
-		return request, headroom.Metrics{}
+		return request, headroom.Metrics{}, nil
 	}
 	compressed, metrics, err := s.compressor.Compress(ctx, model, turn.AffinityID(), providerID, request)
 	if err != nil {
@@ -208,9 +207,9 @@ func (s *Service) compress(ctx context.Context, model domain.Model, turn convers
 			"provider", providerID,
 			"error", err.Error(),
 		)
-		return request, headroom.Metrics{}
+		return inference.Request{}, headroom.Metrics{}, headroom.ErrUnavailable
 	}
-	return compressed, metrics
+	return compressed, metrics, nil
 }
 
 func (s *Service) executeDecision(ctx context.Context, in Input, turn conversation.Turn, decision router.Decision) (Output, error) {
@@ -239,7 +238,13 @@ func (s *Service) executeDecision(ctx context.Context, in Input, turn conversati
 	request.PreviousResponseID = ""
 	request.Input = turn.TranscriptFor(decision.Provider)
 	request = providerScopedRequest(request, decision.Provider)
-	request, compression := s.compress(ctx, model, turn, decision.Provider, attempt.ID, request)
+	request, compression, err := s.compress(ctx, model, turn, decision.Provider, attempt.ID, request)
+	if err != nil {
+		if failErr := s.conversations.FailAttempt(ctx, attempt, "", err); failErr != nil {
+			return Output{}, errors.Join(err, failErr)
+		}
+		return Output{}, err
+	}
 	result, err := adapter.Execute(providerScopedContext(ctx, decision.Provider), model, request)
 	if err != nil {
 		attributes := []any{

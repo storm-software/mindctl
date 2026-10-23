@@ -42,7 +42,8 @@ func TestCursorHarnessSetupOffOnUninstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output, "OpenAI base URL") || !strings.Contains(output, "Authorization: Bearer") {
+	if !strings.Contains(output, "OpenAI base URL") || !strings.Contains(output, "Authorization: Bearer") ||
+		!strings.Contains(output, "headroom.enabled: true") || !strings.Contains(output, "Cursor's built-in models") {
 		t.Fatalf("setup output:\n%s", output)
 	}
 	state, err := cursorState(home)

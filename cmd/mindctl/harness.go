@@ -307,6 +307,8 @@ func writeSetupNextSteps(output io.Writer, selected []string) error {
 		lines = append(lines,
 			"  Cursor: quit Cursor first. Paste the gateway token into Settings → Models → OpenAI API key",
 			"  and choose the mindctl-auto model. Restart Cursor after setup.",
+			"  To compress routed requests, set headroom.enabled: true in the gateway config and restart Mindctl.",
+			"  Cursor's built-in models, Auto, Tab, Cloud Agents, and CLI do not use this OpenAI override.",
 			"  POST /v1/chat/completions checks Authorization: Bearer against the gateway token,",
 			"  including when Claude and Codex use X-Mindctl-Token.",
 		)
