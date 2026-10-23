@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.51](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.51) (10/23/2026)
+
+### Features
+
+- **mindctl:** Added Cursor to list of harnesses with support for routing ([af3f7bf](https://github.com/storm-software/mindctl/commit/af3f7bf))
+
 ## [0.1.48](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.48) (10/08/2026)
 
 ### Features
