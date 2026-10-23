@@ -135,7 +135,7 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 	}{
 		"claude-fable-5-1":  {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, cacheWrite: 12.5, output: 50},
 		"claude-opus-5-5":   {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, cacheWrite: 5, output: 20},
-		"claude-sonnet-5-5": {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .2, cacheWrite: 2.5, output: 10},
+		"claude-sonnet-5-5": {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .1, cacheWrite: 2.5, output: 10},
 		"claude-haiku-4-5":  {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, cacheWrite: 1.25, output: 5},
 	}
 	for _, model := range cfg.Models {
@@ -176,6 +176,7 @@ func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
 	}{
 		"muse-spark-1.3":             {input: 1.25, cachedInput: .15, output: 4.25},
 		"muse-spark-1.3-contributor": {input: .1, cachedInput: .002, output: .2},
+		"muse-wonder":                {input: 4, cachedInput: .2, output: 20},
 	}
 	for _, model := range cfg.Models {
 		want, ok := wantPrices[model.ID]
@@ -192,6 +193,58 @@ func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
 	}
 	for modelID := range wantPrices {
 		t.Errorf("missing shipped Meta model %q", modelID)
+	}
+	for _, model := range cfg.Models {
+		if model.ID == "muse-wonder" && model.CacheWriteInputPrice() != 0 {
+			t.Errorf("muse-wonder cache write price = %g, want 0", model.CacheWriteInputPrice())
+		}
+	}
+}
+
+func TestShippedExampleIncludesGeminiModelCatalog(t *testing.T) {
+	cfg, err := Read("../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("Read shipped example: %v", err)
+	}
+
+	providers := make(map[string]ProviderConfig, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		providers[provider.ID] = provider
+	}
+	gemini, ok := providers["gemini"]
+	if !ok {
+		t.Fatal("shipped example does not enable the Gemini provider")
+	}
+	if gemini.BaseURL != "https://generativelanguage.googleapis.com" || gemini.AuthMode() != ProviderAuthAPIKey || gemini.APIKeyEnv != "GEMINI_API_KEY" {
+		t.Errorf("Gemini provider = %#v, want api-key provider at https://generativelanguage.googleapis.com using GEMINI_API_KEY", gemini)
+	}
+
+	wantModels := map[string]struct {
+		tier                       string
+		input, cachedInput, output float64
+	}{
+		"gemini-3.1-pro":   {tier: "T5", input: 2, cachedInput: .2, output: 12},
+		"gemini-4-argon":   {tier: "T5", input: 2, cachedInput: .1, output: 10},
+		"gemini-3.8-flash": {tier: "T3", input: .75, cachedInput: .075, output: 3.75},
+	}
+	for _, model := range cfg.Models {
+		want, ok := wantModels[model.ID]
+		if !ok {
+			continue
+		}
+		delete(wantModels, model.ID)
+		if model.Provider != "gemini" || model.Tier != want.tier || !model.Available {
+			t.Errorf("model %s provider/tier/available = %q/%q/%t, want gemini/%s/true", model.ID, model.Provider, model.Tier, model.Available, want.tier)
+		}
+		if model.ContextWindow != 1_000_000 || model.MaxOutputTokens != 65_536 {
+			t.Errorf("model %s context/output = %d/%d, want 1000000/65536", model.ID, model.ContextWindow, model.MaxOutputTokens)
+		}
+		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.CacheWriteInputPrice() != 0 || model.OutputPrice != want.output {
+			t.Errorf("model %s prices = input %g cached %g cache-write %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.CacheWriteInputPrice(), model.OutputPrice)
+		}
+	}
+	for modelID := range wantModels {
+		t.Errorf("missing shipped Gemini model %q", modelID)
 	}
 }
 

@@ -114,6 +114,30 @@ func TestMessagesRouteIsOptInAndAuthenticated(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsUsesAuthorizationBearer(t *testing.T) {
+	cfg, env := fixture(t)
+	cfg.ClientAuth.Header = "X-Mindctl-Token"
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"mindctl-auto","messages":[]}`))
+	request.Header.Set("X-Mindctl-Token", env["TEST_GATEWAY_TOKEN"])
+	response := httptest.NewRecorder()
+	app.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("custom header status=%d body=%s", response.Code, response.Body.String())
+	}
+	request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"mindctl-auto","messages":[]}`))
+	request.Header.Set("Authorization", "Bearer "+env["TEST_GATEWAY_TOKEN"])
+	response = httptest.NewRecorder()
+	app.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("authorized status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestCatalogPreservesExplicitOnly(t *testing.T) {
 	cfg, env := fixture(t)
 	cfg.Models[0].ExplicitOnly = true

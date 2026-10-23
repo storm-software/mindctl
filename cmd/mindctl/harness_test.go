@@ -130,8 +130,11 @@ func TestSetupMenuSelectsHarnesses(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home := setupHome(t)
+			if strings.Contains(test.stdin, "all") {
+				seedCursorState(t, home)
+			}
 			output, err := runSetupCommand(t, test.stdin)
-			if !strings.Contains(output, "1) Claude Code") || !strings.Contains(output, "2) Codex") {
+			if !strings.Contains(output, "1) Claude Code") || !strings.Contains(output, "2) Codex") || !strings.Contains(output, "3) Cursor") {
 				t.Fatalf("menu missing harnesses:\n%s", output)
 			}
 			if test.wantErr != "" {

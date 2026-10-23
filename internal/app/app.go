@@ -260,6 +260,11 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	mux.Handle("/healthz", operations)
 	mux.Handle("/readyz", operations)
 	mux.Handle("/v1/responses", api.Authenticate(responses, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}))
+	// Cursor's OpenAI override can only send Authorization. Keep that check on
+	// this route so the configured header can stay a separate gateway token
+	// for Claude and Codex.
+	chat := captureBodies(api.NewChatHandler(a.executor, responsesConfig))
+	mux.Handle("/v1/chat/completions", api.Authenticate(chat, api.ChatAuthorizationHeader, appTokens{{ID: "configured-client", Value: clientToken}}))
 	if cfg.ClaudeMessages.Enabled {
 		messages := api.UseGatewayCredentials(api.NewMessagesHandler(a.executor, responsesConfig), gatewayClaudeToken, gatewayCodexAuthFile)
 		messages = captureBodies(api.CaptureNativeClaudeOAuth(messages))

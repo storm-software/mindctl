@@ -159,12 +159,13 @@ devenv shell -- go run ./cmd/mindctl serve --config ./config.yaml
 
 The Mindctl command line interface provides several commands to manage the application, its configuration, models, and providers. A complete list of available commands can be found in the [CLI documentation](docs/cli/mindctl.md).
 
-Set up Claude Code, Codex, or both to use the Mindctl router:
+Set up Claude Code, Codex, Cursor, or any combination to use the Mindctl router:
 
 ```sh
 mindctl                   # choose one or more harnesses from a menu
 mindctl --claude          # skip the menu, set up Claude Code
 mindctl --codex           # skip the menu, set up Codex
+mindctl --cursor          # skip the menu, set up Cursor
 mindctl --codex --claude  # set up both
 ```
 
@@ -186,12 +187,21 @@ UserPromptSubmit and answers `$mindctl-on`, `$mindctl-off`, and
 `~/.codex/skills/` are the fallback. Files mindctl did not write are left alone.
 `--uninstall` removes the hooks and skills too. Other settings and
 comments are kept, and the original file is saved beside it with a
-`.mindctl-backup` suffix. Setup does not store the gateway token; see the
+`.mindctl-backup` suffix. Cursor setup requires Cursor to be quit, because Cursor
+rewrites `state.vscdb` while it is open. It sets `openAIBaseUrl` to
+`http://127.0.0.1:8080/v1` and `useOpenAIKey` to true, and adds a `mindctl-auto`
+model. Restart Cursor afterward. Paste the gateway token into Settings → Models
+→ OpenAI API key; setup does not write that key. Cursor then calls
+`POST /v1/chat/completions`, which checks `Authorization: Bearer` against the
+gateway token even when `client_auth.header` is `X-Mindctl-Token`. This covers
+local Chat and Agent requests that use the OpenAI key. Tab, Auto, Cloud
+Agents, the Cursor CLI, and Cursor's own models keep using Cursor's service.
+Setup does not store the gateway token; see the
 sections below for the gateway configuration each harness needs.
 
 Switch a harness between the router and its own provider without losing the
 router settings, or remove them entirely. Each command accepts `--claude`,
-`--codex`, or both, and shows the same menu when neither is given:
+`--codex`, `--cursor`, or a combination, and shows the same menu when none is given:
 
 ```sh
 mindctl off --codex          # or: mindctl --off --codex
@@ -200,26 +210,30 @@ mindctl uninstall --claude   # or: mindctl --uninstall --claude
 ```
 
 `off` removes `ANTHROPIC_BASE_URL` from Claude Code's settings (recording it in
-`~/.claude/mindctl-off.json`) and comments out Codex's `model_provider` and
-`model` lines, leaving `[model_providers.mindctl]` in place. `on` restores them;
-a Codex model chosen while routing was off is kept. `uninstall` removes the
-router settings, the parked record, and the `[model_providers.mindctl]` table.
+`~/.claude/mindctl-off.json`), comments out Codex's `model_provider` and
+`model` lines, leaving `[model_providers.mindctl]` in place, and clears Cursor's
+OpenAI base URL and `useOpenAIKey` while leaving `mindctl-auto` in the model
+list. `on` restores them; a Codex model chosen while routing was off is kept.
+`uninstall` removes the router settings, the parked record, the
+`[model_providers.mindctl]` table, and Cursor's `mindctl-auto` model entry.
 Changes take effect the next time the harness starts.
 
-Check whether Codex or Claude Code is configured to use the Mindctl router:
+Check whether Codex, Claude Code, or Cursor is configured to use the Mindctl router:
 
 ```sh
 mindctl status
 mindctl status codex
 mindctl status claude
+mindctl status cursor
 ```
 
 The first command lists harnesses and their configuration status
 (`connected`, `off`, or `disconnected`); the other commands print one status. Codex checks the top-level `model_provider` in
 `~/.codex/config.toml`; Claude checks the global `env.ANTHROPIC_BASE_URL` in
 `~/.claude/settings.json` against `http://127.0.0.1:8080` (with one optional
-trailing slash). Neither command checks project-level or shell overrides or
-tests whether the gateway is running or reachable.
+trailing slash). Cursor checks `openAIBaseUrl` and `useOpenAIKey` in
+`state.vscdb`. None of the commands check project-level or shell overrides or
+test whether the gateway is running or reachable.
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />

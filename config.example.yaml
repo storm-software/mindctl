@@ -9,6 +9,10 @@ client_auth:
   header: X-Mindctl-Token
   max_body_bytes: 16777216
 
+# Cursor's OpenAI base URL override can only send Authorization: Bearer.
+# POST /v1/chat/completions checks that bearer against token_env even when
+# header above is X-Mindctl-Token for Claude Code and Codex.
+
 # Opt in to Claude Code's Anthropic Messages endpoint with a separate client
 # authentication header and the Anthropic OAuth provider configured below.
 # claude_messages:
@@ -115,6 +119,11 @@ providers:
     base_url: https://api.meta.ai/v1
     auth: api_key
     api_key_env: MUSE_API_KEY
+  # Gemini generateContent API. The client appends /v1beta/models/{id}.
+  - id: gemini
+    base_url: https://generativelanguage.googleapis.com
+    auth: api_key
+    api_key_env: GEMINI_API_KEY
 
 models:
   # ChatGPT Pro default catalog. GPT-6 availability may still be rolling out
@@ -311,7 +320,7 @@ models:
     max_output_tokens: 128000
     available: true
     input_price: 2
-    cached_input_price_usd_per_million: 0.2
+    cached_input_price_usd_per_million: 0.1
     cache_write_input_price_usd_per_million: 2.5
     output_price: 10
     per_request_price_usd: 0
@@ -354,6 +363,58 @@ models:
     success_prior: 1
     task_success_priors: {}
 
+  # Google models from https://cursor.com/docs/models-and-pricing. The page
+  # lists no cache-write price, so that rate is an explicit zero. Context is
+  # the documented 1M maximum. Grok and Composer are Cursor-hosted and are
+  # not listed here.
+  - id: gemini-3.1-pro
+    provider: gemini
+    tier: T5
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1000000
+    max_output_tokens: 65536
+    available: true
+    input_price: 2
+    cached_input_price_usd_per_million: 0.2
+    cache_write_input_price_usd_per_million: 0
+    output_price: 12
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gemini-4-argon
+    provider: gemini
+    tier: T5
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1000000
+    max_output_tokens: 65536
+    available: true
+    input_price: 2
+    cached_input_price_usd_per_million: 0.1
+    cache_write_input_price_usd_per_million: 0
+    output_price: 10
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gemini-3.8-flash
+    provider: gemini
+    tier: T3
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1000000
+    max_output_tokens: 65536
+    available: true
+    input_price: 0.75
+    cached_input_price_usd_per_million: 0.075
+    cache_write_input_price_usd_per_million: 0
+    output_price: 3.75
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
   # Muse Spark models support the configured portable multimodal and agentic
   # capabilities. Prices are USD per million tokens.
   - id: muse-spark-1.3
@@ -381,6 +442,23 @@ models:
     input_price: 0.10
     cached_input_price_usd_per_million: 0.002
     output_price: 0.20
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  # https://cursor.com/docs/models-and-pricing. No separate cache-write charge.
+  - id: muse-wonder
+    provider: meta
+    tier: T5
+    capabilities: [chat, tools, images, json_schema]
+    context_window: 1000000
+    max_output_tokens: 131072
+    available: true
+    input_price: 4
+    cached_input_price_usd_per_million: 0.2
+    cache_write_input_price_usd_per_million: 0
+    output_price: 20
     per_request_price_usd: 0
     latency_p95: 0s
     success_prior: 1

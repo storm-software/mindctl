@@ -73,6 +73,16 @@ var harnesses = []harness{
 		On:          onCodex,
 		Uninstall:   uninstallCodex,
 	},
+	{
+		ID:          "cursor",
+		Name:        "Cursor",
+		Description: "points the OpenAI base URL in Cursor's state database at the gateway",
+		State:       cursorState,
+		Setup:       setupCursor,
+		Off:         offCursor,
+		On:          onCursor,
+		Uninstall:   uninstallCursor,
+	},
 }
 
 func findHarness(id string) (harness, bool) {
@@ -138,7 +148,7 @@ func newHarnessActionCommand(use, short string, action harnessAction) *cobra.Com
 	command := &cobra.Command{
 		Use:     use,
 		Short:   short,
-		Example: fmt.Sprintf("  mindctl %[1]s\n  mindctl %[1]s --claude\n  mindctl %[1]s --codex --claude", use),
+		Example: fmt.Sprintf("  mindctl %[1]s\n  mindctl %[1]s --claude\n  mindctl %[1]s --cursor\n  mindctl %[1]s --codex --claude", use),
 		Args:    noArgs("unexpected arguments for " + use),
 		RunE: func(command *cobra.Command, _ []string) error {
 			return runHarnessAction(command, requestedHarnesses(command), action)
@@ -232,7 +242,7 @@ func promptHarnesses(input io.Reader, output io.Writer, home, actionName string)
 
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
-				return nil, errors.New("no harness selected; pass --claude or --codex to skip the menu")
+				return nil, errors.New("no harness selected; pass --claude, --codex, or --cursor to skip the menu")
 			}
 			return nil, fmt.Errorf("read harness selection: %w", readErr)
 		}
@@ -291,6 +301,14 @@ func writeSetupNextSteps(output io.Writer, selected []string) error {
 			"  Claude Code: set `client_auth.header: X-Mindctl-Token` and `claude_messages.enabled: true`",
 			"  in the gateway config, and launch Claude with",
 			"  ANTHROPIC_CUSTOM_HEADERS=\"X-Mindctl-Token: ${MINDCTL_GATEWAY_TOKEN}\".",
+		)
+	}
+	if slices.Contains(selected, "cursor") {
+		lines = append(lines,
+			"  Cursor: quit Cursor first. Paste the gateway token into Settings → Models → OpenAI API key",
+			"  and choose the mindctl-auto model. Restart Cursor after setup.",
+			"  POST /v1/chat/completions checks Authorization: Bearer against the gateway token,",
+			"  including when Claude and Codex use X-Mindctl-Token.",
 		)
 	}
 

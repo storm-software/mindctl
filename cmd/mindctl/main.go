@@ -82,12 +82,12 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	root := &cobra.Command{
 		Use:   "mindctl",
 		Short: "Route coding harnesses through the Mindctl gateway",
-		Long: "Point Claude Code, Codex, or both at the Mindctl gateway. Without a harness\n" +
+		Long: "Point Claude Code, Codex, or Cursor at the Mindctl gateway. Without a harness\n" +
 			"flag, mindctl lists the harnesses and asks which ones to use.\n\n" +
 			"--off parks the router settings so the harness uses its provider directly,\n" +
 			"--on restores them, and --uninstall removes them.\n\n" +
 			"Run the gateway itself with `mindctl serve`.",
-		Example: "  mindctl\n  mindctl --claude\n  mindctl --codex --claude\n" +
+		Example: "  mindctl\n  mindctl --claude\n  mindctl --codex --claude\n  mindctl --cursor\n" +
 			"  mindctl --off --codex\n  mindctl --on --codex\n  mindctl --uninstall --claude",
 		Args:          noArgs("unexpected positional arguments"),
 		SilenceErrors: true,
@@ -809,9 +809,9 @@ func newProviderListCommand(settings *viper.Viper) *cobra.Command {
 		},
 	}
 
-    listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
+	listCommand.Flags().BoolVar(&all, "all", false, "display enabled and disabled providers")
 
-    return listCommand
+	return listCommand
 }
 
 func newProviderCommand(settings *viper.Viper) *cobra.Command {

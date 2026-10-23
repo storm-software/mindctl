@@ -1043,7 +1043,7 @@ func TestRootHelpDocumentsVersionAndConfig(t *testing.T) {
 	if err := run(context.Background(), []string{"--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
-	for _, want := range []string{"version", "status", "serve", "--claude", "--codex", "--config", "--debug"} {
+	for _, want := range []string{"version", "status", "serve", "--claude", "--codex", "--cursor", "--config", "--debug"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
 		}

@@ -1,3 +1,4 @@
 # Add workspace specific phrases here
 
 mindctl
+laya
