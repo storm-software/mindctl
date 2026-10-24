@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.54](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.54) (10/24/2026)
+
+### Bug Fixes
+
+- **mindctl:** Add more detailed status reporting to the CLI ([632e541](https://github.com/storm-software/mindctl/commit/632e541))
+
 ## [0.1.53](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.53) (10/23/2026)
 
 ### Features
