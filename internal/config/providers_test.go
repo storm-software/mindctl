@@ -156,8 +156,12 @@ func TestProvidersFileRejectsUnknownAndDuplicateEntries(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg := providerStateCatalog()
-			if err := ApplyProvidersFile(path, &cfg); err == nil {
+			err := ApplyProvidersFile(path, &cfg)
+			if err == nil {
 				t.Fatal("ApplyProvidersFile succeeded")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("error %q does not name the providers file", err)
 			}
 		})
 	}

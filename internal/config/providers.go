@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -124,7 +125,8 @@ func readProvidersFile(path string, cfg Config) (ProvidersFile, bool, error) {
 		state.Providers = make(map[string][]string)
 	}
 	if err := validateProvidersFile(state, cfg); err != nil {
-		return ProvidersFile{}, true, err
+		// Serve and every models command read this file, so name it and the fix.
+		return ProvidersFile{}, true, fmt.Errorf("providers file %s is invalid: %w (configured providers: %s); remove the entry from that file or configure it in the Mindctl config", path, err, strings.Join(configuredProviderIDs(cfg), ", "))
 	}
 	return state, true, nil
 }
@@ -145,15 +147,15 @@ func providersFileFromCatalog(cfg Config) ProvidersFile {
 func validateProvidersFile(state ProvidersFile, cfg Config) error {
 	for providerID, models := range state.Providers {
 		if !catalogHasProvider(cfg, providerID) {
-			return fmt.Errorf("providers file references unknown provider %s", providerID)
+			return fmt.Errorf("it enables provider %q, which the config does not define", providerID)
 		}
 		seen := make(map[string]struct{}, len(models))
 		for _, modelID := range models {
 			if !catalogHasModel(cfg, providerID, modelID) {
-				return fmt.Errorf("providers file references unknown model %s.%s", providerID, modelID)
+				return fmt.Errorf("it enables model %s.%s, which the config does not define", providerID, modelID)
 			}
 			if _, exists := seen[modelID]; exists {
-				return fmt.Errorf("providers file contains duplicate model %s.%s", providerID, modelID)
+				return fmt.Errorf("it lists model %s.%s more than once", providerID, modelID)
 			}
 			seen[modelID] = struct{}{}
 		}
@@ -224,6 +226,14 @@ func writeProvidersFile(path string, state ProvidersFile) error {
 		return fmt.Errorf("replace providers file: %w", err)
 	}
 	return nil
+}
+
+func configuredProviderIDs(cfg Config) []string {
+	ids := make([]string, 0, len(cfg.Providers))
+	for _, provider := range cfg.Providers {
+		ids = append(ids, provider.ID)
+	}
+	return ids
 }
 
 func catalogHasProvider(cfg Config, providerID string) bool {

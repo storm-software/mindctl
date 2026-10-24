@@ -233,6 +233,48 @@ type SavingsSummary struct {
 	Models []ModelSavings
 }
 
+// UsageFilter selects provider attempts created at or after Since. Rows group
+// them into Bucket-wide windows aligned to the viewer's UTC Offset, and Recent
+// bounds the newest attempts returned individually.
+type UsageFilter struct {
+	Since          time.Time
+	Bucket, Offset time.Duration
+	Recent         int
+}
+
+// UsageTokens sums token counts as each provider reported them; TotalTokens is
+// their disjoint sum by savings.TokenClasses. Only succeeded attempts carry
+// tokens. Costs are USD.
+type UsageTokens struct {
+	InputTokens, CachedInputTokens, CacheWriteInputTokens, OutputTokens, TotalTokens int64
+	ActualCost, BaselineCost, CompressionSavings                                     float64
+}
+
+// UsageRow aggregates one bucket's attempts that share a serving model,
+// account, and status. LatencyMillis sums the Completed attempts' durations.
+type UsageRow struct {
+	Bucket                               time.Time
+	Provider, ModelID, AccountID, Status string
+	Attempts, AutoAttempts, Completed    int64
+	LatencyMillis                        int64
+	UsageTokens
+}
+
+// UsageAttempt is one provider attempt's content-free telemetry.
+type UsageAttempt struct {
+	CreatedAt                                  time.Time
+	Provider, ModelID, AccountID, Status, Tier string
+	Auto                                       bool
+	LatencyMillis                              int64
+	UsageTokens
+}
+
+// UsageReport is the aggregate and recent attempt telemetry in a window.
+type UsageReport struct {
+	Rows   []UsageRow
+	Recent []UsageAttempt
+}
+
 // ConversationRepository adds the transactional persistence needed by the
 // gateway-owned conversation service.
 type ConversationRepository interface {

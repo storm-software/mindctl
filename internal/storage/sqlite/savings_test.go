@@ -146,3 +146,75 @@ func TestRecordSavingsRequiresSucceededAttemptOfClient(t *testing.T) {
 		t.Fatalf("foreign client savings error = %v", err)
 	}
 }
+
+func TestUsageReportGroupsAttemptsByBucketModelAndStatus(t *testing.T) {
+	db := openTestDB(t, filepath.Join(t.TempDir(), "usage.db"))
+	svc := conversation.New(db)
+	ctx := context.Background()
+	small := router.Decision{Provider: "openai", ModelID: "gpt-small", Tier: domain.T2}
+	large := router.Decision{Provider: "anthropic", ModelID: "claude-large", Tier: domain.T5}
+	for _, entry := range []struct {
+		model    string
+		decision router.Decision
+		record   savings.Record
+	}{
+		{inference.AutomaticModel, small, savings.Record{InputTokens: 100, CachedInputTokens: 40, OutputTokens: 10, ActualCost: 1, BaselineCost: 5}},
+		{inference.AutomaticModel, small, savings.Record{InputTokens: 50, OutputTokens: 5, ActualCost: 0.5, BaselineCost: 2}},
+		// Anthropic reports cache reads apart from input tokens.
+		{"claude-large", large, savings.Record{InputTokens: 10, CachedInputTokens: 20, OutputTokens: 1, ActualCost: 3, BaselineCost: 3}},
+	} {
+		_, attempt := succeededAttempt(t, svc, entry.model, entry.decision)
+		if err := svc.RecordSavings(ctx, attempt, entry.record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	turn, err := svc.Start(ctx, "client", inference.Request{
+		Model: inference.AutomaticModel, Input: []inference.Item{{Type: "message", Role: "user", Text: "request"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := svc.BeginAttempt(ctx, turn, small)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FailAttempt(ctx, failed, "req_upstream", errors.New("upstream failed")); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := db.UsageReport(ctx, storage.UsageFilter{Since: time.Now().Add(-time.Hour), Bucket: 24 * time.Hour, Offset: -7 * time.Hour, Recent: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Rows) != 3 {
+		t.Fatalf("rows = %+v", report.Rows)
+	}
+	byKey := map[string]storage.UsageRow{}
+	for _, row := range report.Rows {
+		byKey[row.ModelID+"/"+row.Status] = row
+		if local := row.Bucket.In(time.FixedZone("", -7*3600)); local.Hour() != 0 || local.Minute() != 0 {
+			t.Fatalf("bucket %v is not local midnight", row.Bucket)
+		}
+	}
+	if row := byKey["gpt-small/succeeded"]; row.Attempts != 2 || row.AutoAttempts != 2 || row.Completed != 2 ||
+		row.InputTokens != 150 || row.TotalTokens != 165 || math.Abs(row.BaselineCost-row.ActualCost-5.5) > 1e-9 {
+		t.Fatalf("small row = %+v", row)
+	}
+	if row := byKey["gpt-small/failed"]; row.Attempts != 1 || row.Completed != 1 || row.TotalTokens != 0 {
+		t.Fatalf("failed row = %+v", row)
+	}
+	if row := byKey["claude-large/succeeded"]; row.AutoAttempts != 0 || row.TotalTokens != 31 {
+		t.Fatalf("large row = %+v", row)
+	}
+	if len(report.Recent) != 2 || report.Recent[0].Status != "failed" || report.Recent[0].Tier != "T2" || !report.Recent[0].Auto {
+		t.Fatalf("recent = %+v", report.Recent)
+	}
+
+	future, err := db.UsageReport(ctx, storage.UsageFilter{Since: time.Now().Add(time.Hour), Bucket: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(future.Rows) != 0 || len(future.Recent) != 0 {
+		t.Fatalf("future report = %+v", future)
+	}
+}

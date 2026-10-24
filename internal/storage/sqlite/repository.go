@@ -1158,3 +1158,94 @@ func (db *DB) SummarizeSavings(ctx context.Context, filter storage.SavingsFilter
 	}
 	return summary, nil
 }
+
+const usageTokenSums = `COALESCE(SUM(s.input_tokens), 0), COALESCE(SUM(s.cached_input_tokens), 0),
+	COALESCE(SUM(s.cache_write_input_tokens), 0), COALESCE(SUM(s.output_tokens), 0),
+	COALESCE(SUM(s.actual_cost), 0), COALESCE(SUM(s.baseline_cost), 0), COALESCE(SUM(s.compression_savings), 0)`
+
+// UsageReport aggregates content-free attempt telemetry for the dashboard.
+// Attempts without savings rows, such as failures, count with zero tokens.
+func (db *DB) UsageReport(ctx context.Context, filter storage.UsageFilter) (storage.UsageReport, error) {
+	if filter.Bucket <= 0 {
+		return storage.UsageReport{}, failure("validate usage filter", errors.New("bucket must be positive"))
+	}
+	var since int64
+	if !filter.Since.IsZero() {
+		since = filter.Since.UnixNano()
+	}
+	bucket, offset := filter.Bucket.Nanoseconds(), filter.Offset.Nanoseconds()
+	report := storage.UsageReport{Rows: []storage.UsageRow{}, Recent: []storage.UsageAttempt{}}
+	err := inTransaction(ctx, db.db, false, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `SELECT ((a.created_at + ?) / ?) * ? - ?, a.provider, a.model_id, a.account_id, a.status,
+			count(*), COALESCE(SUM(r.explicit_model = 0), 0), count(a.completed_at),
+			COALESCE(SUM(a.completed_at - a.created_at), 0) / 1000000, `+usageTokenSums+`
+			FROM provider_attempts a JOIN responses r ON r.id = a.response_id LEFT JOIN attempt_savings s ON s.attempt_id = a.id
+			WHERE a.created_at >= ?
+			GROUP BY 1, a.provider, a.model_id, a.account_id, a.status
+			ORDER BY 1, a.provider, a.model_id, a.account_id, a.status`, offset, bucket, bucket, offset, since)
+		if err != nil {
+			return failure("summarize usage", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row storage.UsageRow
+			var start int64
+			if err := rows.Scan(&start, &row.Provider, &row.ModelID, &row.AccountID, &row.Status,
+				&row.Attempts, &row.AutoAttempts, &row.Completed, &row.LatencyMillis,
+				&row.InputTokens, &row.CachedInputTokens, &row.CacheWriteInputTokens, &row.OutputTokens,
+				&row.ActualCost, &row.BaselineCost, &row.CompressionSavings); err != nil {
+				return failure("decode usage", err)
+			}
+			row.Bucket = time.Unix(0, start).UTC()
+			row.TotalTokens = totalTokens(row.Provider, row.UsageTokens)
+			report.Rows = append(report.Rows, row)
+		}
+		if err := rows.Err(); err != nil {
+			return failure("iterate usage", err)
+		}
+		if filter.Recent <= 0 {
+			return nil
+		}
+		recent, err := conn.QueryContext(ctx, `SELECT a.created_at, COALESCE(a.completed_at - a.created_at, 0) / 1000000,
+			a.provider, a.model_id, a.account_id, a.status, a.tier, COALESCE(r.explicit_model = 0, 0),
+			COALESCE(s.input_tokens, 0), COALESCE(s.cached_input_tokens, 0), COALESCE(s.cache_write_input_tokens, 0),
+			COALESCE(s.output_tokens, 0), COALESCE(s.actual_cost, 0), COALESCE(s.baseline_cost, 0), COALESCE(s.compression_savings, 0)
+			FROM provider_attempts a JOIN responses r ON r.id = a.response_id LEFT JOIN attempt_savings s ON s.attempt_id = a.id
+			WHERE a.created_at >= ? ORDER BY a.created_at DESC, a.id LIMIT ?`, since, filter.Recent)
+		if err != nil {
+			return failure("list recent usage", err)
+		}
+		defer recent.Close()
+		for recent.Next() {
+			var attempt storage.UsageAttempt
+			var created int64
+			var tier domain.Tier
+			if err := recent.Scan(&created, &attempt.LatencyMillis, &attempt.Provider, &attempt.ModelID, &attempt.AccountID,
+				&attempt.Status, &tier, &attempt.Auto, &attempt.InputTokens, &attempt.CachedInputTokens,
+				&attempt.CacheWriteInputTokens, &attempt.OutputTokens, &attempt.ActualCost, &attempt.BaselineCost,
+				&attempt.CompressionSavings); err != nil {
+				return failure("decode recent usage", err)
+			}
+			attempt.CreatedAt = time.Unix(0, created).UTC()
+			attempt.Tier = tier.String()
+			attempt.TotalTokens = totalTokens(attempt.Provider, attempt.UsageTokens)
+			report.Recent = append(report.Recent, attempt)
+		}
+		if err := recent.Err(); err != nil {
+			return failure("iterate recent usage", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return storage.UsageReport{}, err
+	}
+	return report, nil
+}
+
+func totalTokens(provider string, tokens storage.UsageTokens) int64 {
+	uncached, read, written, output := savings.TokenClasses(provider, inference.Usage{
+		Known: true, InputTokens: tokens.InputTokens, CachedInputTokens: tokens.CachedInputTokens,
+		CacheWriteInputTokens: tokens.CacheWriteInputTokens, OutputTokens: tokens.OutputTokens,
+	})
+	return uncached + read + written + output
+}

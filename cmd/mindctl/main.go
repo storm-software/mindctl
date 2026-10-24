@@ -170,7 +170,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 
 	root.AddCommand(newConfigCommand())
 	root.AddCommand(
-		newStatusCommand(),
+		newStatusCommand(settings),
 		newModelCommand(settings),
 		newProviderCommand(settings),
 		newHistoryCommand(settings),
@@ -185,7 +185,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	return root
 }
 
-func newStatusCommand() *cobra.Command {
+func newStatusCommand(settings *viper.Viper) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status [harness]",
 		Short: "Show harness connections to the Mindctl router",
@@ -207,8 +207,12 @@ func newStatusCommand() *cobra.Command {
 					return err
 				}
 
-				_, err = fmt.Fprintln(command.OutOrStdout(), state)
-				return err
+				if _, err := fmt.Fprintln(command.OutOrStdout(), state); err != nil {
+					return err
+				}
+
+				reportConfigError(command, settings)
+				return nil
 			}
 
 			codex, err := codexState(home)
@@ -226,8 +230,21 @@ func newStatusCommand() *cobra.Command {
 				return err
 			}
 
-			return output.Flush()
+			if err := output.Flush(); err != nil {
+				return err
+			}
+
+			reportConfigError(command, settings)
+			return nil
 		},
+	}
+}
+
+// reportConfigError surfaces the config and providers file errors that stop
+// serve from starting. Status still succeeds so harness state stays readable.
+func reportConfigError(command *cobra.Command, settings *viper.Viper) {
+	if _, err := readCommandCatalog(command, settings); err != nil {
+		fmt.Fprintf(command.ErrOrStderr(), "\nconfig error: %v\n", err)
 	}
 }
 

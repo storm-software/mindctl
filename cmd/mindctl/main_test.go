@@ -209,6 +209,34 @@ func TestStatusCommand(t *testing.T) {
 	}
 }
 
+func TestStatusReportsConfigErrors(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "missing-gateway-config"))
+	t.Setenv("XDG_STATE_HOME", home)
+	providers := filepath.Join(home, "mindctl", "providers.yaml")
+	if err := os.MkdirAll(filepath.Dir(providers), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providers, []byte("providers:\n  missing:\n    - model\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	configPath, err := filepath.Abs("../../config.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"status", "--config", configPath}, &stdout, &stderr); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.HasPrefix(stdout.String(), "HARNESS") {
+		t.Fatalf("status output = %q; want harness table", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "config error: providers file "+providers) || !strings.Contains(got, `"missing"`) {
+		t.Fatalf("status stderr = %q; want providers file error", got)
+	}
+}
+
 func TestResolveDebugUsesFlagThenEnvironmentThenConfig(t *testing.T) {
 	tests := []struct {
 		name                  string
