@@ -97,6 +97,8 @@ routing:
 
 # oauth:
 #   auth_dir: /home/you/.config/mindctl/auth
+# Enables the /v8/management/ API and its web dashboard at /dashboard/, which
+# signs in with the token from token_env.
 # management:
 #   enabled: false
 #   token_env: MINDCTL_MANAGEMENT_TOKEN

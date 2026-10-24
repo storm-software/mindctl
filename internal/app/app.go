@@ -321,9 +321,10 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		managementToken, _ := getenv(cfg.Management.TokenEnv)
 		management := &api.Management{
 			ConfigPath: cfg.Path, AuthDir: cfg.OAuth.AuthDir, Config: cfg,
-			Pool: pool, Plugins: plugins, Models: append([]domain.Model(nil), a.catalog...),
+			Pool: pool, Plugins: plugins, Models: append([]domain.Model(nil), a.catalog...), Usage: a.store.UsageReport,
 		}
 		mux.Handle("/v8/management/", api.Authenticate(management.Handler(), "Authorization", appTokens{{ID: "management", Value: managementToken}}))
+		mux.Handle("/dashboard/", api.Dashboard())
 	}
 	if cfg.ClaudeMessages.Enabled {
 		messages := api.UseGatewayCredentials(api.NewMessagesHandler(a.executor, responsesConfig), gatewayClaudeToken, gatewayCodexAuthFile)

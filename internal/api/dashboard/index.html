@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mindctl dashboard</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <span class="brand">mindctl</span>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#usage">Usage</a>
+      <a href="#accounts">Accounts</a>
+      <a href="#models">Models</a>
+      <a href="#config">Config</a>
+    </nav>
+    <button type="button" id="signout" class="quiet" hidden>Sign out</button>
+  </header>
+
+  <main>
+    <form id="login" class="card login" hidden>
+      <h1>Sign in</h1>
+      <label for="token">Management token</label>
+      <input id="token" type="password" autocomplete="current-password" required>
+      <p class="hint">The value of the environment variable named by <code>management.token_env</code>.</p>
+      <button type="submit">Sign in</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+
+    <section id="usage" class="tab" hidden>
+      <div class="filters">
+        <div class="segmented" id="range" role="group" aria-label="Time range">
+          <button type="button" data-value="24h">24h</button>
+          <button type="button" data-value="7d">7d</button>
+          <button type="button" data-value="30d">30d</button>
+          <button type="button" data-value="90d">90d</button>
+        </div>
+        <span class="updated" id="updated" aria-live="polite"></span>
+      </div>
+      <p class="error" id="usage-error" role="alert"></p>
+      <div class="kpis" id="kpis"></div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Activity by provider</h2>
+          <div class="segmented" id="metric" role="group" aria-label="Chart metric">
+            <button type="button" data-value="attempts">Requests</button>
+            <button type="button" data-value="tokens">Tokens</button>
+            <button type="button" data-value="cost">Cost</button>
+          </div>
+        </div>
+        <div class="legend" id="legend"></div>
+        <div class="chart" id="chart"></div>
+      </div>
+      <div class="card"><h2>By model</h2><div class="scroll" id="by-model"></div></div>
+      <div class="card"><h2>By account</h2><div class="scroll" id="by-account"></div></div>
+      <div class="card"><h2>Recent requests</h2><div class="scroll tall" id="recent" tabindex="0"></div></div>
+    </section>
+
+    <section id="accounts" class="tab" hidden>
+      <p class="error" id="accounts-error" role="alert"></p>
+      <div class="card"><h2>Credentials</h2><div class="scroll" id="credentials"></div></div>
+    </section>
+
+    <section id="models" class="tab" hidden>
+      <p class="error" id="models-error" role="alert"></p>
+      <div class="card"><h2>Model catalog</h2><div class="scroll" id="catalog"></div></div>
+    </section>
+
+    <section id="config" class="tab" hidden>
+      <p class="error" id="config-error" role="alert"></p>
+      <div class="card">
+        <h2>Running configuration</h2>
+        <p class="hint">Secrets are referenced by environment variable name and never shown.</p>
+        <pre id="config-yaml" tabindex="0"></pre>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

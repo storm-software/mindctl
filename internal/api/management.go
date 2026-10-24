@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +19,14 @@ import (
 	"github.com/storm-software/mindctl/internal/config"
 	"github.com/storm-software/mindctl/internal/debugtrace"
 	"github.com/storm-software/mindctl/internal/domain"
+	"github.com/storm-software/mindctl/internal/inference"
 	"github.com/storm-software/mindctl/internal/oauth"
 	"github.com/storm-software/mindctl/internal/pluginhost"
+	"github.com/storm-software/mindctl/internal/storage"
 	"gopkg.in/yaml.v3"
 )
 
-// Management is the authenticated control API. It has no HTML client.
+// Management is the authenticated control API. Dashboard is its HTML client.
 type Management struct {
 	ConfigPath string
 	AuthDir    string
@@ -31,6 +34,7 @@ type Management struct {
 	Pool       *accounts.Pool
 	Plugins    *pluginhost.Host
 	Models     []domain.Model
+	Usage      func(context.Context, storage.UsageFilter) (storage.UsageReport, error)
 
 	mu     sync.Mutex
 	logins map[string]*loginSession
@@ -88,6 +92,8 @@ func (m *Management) serve(w http.ResponseWriter, r *http.Request) {
 		m.installPlugin(w, r)
 	case path == "quota" && r.Method == http.MethodGet:
 		m.quota(w, r)
+	case path == "usage" && r.Method == http.MethodGet:
+		m.usage(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -398,6 +404,41 @@ func (m *Management) quota(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": items})
+}
+
+// usage reports attempts in the last range, bucketed by bucket and aligned to
+// the viewer's UTC offset in seconds east.
+func (m *Management) usage(w http.ResponseWriter, r *http.Request) {
+	if m.Usage == nil {
+		WriteError(w, errManagement("usage storage is unavailable"))
+		return
+	}
+	query := r.URL.Query()
+	window, err := time.ParseDuration(query.Get("range"))
+	if err != nil || window <= 0 || window > 366*24*time.Hour {
+		WriteError(w, inference.Invalid("range", "must be a positive duration of at most 366 days"))
+		return
+	}
+	bucket, err := time.ParseDuration(query.Get("bucket"))
+	if err != nil || bucket < time.Minute || window/bucket > 2000 {
+		WriteError(w, inference.Invalid("bucket", "must be at least 1m and split range into at most 2000 buckets"))
+		return
+	}
+	offset := 0
+	if raw := query.Get("offset"); raw != "" {
+		if offset, err = strconv.Atoi(raw); err != nil || offset < -14*3600 || offset > 14*3600 {
+			WriteError(w, inference.Invalid("offset", "must be a UTC offset in seconds"))
+			return
+		}
+	}
+	report, err := m.Usage(r.Context(), storage.UsageFilter{
+		Since: time.Now().Add(-window), Bucket: bucket, Offset: time.Duration(offset) * time.Second, Recent: 100,
+	})
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
 }
 
 func refreshName(providerID string) string {
