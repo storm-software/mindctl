@@ -48,7 +48,7 @@ func TestDecodeChatRequestKeepsToolsAndIgnoresSamplingFields(t *testing.T) {
 
 func TestChatHandlerAuthenticatesBearerAndStreamsTools(t *testing.T) {
 	runner := &chatExecutor{}
-	handler := Authenticate(NewChatHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20}), ChatAuthorizationHeader, staticTokens{{ID: "client", Value: "gateway"}})
+	handler := Authenticate(NewChatHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20}), ChatAuthorizationHeader, StaticTokens{{ID: "client", Value: "gateway"}})
 	rejected := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"mindctl-auto","messages":[{"role":"user","content":"hi"}]}`))
 	rejected.Header.Set("X-Mindctl-Token", "gateway")
 	response := httptest.NewRecorder()

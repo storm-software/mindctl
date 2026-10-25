@@ -56,8 +56,10 @@
   - [ChatGPT subscription routing](#chatgpt-subscription-routing)
   - [Claude subscription routing](#claude-subscription-routing)
     - [Claude Code Messages endpoint (opt-in)](#claude-code-messages-endpoint-opt-in)
+    - [Gateway-held subscription credentials (opt-in)](#gateway-held-subscription-credentials-opt-in)
 - [Configuration](#configuration)
   - [Managed Headroom compression](#managed-headroom-compression)
+  - [External identity provider](#external-identity-provider)
   - [Session affinity](#session-affinity)
   - [Token usage savings](#token-usage-savings)
   - [Request cost x-ray](#request-cost-x-ray)
@@ -454,6 +456,80 @@ request. Disable it by setting `headroom.enabled: false` and restarting.
 
 Do not enable this option when another Headroom proxy already fronts Mindctl,
 or the request may be compressed twice.
+
+## External identity provider
+
+Mindctl can hand authentication to an external identity provider (IdP), such
+as [Better Auth](https://better-auth.com), [Keycloak](https://www.keycloak.org), [Authentik](https://goauthentik.io), or [Zitadel](https://zitadel.com). It
+uses two standard protocols, so no IdP-specific code is involved:
+
+- **Gateway clients** (Claude Code, Codex, Cursor) send a per-user key from
+  the IdP wherever they sent the gateway token. Mindctl checks the key with
+  [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) token introspection and
+  caches each active answer for `cache_ttl`.
+- **The dashboard** signs people in with OpenID Connect (authorization code
+  with PKCE). The management API accepts the issuer's JWT access tokens when
+  `aud` contains `audience` and `scope` contains `required_scope`.
+
+```yaml
+client_auth:
+  header: X-Mindctl-Token
+  introspection:
+    url: https://auth.example.com/api/mindctl/introspect
+    client_id: mindctl
+    client_secret_env: MINDCTL_INTROSPECT_SECRET
+    audience: https://mindctl.example.com
+management:
+  enabled: true
+  oidc:
+    issuer: https://auth.example.com/api/auth
+    client_id: mindctl-dashboard
+    audience: https://mindctl.example.com
+    required_scope: mindctl:admin
+```
+
+`token_env` becomes optional in both blocks. When it is set, its token keeps
+working as a break-glass credential. Requests authenticated by the IdP are
+stored under the client ID `idp:<sub>`, so each user sees only their own
+conversations and routing sessions. Conversations made with the static token
+stay with that token. A revoked key keeps working for up to `cache_ttl`
+(default `1m`). If the IdP cannot be reached, Mindctl returns HTTP 503 with
+code `auth_unavailable`, so clients retry instead of discarding the key.
+
+With Better Auth, enable the `jwt()` and `oauthProvider()` plugins and list
+`https://mindctl.example.com` in `resources`. Register `mindctl-dashboard` as
+a public client with the redirect URI `https://<mindctl host>/dashboard/`.
+Issue gateway keys with the `apiKey()` plugin. Better Auth's `verifyApiKey` is
+server-only, so expose it to Mindctl through one route in the Better Auth
+app. Use a URL-safe secret, such as one from `openssl rand -hex 32`.
+
+```ts
+// app/api/mindctl/introspect/route.ts
+import { timingSafeEqual } from "node:crypto";
+import { auth } from "@/lib/auth";
+
+const expected = Buffer.from(
+  "Basic " + btoa(`mindctl:${process.env.MINDCTL_INTROSPECT_SECRET}`)
+);
+
+export async function POST(request: Request) {
+  const presented = Buffer.from(request.headers.get("authorization") ?? "");
+  if (presented.length !== expected.length || !timingSafeEqual(presented, expected))
+    return new Response(null, { status: 401 });
+  const token = String((await request.formData()).get("token") ?? "");
+  const { valid, key } = await auth.api.verifyApiKey({ body: { key: token } });
+  if (!valid || !key) return Response.json({ active: false });
+  return Response.json({
+    active: true,
+    sub: key.referenceId,
+    aud: "https://mindctl.example.com",
+    exp: key.expiresAt ? Math.floor(new Date(key.expiresAt).getTime() / 1000) : undefined
+  });
+}
+```
+
+Each verification counts against the key's Better Auth rate limit. The cache
+absorbs most of them, so raise or disable that limit for gateway keys.
 
 ## Session affinity
 

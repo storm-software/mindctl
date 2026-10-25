@@ -264,7 +264,17 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 	)
 	a.executor.SetAccountRouting(selector, aliases)
 	a.executor.SetProtocolClients(protocolFactory(a.httpClient))
-	clientToken, _ := getenv(cfg.ClientAuth.TokenEnv)
+	gateway := api.Verifiers{}
+	if clientToken, _ := getenv(cfg.ClientAuth.TokenEnv); clientToken != "" {
+		gateway = append(gateway, api.StaticTokens{{ID: "configured-client", Value: clientToken}})
+	}
+	if introspection := cfg.ClientAuth.Introspection; introspection.Enabled() {
+		secret, _ := getenv(introspection.ClientSecretEnv)
+		gateway = append(gateway, &api.Introspector{
+			URL: introspection.URL, ClientID: introspection.ClientID, ClientSecret: secret,
+			Audience: introspection.Audience, TTL: introspection.CacheTTLValue(), Logger: debugLogger,
+		})
+	}
 	maxBodyBytes := cfg.ClientAuth.MaxBodyBytes
 	if maxBodyBytes == 0 {
 		maxBodyBytes = config.DefaultMaxBodyBytes
@@ -304,40 +314,47 @@ func newWithLookupWithMaintenance(ctx context.Context, cfg config.Config, lookup
 		},
 		Config: responsesConfig, Aliases: aliases, Models: append([]domain.Model(nil), a.catalog...),
 	}
-	clientAuth := api.Authenticate(named.Responses(responses), cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}})
+	clientAuth := api.Authenticate(named.Responses(responses), cfg.ClientAuth.HeaderName(), gateway)
 	mux.Handle("/v1/responses", clientAuth)
 	// Cursor's OpenAI override can only send Authorization. Keep that check on
 	// this route so the configured header can stay a separate gateway token
 	// for Claude and Codex.
 	chat := captureBodies(api.NewChatHandler(a.executor, responsesConfig))
-	mux.Handle("/v1/chat/completions", api.Authenticate(chat, api.ChatAuthorizationHeader, appTokens{{ID: "configured-client", Value: clientToken}}))
+	mux.Handle("/v1/chat/completions", api.Authenticate(chat, api.ChatAuthorizationHeader, gateway))
 	wrapClient := func(handler http.Handler) http.Handler {
-		return api.Authenticate(handler, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}})
+		return api.Authenticate(handler, cfg.ClientAuth.HeaderName(), gateway)
 	}
 	named.Mount(mux, wrapClient)
 	mux.Handle("/auth/callback", oauth.Callbacks.Handler())
 	mux.Handle("/callback", oauth.Callbacks.Handler())
 	if cfg.Management.Enabled {
-		managementToken, _ := getenv(cfg.Management.TokenEnv)
+		managementAuth := api.Verifiers{}
+		if managementToken, _ := getenv(cfg.Management.TokenEnv); managementToken != "" {
+			managementAuth = append(managementAuth, api.StaticTokens{{ID: "management", Value: managementToken}})
+		}
+		var signIn *api.OIDC
+		if oidc := cfg.Management.OIDC; oidc.Enabled() {
+			signIn = &api.OIDC{
+				Issuer: oidc.Issuer, ClientID: oidc.ClientID, Audience: oidc.Audience,
+				RequiredScope: oidc.RequiredScope, Logger: debugLogger,
+			}
+			managementAuth = append(managementAuth, signIn)
+		}
 		management := &api.Management{
 			ConfigPath: cfg.Path, AuthDir: cfg.OAuth.AuthDir, Config: cfg,
 			Pool: pool, Plugins: plugins, Models: append([]domain.Model(nil), a.catalog...), Usage: a.store.UsageReport,
 		}
-		mux.Handle("/v8/management/", api.Authenticate(management.Handler(), "Authorization", appTokens{{ID: "management", Value: managementToken}}))
-		mux.Handle("/dashboard/", api.Dashboard())
+		mux.Handle("/v8/management/", api.Authenticate(management.Handler(), "Authorization", managementAuth))
+		mux.Handle("/dashboard/", api.Dashboard(signIn))
 	}
 	if cfg.ClaudeMessages.Enabled {
 		messages := api.UseGatewayCredentials(api.NewMessagesHandler(a.executor, responsesConfig), gatewayClaudeToken, gatewayCodexAuthFile)
 		messages = captureBodies(api.CaptureNativeClaudeOAuth(messages))
-		mux.Handle("/v1/messages", api.AuthenticateWithError(messages, cfg.ClientAuth.HeaderName(), appTokens{{ID: "configured-client", Value: clientToken}}, api.WriteMessagesError))
+		mux.Handle("/v1/messages", api.AuthenticateWithError(messages, cfg.ClientAuth.HeaderName(), gateway, api.WriteMessagesError))
 	}
 	a.handler = mux
 	return a, nil
 }
-
-type appTokens []api.Token
-
-func (tokens appTokens) Tokens() []api.Token { return tokens }
 
 func configuredProviders(configs []config.ProviderConfig, getenv func(string) (string, bool), httpClient *http.Client) (map[string]provider.Provider, error) {
 	entries := make(map[string]provider.Provider, len(configs))

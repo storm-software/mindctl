@@ -20,6 +20,9 @@ var (
 	ErrBodyTooLarge = errors.New("request body too large")
 	// ErrUnauthorized identifies missing or invalid gateway authentication.
 	ErrUnauthorized = errors.New("unauthorized")
+	// ErrAuthUnavailable identifies an identity provider that could not answer,
+	// so clients retry instead of treating their credential as revoked.
+	ErrAuthUnavailable = errors.New("identity provider unavailable")
 	// ErrMethodNotAllowed identifies an unsupported endpoint method.
 	ErrMethodNotAllowed = errors.New("method not allowed")
 )
@@ -52,6 +55,8 @@ func errorDetail(err error) (int, ErrorDetail) {
 		return http.StatusRequestEntityTooLarge, ErrorDetail{Message: "request body too large", Type: "invalid_request_error", Code: "body_too_large"}
 	case errors.Is(err, ErrUnauthorized):
 		return http.StatusUnauthorized, ErrorDetail{Message: "missing or invalid authentication", Type: "authentication_error", Code: "invalid_api_key"}
+	case errors.Is(err, ErrAuthUnavailable):
+		return http.StatusServiceUnavailable, ErrorDetail{Message: "identity provider is unavailable", Type: "server_error", Code: "auth_unavailable"}
 	case errors.Is(err, ErrInvalidRequest):
 		detail := ErrorDetail{Message: "invalid request", Type: "invalid_request_error"}
 		var validation *inference.ValidationError

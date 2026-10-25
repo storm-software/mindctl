@@ -636,6 +636,33 @@ func TestValidateAggregatesInvalidCatalogAndKeyErrors(t *testing.T) {
 	}
 }
 
+func TestValidateExternalIdentityProvidersReplaceStaticTokens(t *testing.T) {
+	env := func(name string) (string, bool) {
+		if name == "IDP_SECRET" {
+			return "idp-secret", true
+		}
+		return testEnv(name)
+	}
+	cfg := validConfig()
+	cfg.ClientAuth.TokenEnv = ""
+	cfg.ClientAuth.Introspection = IntrospectionConfig{URL: "https://auth.example.test/api/mindctl/introspect", ClientID: "mindctl", ClientSecretEnv: "IDP_SECRET"}
+	cfg.Management = ManagementConfig{Enabled: true, OIDC: OIDCConfig{Issuer: "https://auth.example.test/api/auth", ClientID: "dashboard", Audience: "https://mindctl.example.test"}}
+	if err := cfg.Validate(env); err != nil {
+		t.Fatalf("external providers without static tokens: %v", err)
+	}
+
+	cfg.ClientAuth.Introspection.URL = ""
+	cfg.ClientAuth.Introspection.CacheTTL = -time.Second
+	cfg.Management.OIDC.Audience = "dashboard"
+	cfg.Management.TokenEnv = "MISSING_MANAGEMENT_TOKEN"
+	err := cfg.Validate(env)
+	for _, want := range []string{"introspection url", "cache_ttl", "audience must differ", "MISSING_MANAGEMENT_TOKEN"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in %v", want, err)
+		}
+	}
+}
+
 func TestValidateAcceptsZeroRetentionAsUnlimited(t *testing.T) {
 	cfg := validConfig()
 	if cfg.SQLite.Retention != 0 {

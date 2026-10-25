@@ -76,11 +76,37 @@ type SavingsConfig struct {
 	BaselineModel string `yaml:"baseline_model"`
 }
 
-// ClientAuthConfig configures gateway authentication using a referenced secret.
+// ClientAuthConfig configures gateway authentication using a referenced secret,
+// an external introspection endpoint, or both.
 type ClientAuthConfig struct {
-	TokenEnv     string `yaml:"token_env"`
-	Header       string `yaml:"header"`
-	MaxBodyBytes int64  `yaml:"max_body_bytes"`
+	TokenEnv      string              `yaml:"token_env"`
+	Header        string              `yaml:"header"`
+	MaxBodyBytes  int64               `yaml:"max_body_bytes"`
+	Introspection IntrospectionConfig `yaml:"introspection"`
+}
+
+// IntrospectionConfig checks gateway credentials with an RFC 7662 endpoint.
+// Mindctl authenticates to it with HTTP Basic client credentials.
+type IntrospectionConfig struct {
+	URL             string `yaml:"url"`
+	ClientID        string `yaml:"client_id"`
+	ClientSecretEnv string `yaml:"client_secret_env"`
+	// Audience, when set, must appear in the introspection response's aud.
+	Audience string `yaml:"audience"`
+	// CacheTTL bounds how long an active answer is reused, which is also how
+	// long a revoked credential keeps working. Zero uses one minute.
+	CacheTTL time.Duration `yaml:"cache_ttl"`
+}
+
+// Enabled reports whether any introspection field is set.
+func (c IntrospectionConfig) Enabled() bool { return c != IntrospectionConfig{} }
+
+// CacheTTLValue returns the configured cache lifetime or the one-minute default.
+func (c IntrospectionConfig) CacheTTLValue() time.Duration {
+	if c.CacheTTL == 0 {
+		return time.Minute
+	}
+	return c.CacheTTL
 }
 
 type ClaudeMessagesConfig struct {
@@ -183,9 +209,26 @@ type AliasConfig struct {
 
 // ManagementConfig exposes the authenticated control API when Enabled.
 type ManagementConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	TokenEnv string `yaml:"token_env"`
+	Enabled  bool       `yaml:"enabled"`
+	TokenEnv string     `yaml:"token_env"`
+	OIDC     OIDCConfig `yaml:"oidc"`
 }
+
+// OIDCConfig signs dashboard users in with an external OpenID Connect issuer
+// and accepts its JWT access tokens on the management API.
+type OIDCConfig struct {
+	Issuer string `yaml:"issuer"`
+	// ClientID is the dashboard's public client, which signs in with PKCE.
+	ClientID string `yaml:"client_id"`
+	// Audience is the resource identifier requested for, and required in, the
+	// access token's aud. It must differ from ClientID so ID tokens are refused.
+	Audience string `yaml:"audience"`
+	// RequiredScope, when set, must appear in the access token's scope claim.
+	RequiredScope string `yaml:"required_scope"`
+}
+
+// Enabled reports whether any OIDC field is set.
+func (c OIDCConfig) Enabled() bool { return c != OIDCConfig{} }
 
 // PluginsConfig loads optional executors and translators.
 // The host stays disabled until Enabled is set, and a plugin cannot replace
@@ -439,7 +482,25 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		}
 	}
 
-	requireEnv("client authentication", cfg.ClientAuth.TokenEnv)
+	// An external verifier makes the static token optional; one that is still
+	// named must resolve.
+	if introspection := cfg.ClientAuth.Introspection; introspection.Enabled() {
+		if cfg.ClientAuth.TokenEnv != "" {
+			requireEnv("client authentication", cfg.ClientAuth.TokenEnv)
+		}
+		if !validServiceURL(introspection.URL) {
+			errs = append(errs, errors.New("invalid client authentication introspection url"))
+		}
+		if introspection.ClientID == "" {
+			errs = append(errs, errors.New("client authentication introspection requires client_id"))
+		}
+		requireEnv("client authentication introspection", introspection.ClientSecretEnv)
+		if introspection.CacheTTL < 0 {
+			errs = append(errs, errors.New("client authentication introspection cache_ttl must not be negative"))
+		}
+	} else {
+		requireEnv("client authentication", cfg.ClientAuth.TokenEnv)
+	}
 	clientAuthHeader := cfg.ClientAuth.HeaderName()
 	if !validHeaderFieldName(clientAuthHeader) {
 		errs = append(errs, errors.New("invalid client authentication header"))
@@ -448,7 +509,7 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 		errs = append(errs, errors.New("maximum body bytes must not be negative"))
 	}
 	requireEnv("classifier", cfg.Classifier.TokenEnv)
-	if !validClassifierEndpoint(cfg.Classifier.Endpoint) {
+	if !validServiceURL(cfg.Classifier.Endpoint) {
 		errs = append(errs, errors.New("invalid classifier endpoint"))
 	}
 
@@ -510,7 +571,19 @@ func (cfg Config) Validate(getenv func(string) (string, bool)) error {
 			}
 		}
 	}
-	if cfg.Management.Enabled {
+	if oidc := cfg.Management.OIDC; cfg.Management.Enabled && oidc.Enabled() {
+		if cfg.Management.TokenEnv != "" {
+			requireEnv("management", cfg.Management.TokenEnv)
+		}
+		if !validServiceURL(oidc.Issuer) {
+			errs = append(errs, errors.New("invalid management oidc issuer"))
+		}
+		if oidc.ClientID == "" || oidc.Audience == "" {
+			errs = append(errs, errors.New("management oidc requires client_id and audience"))
+		} else if oidc.ClientID == oidc.Audience {
+			errs = append(errs, errors.New("management oidc audience must differ from client_id"))
+		}
+	} else if cfg.Management.Enabled {
 		requireEnv("management", cfg.Management.TokenEnv)
 	}
 	if chatGPTOAuthConfigured && (strings.EqualFold(clientAuthHeader, "Authorization") || strings.EqualFold(clientAuthHeader, "ChatGPT-Account-Id")) {
@@ -738,7 +811,7 @@ func aliasModelExists(cfg Config, id string) bool {
 	return false
 }
 
-func validClassifierEndpoint(raw string) bool {
+func validServiceURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && !strings.Contains(raw, "#")
 }

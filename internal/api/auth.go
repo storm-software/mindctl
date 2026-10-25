@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -15,10 +16,49 @@ type Token struct {
 	ID, Value string
 }
 
-// TokenSource permits static or rotated client-token sources without exposing
-// token values to request handlers.
-type TokenSource interface {
-	Tokens() []Token
+// Verifier resolves a presented credential to a stable client ID. It fails
+// with ErrUnauthorized for a credential it does not accept, or with
+// ErrAuthUnavailable when it cannot decide.
+type Verifier interface {
+	Verify(ctx context.Context, presented string) (string, error)
+}
+
+// StaticTokens accepts configured tokens. Tokens are compared as fixed-size
+// hashes, and every configured token is checked.
+type StaticTokens []Token
+
+func (tokens StaticTokens) Verify(_ context.Context, presented string) (string, error) {
+	presentedHash := sha256.Sum256([]byte(presented))
+	matchedID := ""
+	for _, token := range tokens {
+		tokenHash := sha256.Sum256([]byte(token.Value))
+		matches := subtle.ConstantTimeCompare(presentedHash[:], tokenHash[:])
+		if matches == 1 && matchedID == "" && token.ID != "" && token.Value != "" {
+			matchedID = token.ID
+		}
+	}
+	if matchedID == "" {
+		return "", ErrUnauthorized
+	}
+	return matchedID, nil
+}
+
+// Verifiers accepts a credential that any member accepts, trying them in
+// order. An unavailable member is reported only when none accepts it.
+type Verifiers []Verifier
+
+func (verifiers Verifiers) Verify(ctx context.Context, presented string) (string, error) {
+	err := ErrUnauthorized
+	for _, verifier := range verifiers {
+		id, verifyErr := verifier.Verify(ctx, presented)
+		if verifyErr == nil {
+			return id, nil
+		}
+		if !errors.Is(verifyErr, ErrUnauthorized) {
+			err = verifyErr
+		}
+	}
+	return "", err
 }
 
 type clientIDContextKey struct{}
@@ -30,16 +70,15 @@ func ClientID(ctx context.Context) (string, bool) {
 	return id, ok
 }
 
-// Authenticate validates a gateway token before calling next. Authorization
-// uses Bearer syntax; dedicated headers carry the raw token. Tokens are
-// compared as fixed-size hashes, and every configured token is checked.
-func Authenticate(next http.Handler, header string, tokens TokenSource) http.Handler {
-	return AuthenticateWithError(next, header, tokens, WriteError)
+// Authenticate validates a gateway credential before calling next.
+// Authorization uses Bearer syntax; dedicated headers carry the raw token.
+func Authenticate(next http.Handler, header string, verifier Verifier) http.Handler {
+	return AuthenticateWithError(next, header, verifier, WriteError)
 }
 
 // AuthenticateWithError validates the gateway credential and writes failures
 // using the endpoint's error envelope.
-func AuthenticateWithError(next http.Handler, header string, tokens TokenSource, writeError func(http.ResponseWriter, error)) http.Handler {
+func AuthenticateWithError(next http.Handler, header string, verifier Verifier, writeError func(http.ResponseWriter, error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		values := r.Header.Values(header)
 		if len(values) != 1 {
@@ -59,17 +98,9 @@ func AuthenticateWithError(next http.Handler, header string, tokens TokenSource,
 			writeError(w, ErrUnauthorized)
 			return
 		}
-		presentedHash := sha256.Sum256([]byte(presented))
-		matchedID := ""
-		for _, token := range tokens.Tokens() {
-			tokenHash := sha256.Sum256([]byte(token.Value))
-			matches := subtle.ConstantTimeCompare(presentedHash[:], tokenHash[:])
-			if matches == 1 && matchedID == "" && token.ID != "" {
-				matchedID = token.ID
-			}
-		}
-		if matchedID == "" {
-			writeError(w, ErrUnauthorized)
+		matchedID, err := verifier.Verify(r.Context(), presented)
+		if err != nil {
+			writeError(w, err)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientIDContextKey{}, matchedID)))

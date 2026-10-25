@@ -138,7 +138,7 @@ func TestAuthenticateWithErrorKeepsExistingResponsesShape(t *testing.T) {
 			}
 			handler := AuthenticateWithError(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				t.Fatal("unauthorized request reached handler")
-			}), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}}, errorWriter)
+			}), "X-Mindctl-Token", StaticTokens{{ID: "client", Value: "gateway"}}, errorWriter)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if test.custom && (!called || response.Code != http.StatusTeapot) {

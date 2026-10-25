@@ -114,6 +114,44 @@ func TestMessagesRouteIsOptInAndAuthenticated(t *testing.T) {
 	}
 }
 
+func TestExternalIdentityProviderReplacesStaticTokens(t *testing.T) {
+	var idp *httptest.Server
+	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer": idp.URL, "authorization_endpoint": idp.URL + "/authorize", "token_endpoint": idp.URL + "/token", "jwks_uri": idp.URL + "/jwks",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"active": r.PostFormValue("token") == "user-key", "sub": "user-1"})
+	}))
+	defer idp.Close()
+	cfg, env := fixture(t)
+	cfg.ClientAuth.TokenEnv = ""
+	cfg.ClientAuth.Introspection = config.IntrospectionConfig{URL: idp.URL + "/introspect", ClientID: "mindctl", ClientSecretEnv: "TEST_IDP_SECRET"}
+	cfg.Management = config.ManagementConfig{Enabled: true, OIDC: config.OIDCConfig{Issuer: idp.URL, ClientID: "dashboard", Audience: "https://mindctl.test"}}
+	env["TEST_IDP_SECRET"] = "idp-secret"
+	app, err := newWithLookup(context.Background(), cfg, lookup(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	for key, want := range map[string]int{"user-key": http.StatusBadRequest, "other-key": http.StatusUnauthorized} {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"mindctl-auto","messages":[]}`))
+		request.Header.Set("Authorization", "Bearer "+key)
+		response := httptest.NewRecorder()
+		app.Handler().ServeHTTP(response, request)
+		if response.Code != want {
+			t.Fatalf("%s: status=%d body=%s", key, response.Code, response.Body.String())
+		}
+	}
+	response := httptest.NewRecorder()
+	app.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/dashboard/oidc", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), idp.URL+"/authorize") {
+		t.Fatalf("dashboard sign-in config: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestChatCompletionsUsesAuthorizationBearer(t *testing.T) {
 	cfg, env := fixture(t)
 	cfg.ClientAuth.Header = "X-Mindctl-Token"

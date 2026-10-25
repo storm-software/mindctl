@@ -213,7 +213,7 @@ func TestResponsesHandlerDerivesChatGPTCredentialAvailabilityPerRequest(t *testi
 		ChatGPTOAuthProviders: map[string]bool{"openai": true},
 		ClaudeOAuthProviders:  map[string]bool{"anthropic": true},
 	})
-	h := Authenticate(CaptureChatGPTOAuth(CaptureClaudeOAuth(responses)), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}})
+	h := Authenticate(CaptureChatGPTOAuth(CaptureClaudeOAuth(responses)), "X-Mindctl-Token", StaticTokens{{ID: "client", Value: "gateway"}})
 
 	statuses := make(chan int, len(cases))
 	var requests sync.WaitGroup
@@ -314,7 +314,7 @@ func testResponsesHandler(output executor.Output, err ...error) http.Handler {
 }
 
 func testResponsesHandlerWith(runner ResponseExecutor) http.Handler {
-	return Authenticate(NewResponsesHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20, Models: []domain.Model{{ID: "claude-test", Tier: domain.T4}}}), "Authorization", staticTokens{{ID: "client_test", Value: "test-token"}})
+	return Authenticate(NewResponsesHandler(runner, ResponsesConfig{MaxBodyBytes: 1 << 20, Models: []domain.Model{{ID: "claude-test", Tier: domain.T4}}}), "Authorization", StaticTokens{{ID: "client_test", Value: "test-token"}})
 }
 
 func authenticatedRequest(body string) *http.Request {

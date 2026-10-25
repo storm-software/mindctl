@@ -8,6 +8,17 @@ client_auth:
   token_env: MINDCTL_GATEWAY_TOKEN
   header: X-Mindctl-Token
   max_body_bytes: 16777216
+  # Optional: accept per-user keys issued by an external identity provider,
+  # checked with RFC 7662 token introspection. token_env then becomes an
+  # optional break-glass token. Each user's requests and conversations are
+  # kept under client ID idp:<sub>. A revoked key keeps working for up to
+  # cache_ttl; an unreachable provider returns 503 auth_unavailable.
+  # introspection:
+  #   url: https://auth.example.com/api/mindctl/introspect
+  #   client_id: mindctl
+  #   client_secret_env: MINDCTL_INTROSPECT_SECRET
+  #   audience: https://mindctl.example.com
+  #   cache_ttl: 1m
 
 # Cursor's OpenAI base URL override can only send Authorization: Bearer.
 # POST /v1/chat/completions checks that bearer against token_env even when
@@ -98,10 +109,18 @@ routing:
 # oauth:
 #   auth_dir: /home/you/.config/mindctl/auth
 # Enables the /v8/management/ API and its web dashboard at /dashboard/, which
-# signs in with the token from token_env.
+# signs in with the token from token_env. With oidc set, the dashboard signs in
+# with that issuer using PKCE (register https://<mindctl>/dashboard/ as the
+# public client's redirect URI) and token_env becomes optional.
 # management:
 #   enabled: false
 #   token_env: MINDCTL_MANAGEMENT_TOKEN
+#   oidc:
+#     issuer: https://auth.example.com/api/auth
+#     client_id: mindctl-dashboard
+#     # Resource identifier requested for, and required in, the token's aud.
+#     audience: https://mindctl.example.com
+#     required_scope: mindctl:admin
 # plugins:
 #   enabled: false
 

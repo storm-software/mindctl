@@ -40,7 +40,7 @@ func TestManagementUsageValidatesWindowAndPassesFilter(t *testing.T) {
 func TestDashboardServesStaticClientWithStrictPolicy(t *testing.T) {
 	for _, path := range []string{"/dashboard/", "/dashboard/app.js", "/dashboard/style.css"} {
 		recorder := httptest.NewRecorder()
-		Dashboard().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		Dashboard(nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 		if recorder.Code != http.StatusOK || recorder.Body.Len() == 0 {
 			t.Fatalf("%s: status = %d", path, recorder.Code)
 		}

@@ -12,10 +12,6 @@ import (
 	"github.com/storm-software/mindctl/internal/upstreamauth"
 )
 
-type staticTokens []Token
-
-func (s staticTokens) Tokens() []Token { return s }
-
 func TestDecodeResponseRequest(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
       "model":"mindctl-auto","instructions":"be concise","input":"hello","stream":false
@@ -178,7 +174,7 @@ func TestDecodeRejectsJSONSchemaFormatWithoutObjectSchema(t *testing.T) {
 
 func TestAuthenticateUsesConstantTimeTokenMatch(t *testing.T) {
 	called := false
-	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "Authorization", staticTokens{{ID: "client-a", Value: "client-a"}})
+	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "Authorization", StaticTokens{{ID: "client-a", Value: "client-a"}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Set("Authorization", "Bearer client-a")
 	rr := httptest.NewRecorder()
@@ -191,7 +187,7 @@ func TestAuthenticateUsesConstantTimeTokenMatch(t *testing.T) {
 func TestAuthenticateRejectsMissingOrInvalidBearerTokens(t *testing.T) {
 	for _, header := range []string{"", "Basic client-a", "Bearer wrong"} {
 		called := false
-		h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "Authorization", staticTokens{{ID: "client-a", Value: "client-a"}})
+		h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "Authorization", StaticTokens{{ID: "client-a", Value: "client-a"}})
 		req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 		if header != "" {
 			req.Header.Set("Authorization", header)
@@ -208,7 +204,7 @@ func TestAuthenticateSupportsDedicatedRawTokenHeader(t *testing.T) {
 	gotClient := ""
 	h := Authenticate(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		gotClient, _ = ClientID(r.Context())
-	}), "X-Mindctl-Token", staticTokens{{ID: "client-a", Value: "gateway-secret"}})
+	}), "X-Mindctl-Token", StaticTokens{{ID: "client-a", Value: "gateway-secret"}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Set("X-Mindctl-Token", "gateway-secret")
 	rr := httptest.NewRecorder()
@@ -220,7 +216,7 @@ func TestAuthenticateSupportsDedicatedRawTokenHeader(t *testing.T) {
 
 func TestAuthenticateRejectsDuplicateGatewayHeaders(t *testing.T) {
 	called := false
-	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "X-Mindctl-Token", staticTokens{{ID: "client-a", Value: "gateway-secret"}})
+	h := Authenticate(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }), "X-Mindctl-Token", StaticTokens{{ID: "client-a", Value: "gateway-secret"}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Add("X-Mindctl-Token", "gateway-secret")
 	req.Header.Add("X-Mindctl-Token", "gateway-secret")

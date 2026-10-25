@@ -19,6 +19,8 @@
 "use strict";
 
 const TOKEN_KEY = "mindctl.management-token";
+const SIGN_IN_KEY = "mindctl.sign-in";
+const REDIRECT_URI = `${location.origin}/dashboard/`;
 const RANGES = {
   "24h": { range: "24h", bucket: "1h", rangeMs: 24 * 3600e3, bucketMs: 3600e3 },
   "7d": {
@@ -58,9 +60,12 @@ const compact = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1
 });
 
+// The token lives for this tab's session; earlier versions kept it in
+// localStorage, so that copy is removed.
 function readToken() {
   try {
-    return localStorage.getItem(TOKEN_KEY) || "";
+    localStorage.removeItem(TOKEN_KEY);
+    return sessionStorage.getItem(TOKEN_KEY) || "";
   } catch {
     return "";
   }
@@ -68,10 +73,10 @@ function readToken() {
 function writeToken(value) {
   try {
     value
-      ? localStorage.setItem(TOKEN_KEY, value)
-      : localStorage.removeItem(TOKEN_KEY);
+      ? sessionStorage.setItem(TOKEN_KEY, value)
+      : sessionStorage.removeItem(TOKEN_KEY);
   } catch {
-    /* per-tab only */
+    /* in memory only */
   }
 }
 
@@ -106,7 +111,7 @@ async function api(path, options = {}) {
     }
   });
   if (response.status === 401) {
-    signOut("The management token was rejected.");
+    signOut("Your sign-in was rejected or has expired.");
     throw new Error("unauthorized");
   }
   if (!response.ok) {
@@ -127,6 +132,77 @@ function signOut(message = "") {
   writeToken("");
   $("login-error").textContent = message;
   route();
+}
+
+// ---------- single sign-on ----------
+
+// signInConfig is null unless management.oidc is configured.
+const signInConfig = fetch("/dashboard/oidc")
+  .then(response => (response.ok ? response.json() : null))
+  .catch(() => null);
+
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+function randomString() {
+  return base64url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+async function startSignIn() {
+  const config = await signInConfig;
+  if (!config) throw new Error("the identity provider is unavailable");
+  if (!crypto.subtle)
+    throw new Error("single sign-on needs HTTPS or localhost");
+  const verifier = randomString();
+  const challenge = base64url(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))
+  );
+  const pending = { state: randomString(), verifier };
+  sessionStorage.setItem(SIGN_IN_KEY, JSON.stringify(pending));
+  const url = new URL(config.authorization_endpoint);
+  for (const [key, value] of Object.entries({
+    response_type: "code",
+    client_id: config.client_id,
+    redirect_uri: REDIRECT_URI,
+    scope: config.scope,
+    resource: config.resource,
+    state: pending.state,
+    code_challenge: challenge,
+    code_challenge_method: "S256"
+  }))
+    url.searchParams.set(key, value);
+  location.assign(url);
+}
+
+// finishSignIn redeems the code the issuer redirected back with.
+async function finishSignIn(params) {
+  history.replaceState(null, "", location.pathname + location.hash);
+  let pending = {};
+  try {
+    pending = JSON.parse(sessionStorage.getItem(SIGN_IN_KEY) || "{}");
+    sessionStorage.removeItem(SIGN_IN_KEY);
+  } catch {
+    /* no pending sign-in */
+  }
+  if (params.has("error"))
+    throw new Error(params.get("error_description") || params.get("error"));
+  if (!pending.state || params.get("state") !== pending.state)
+    throw new Error("the response did not match this browser's request");
+  const response = await fetch("/dashboard/oidc/token", {
+    method: "POST",
+    body: new URLSearchParams({
+      code: params.get("code") || "",
+      code_verifier: pending.verifier,
+      redirect_uri: REDIRECT_URI
+    })
+  });
+  if (!response.ok)
+    throw new Error("the identity provider rejected the sign-in");
+  state.token = (await response.json()).access_token;
+  writeToken(state.token);
 }
 
 // ---------- formatting ----------
@@ -924,6 +1000,14 @@ $("login").addEventListener("submit", async event => {
         `Could not reach mindctl: ${error.message}`;
   }
 });
+$("sso").addEventListener("click", () =>
+  startSignIn().catch(error => {
+    $("login-error").textContent = `Could not start sign-in: ${error.message}`;
+  })
+);
+signInConfig.then(config => {
+  $("sso").hidden = !config;
+});
 $("signout").addEventListener("click", () => signOut());
 window.addEventListener("hashchange", route);
 new ResizeObserver(
@@ -944,4 +1028,12 @@ setInterval(() => {
     loadUsage();
 }, 30000);
 
-route();
+const callback = new URLSearchParams(location.search);
+(callback.has("code") || callback.has("error")
+  ? finishSignIn(callback)
+  : Promise.resolve()
+)
+  .catch(error => {
+    $("login-error").textContent = `Sign-in failed: ${error.message}`;
+  })
+  .finally(route);

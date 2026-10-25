@@ -67,7 +67,7 @@ func TestResolveMessagesModelAcceptsDatedAnthropicSnapshots(t *testing.T) {
 func TestMessagesHandlerCrossProviderAndStream(t *testing.T) {
 	runner := &messagesExecutor{}
 	cfg := ResponsesConfig{MaxBodyBytes: 1 << 20, ProviderCredentials: map[string]bool{"openai": true}, ClaudeOAuthProviders: map[string]bool{"anthropic": true}}
-	handler := AuthenticateWithError(CaptureNativeClaudeOAuth(NewMessagesHandler(runner, cfg)), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}}, writeMessagesError)
+	handler := AuthenticateWithError(CaptureNativeClaudeOAuth(NewMessagesHandler(runner, cfg)), "X-Mindctl-Token", StaticTokens{{ID: "client", Value: "gateway"}}, writeMessagesError)
 	for _, test := range []struct {
 		name, body string
 		stream     bool

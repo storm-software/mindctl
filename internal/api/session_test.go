@@ -146,7 +146,7 @@ func TestHandlersSetSessionKeyOnlyForAutomaticStatelessRequests(t *testing.T) {
 	serveMessages := func(t *testing.T, cfg ResponsesConfig, body string) *messagesExecutor {
 		t.Helper()
 		runner := &messagesExecutor{}
-		handler := AuthenticateWithError(CaptureNativeClaudeOAuth(NewMessagesHandler(runner, cfg)), "X-Mindctl-Token", staticTokens{{ID: "client", Value: "gateway"}}, writeMessagesError)
+		handler := AuthenticateWithError(CaptureNativeClaudeOAuth(NewMessagesHandler(runner, cfg)), "X-Mindctl-Token", StaticTokens{{ID: "client", Value: "gateway"}}, writeMessagesError)
 		request := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
 		request.Header.Set("X-Mindctl-Token", "gateway")
 		request.Header.Set("X-Claude-Code-Session-Id", testSessionID)
