@@ -452,7 +452,10 @@ only round-trip-safe assistant and string tool-result text to a loopback,
 token-authenticated child; provider credentials and inference requests never
 go to that child. Compression failures are fail-closed and return HTTP 503
 with code `headroom_unavailable`; Mindctl never forwards the uncompressed
-request. Disable it by setting `headroom.enabled: false` and restarting.
+request when the Headroom runtime fails. When Headroom answers with a rewrite
+that fails round-trip validation, such as changed user text, Mindctl logs a
+`route.compression.rejected` warning and sends the original request for that
+turn. Disable compression by setting `headroom.enabled: false` and restarting.
 
 Do not enable this option when another Headroom proxy already fronts Mindctl,
 or the request may be compressed twice.

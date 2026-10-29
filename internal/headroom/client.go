@@ -101,7 +101,7 @@ func (c *Client) Compress(ctx context.Context, model domain.Model, conversationI
 		return inference.Request{}, Metrics{}, err
 	}
 	if err := applyMessages(&copyRequest, response.Messages); err != nil {
-		return inference.Request{}, Metrics{}, unavailable(err)
+		return inference.Request{}, Metrics{}, err
 	}
 	return copyRequest, metrics, nil
 }

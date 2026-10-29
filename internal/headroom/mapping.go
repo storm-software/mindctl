@@ -2,7 +2,7 @@ package headroom
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/storm-software/mindctl/internal/inference"
@@ -78,12 +78,12 @@ func messageTargets(request inference.Request) []messageTarget {
 func applyMessages(request *inference.Request, messages []compressionMessage) error {
 	targets := messageTargets(*request)
 	if len(messages) != len(targets) {
-		return errors.New("compressed message count changed")
+		return fmt.Errorf("%w: compressed message count changed from %d to %d", ErrRejected, len(targets), len(messages))
 	}
 	for index, message := range messages {
-		original := targets[index].message
-		if message.Content == "" || message.Role != original.Role || message.ToolCallID != original.ToolCallID || (message.Role == "user" && message.Content != original.Content) {
-			return errors.New("invalid compressed message")
+		if reason := invalidReason(targets[index].message, message); reason != "" {
+			// Names the rule and position only; message text stays private.
+			return fmt.Errorf("%w: message %d (%s): %s", ErrRejected, index, targets[index].message.Role, reason)
 		}
 	}
 	for index, target := range targets {
@@ -101,6 +101,20 @@ func applyMessages(request *inference.Request, messages []compressionMessage) er
 		}
 	}
 	return nil
+}
+
+func invalidReason(original, message compressionMessage) string {
+	switch {
+	case message.Content == "":
+		return "empty content"
+	case message.Role != original.Role:
+		return "role changed to " + message.Role
+	case message.ToolCallID != original.ToolCallID:
+		return "tool_call_id changed"
+	case message.Role == "user" && message.Content != original.Content:
+		return "user text changed"
+	}
+	return ""
 }
 
 func rawJSONPresent(value json.RawMessage) bool {

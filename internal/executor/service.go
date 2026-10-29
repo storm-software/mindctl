@@ -227,12 +227,25 @@ func (s *Service) Execute(ctx context.Context, in Input) (Output, error) {
 	return s.executeDecision(ctx, in, turn, decision)
 }
 
-// compress prevents an uncompressed provider request when enabled Headroom fails.
+// compress prevents an uncompressed provider request when enabled Headroom
+// fails. A rejected rewrite is deterministic for the content, so failing would
+// only make clients retry into the same error; the original is sent instead.
 func (s *Service) compress(ctx context.Context, model domain.Model, turn conversation.Turn, providerID, attemptID string, request inference.Request) (inference.Request, headroom.Metrics, error) {
 	if s.compressor == nil {
 		return request, headroom.Metrics{}, nil
 	}
 	compressed, metrics, err := s.compressor.Compress(ctx, model, turn.AffinityID(), providerID, request)
+	if errors.Is(err, headroom.ErrRejected) {
+		if s.logger != nil {
+			s.logger.Warn("route.compression.rejected",
+				"response_id", turn.ResponseID,
+				"attempt_id", attemptID,
+				"provider", providerID,
+				"error", err.Error(),
+			)
+		}
+		return request, headroom.Metrics{}, nil
+	}
 	if err != nil {
 		s.trace("route.compression.failed",
 			"response_id", turn.ResponseID,

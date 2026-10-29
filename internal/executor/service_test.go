@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -491,6 +492,20 @@ func TestExecuteDoesNotForwardUncompressedRequestWhenHeadroomFails(t *testing.T)
 	}
 	if deps.OpenAI.Calls != 0 || deps.Conversations.FailCalls != 1 || deps.Conversations.CommitCalls != 0 {
 		t.Fatalf("provider calls=%d fail calls=%d commit calls=%d", deps.OpenAI.Calls, deps.Conversations.FailCalls, deps.Conversations.CommitCalls)
+	}
+}
+
+func TestExecuteForwardsOriginalRequestWhenHeadroomRejectsRewrite(t *testing.T) {
+	deps := fakeDeps()
+	deps.Executor = NewWithCompressor(deps.Classifier, router.NewPolicy(router.PolicyConfig{}),
+		provider.NewRegistry(map[string]provider.Provider{"openai": deps.OpenAI, "anthropic": deps.Anthropic}), deps.Conversations,
+		fakeCompressor{err: fmt.Errorf("%w: message 0 (user): user text changed", headroom.ErrRejected)}, nil)
+
+	if _, err := deps.Executor.Execute(context.Background(), deps.input(newAutomaticInput())); err != nil {
+		t.Fatalf("error = %v, want original request forwarded", err)
+	}
+	if deps.OpenAI.Calls != 1 || deps.Conversations.CommitCalls != 1 {
+		t.Fatalf("provider calls=%d commit calls=%d", deps.OpenAI.Calls, deps.Conversations.CommitCalls)
 	}
 }
 

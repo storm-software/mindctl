@@ -129,6 +129,17 @@ func TestClientRejectsUnsafeCompression(t *testing.T) {
 	}
 }
 
+func TestClientClassifiesInvalidRewriteAsRejected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"messages":[{"role":"user","content":"private rewrite"}],"tokens_before":10,"tokens_after":5,"tokens_saved":5}`))
+	}))
+	defer server.Close()
+	_, _, err := NewClient(server.URL, "token", nil).Compress(context.Background(), domain.Model{ID: "model"}, "conversation", "provider", inference.Request{Input: []inference.Item{{Type: "message", Role: "user", Text: "original"}}})
+	if !errors.Is(err, ErrRejected) || errors.Is(err, ErrUnavailable) || !strings.Contains(err.Error(), "message 0 (user): user text changed") || strings.Contains(err.Error(), "private rewrite") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestSessionIDIncludesProviderAndModel(t *testing.T) {
 	first := sessionID("conversation", "openai", "model-a")
 	second := sessionID("conversation", "anthropic", "model-a")
