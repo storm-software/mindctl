@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.59](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.59) (10/30/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue using anthropic providers through claude code ([d71a03e](https://github.com/storm-software/mindctl/commit/d71a03e))
+
 ## [0.1.58](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.58) (10/30/2026)
 
 ### Bug Fixes
