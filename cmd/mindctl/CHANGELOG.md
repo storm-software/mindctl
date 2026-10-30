@@ -2,6 +2,12 @@
 
 # Changelog for Mindctl - Mindctl
 
+## [0.1.58](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.58) (10/30/2026)
+
+### Bug Fixes
+
+- **mindctl:** Resolve issue with auto routing from claude and update footer color ([3f06a55](https://github.com/storm-software/mindctl/commit/3f06a55))
+
 ## [0.1.54](https://github.com/storm-software/mindctl/releases/tag/mindctl%400.1.54) (10/24/2026)
 
 ### Bug Fixes
