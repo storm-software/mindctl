@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-brand=$'\033[38;2;99;102;241mMINDCTL\033[0m'
+brand=$'\033[38;2;232;154;246mMINDCTL\033[0m'
 
 input="$(cat)"
 if ! command -v jq >/dev/null 2>&1; then

@@ -552,7 +552,7 @@ func TestClaudeStatuslineRendersSavings(t *testing.T) {
 	}
 
 	// big: 0.5 + 0.25 = 0.75; small: 0.1 + 0.04 = 0.14; saved 0.61.
-	want := "\033[38;2;99;102;241mMINDCTL\033[0m — small ← big[1m] · saved $0.61 · 100.0k in / 10.0k out"
+	want := "\033[38;2;232;154;246mMINDCTL\033[0m — small ← big[1m] · saved $0.61 · 100.0k in / 10.0k out"
 	if string(output) != want {
 		t.Fatalf("statusline = %q\nwant %q", output, want)
 	}

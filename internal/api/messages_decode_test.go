@@ -29,6 +29,7 @@ func TestDecodeMessagesRequest(t *testing.T) {
 		{name: "only empty messages", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":[]}]}`, wantError: true},
 		{name: "invalid role", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"developer","content":"hi"}]}`, wantError: true},
 		{name: "system block extra field", body: `{"model":"mindctl-auto","max_tokens":42,"system":[{"type":"text","text":"instructions","citations":null}],"messages":[{"role":"user","content":"hi"}]}`, native: true, wantItems: 1},
+		{name: "system empty text block", body: `{"model":"mindctl-auto","max_tokens":42,"system":[{"type":"text","text":""},{"type":"text","text":"instructions"}],"messages":[{"role":"user","content":"hi"}]}`, wantItems: 1},
 		{name: "system non-text block", body: `{"model":"mindctl-auto","max_tokens":42,"system":[{"type":"image","source":{}}],"messages":[{"role":"user","content":"hi"}]}`, wantError: true},
 		{name: "system role", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":"hi"},{"role":"system","content":"mid-conversation"}]}`, native: true, wantItems: 2},
 		{name: "unknown parameter", body: `{"model":"mindctl-auto","max_tokens":42,"messages":[{"role":"user","content":"hi"}],"temperature":0.7}`, native: true, wantItems: 1},

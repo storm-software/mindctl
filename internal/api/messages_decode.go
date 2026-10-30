@@ -140,10 +140,15 @@ func DecodeMessagesRequest(w http.ResponseWriter, r *http.Request, maxBodyBytes 
 			if json.Unmarshal(wire.System, &blocks) != nil {
 				return DecodedMessages{}, inference.Invalid("system", "must contain text blocks")
 			}
-			for _, raw := range blocks {
+			for index, raw := range blocks {
 				var block messagesWireBlock
-				if json.Unmarshal(raw, &block) != nil || block.Type != "text" || block.Text == "" {
-					return DecodedMessages{}, inference.Invalid("system", "has unsupported native content")
+				if json.Unmarshal(raw, &block) != nil || block.Type != "text" {
+					return DecodedMessages{}, inference.Invalid(fmt.Sprintf("system[%d]", index), fmt.Sprintf("unsupported block type %q", block.Type))
+				}
+				// SDK callers can send an empty text block. It carries nothing, and
+				// Anthropic rejects empty text, so drop it.
+				if block.Text == "" {
+					continue
 				}
 				if decoded.Request.Instructions != "" {
 					decoded.Request.Instructions += "\n"
