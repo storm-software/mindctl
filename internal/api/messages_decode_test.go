@@ -157,13 +157,23 @@ func TestDecodeMessagesForwardsNativeToolSearchContent(t *testing.T) {
 	}
 }
 
+func TestDecodeMessagesKeepsSystemToolAddition(t *testing.T) {
+	got, err := decodeMessagesBody(t, `{"model":"m","max_tokens":1,"messages":[{"role":"system","content":[{"type":"text","text":"rules"},{"type":"tool_addition","name":"lookup"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Request.Input) != 1 || got.Request.Input[0].Text != "rules" || !strings.Contains(string(got.Request.Input[0].ProviderData), `"type":"tool_addition"`) {
+		t.Fatalf("decoded=%+v", got.Request.Input)
+	}
+}
+
 func TestDecodeMessagesReportsSpecificReasons(t *testing.T) {
 	for _, test := range []struct{ name, body, want string }{
 		{name: "role", body: `{"model":"m","max_tokens":1,"messages":[{"role":"developer","content":"hi"}]}`, want: `messages[0].role: unsupported message role "developer"`},
 		{name: "thinking type", body: `{"model":"m","max_tokens":1,"thinking":{"type":"sometimes"},"messages":[{"role":"user","content":"hi"}]}`, want: `thinking.type: unsupported thinking type "sometimes"`},
 		{name: "tool schema", body: `{"model":"m","max_tokens":1,"tools":[{"name":"run"}],"messages":[{"role":"user","content":"hi"}]}`, want: "tools[0].input_schema: is required"},
 		{name: "only native blocks", body: `{"model":"m","max_tokens":1,"messages":[{"role":"assistant","content":[{"type":"server_tool_use","id":"s","name":"n","input":{}}]}]}`, want: "messages[0].content: must include a text, image, tool_use, or tool_result block"},
-		{name: "system non-text", body: `{"model":"m","max_tokens":1,"messages":[{"role":"system","content":[{"type":"image","source":{}}]}]}`, want: `messages[0].content[0]: system messages support only text blocks, got "image"`},
+		{name: "system non-text", body: `{"model":"m","max_tokens":1,"messages":[{"role":"system","content":[{"type":"image","source":{}}]}]}`, want: `messages[0].content[0]: images are only valid in user messages`},
 		{name: "field type", body: `{"model":"m","max_tokens":"many","messages":[]}`, want: "max_tokens: has an invalid JSON type string"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -254,9 +254,6 @@ func decodeMessagesMessage(param string, raw json.RawMessage) ([]inference.Item,
 			return nil, false, inference.Invalid(blockParam, "must be an object with a type")
 		}
 		native := message.Role == "system" || block.CacheControl != nil || decodeStrict(raw, &messagesWireBlock{}) != nil
-		if message.Role == "system" && block.Type != "text" {
-			return nil, false, inference.Invalid(blockParam, fmt.Sprintf("system messages support only text blocks, got %q", block.Type))
-		}
 		var item inference.Item
 		switch block.Type {
 		case "thinking", "redacted_thinking":

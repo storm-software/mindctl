@@ -218,7 +218,7 @@ func TestStatusReportsConfigErrors(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(providers), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(providers, []byte("providers:\n  missing:\n    - model\n"), 0600); err != nil {
+	if err := os.WriteFile(providers, []byte("providers:\n  openai:\n    - gpt-6-astra\n    - gpt-6-astra\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	configPath, err := filepath.Abs("../../config.example.yaml")
@@ -232,7 +232,7 @@ func TestStatusReportsConfigErrors(t *testing.T) {
 	if !strings.HasPrefix(stdout.String(), "HARNESS") {
 		t.Fatalf("status output = %q; want harness table", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "config error: providers file "+providers) || !strings.Contains(got, `"missing"`) {
+	if got := stderr.String(); !strings.Contains(got, "config error: providers file "+providers) || !strings.Contains(got, "more than once") {
 		t.Fatalf("status stderr = %q; want providers file error", got)
 	}
 }

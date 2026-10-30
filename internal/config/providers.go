@@ -146,13 +146,15 @@ func providersFileFromCatalog(cfg Config) ProvidersFile {
 
 func validateProvidersFile(state ProvidersFile, cfg Config) error {
 	for providerID, models := range state.Providers {
+		// A generated catalog drops providers when their credentials are absent.
+		// Stale allow-list entries for those models must not stop the gateway.
 		if !catalogHasProvider(cfg, providerID) {
-			return fmt.Errorf("it enables provider %q, which the config does not define", providerID)
+			continue
 		}
 		seen := make(map[string]struct{}, len(models))
 		for _, modelID := range models {
 			if !catalogHasModel(cfg, providerID, modelID) {
-				return fmt.Errorf("it enables model %s.%s, which the config does not define", providerID, modelID)
+				continue
 			}
 			if _, exists := seen[modelID]; exists {
 				return fmt.Errorf("it lists model %s.%s more than once", providerID, modelID)

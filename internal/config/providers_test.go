@@ -144,25 +144,29 @@ func TestSetModelEnabledRejectsInvalidCatalogRelationship(t *testing.T) {
 	}
 }
 
-func TestProvidersFileRejectsUnknownAndDuplicateEntries(t *testing.T) {
-	for name, body := range map[string]string{
-		"unknown provider": "providers:\n  missing:\n    - model\n",
-		"unknown model":    "providers:\n  openai:\n    - missing\n",
-		"duplicate model":  "providers:\n  openai:\n    - gpt-alpha\n    - gpt-alpha\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "providers.yaml")
-			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-				t.Fatal(err)
-			}
-			cfg := providerStateCatalog()
-			err := ApplyProvidersFile(path, &cfg)
-			if err == nil {
-				t.Fatal("ApplyProvidersFile succeeded")
-			}
-			if !strings.Contains(err.Error(), path) {
-				t.Fatalf("error %q does not name the providers file", err)
-			}
-		})
+func TestProvidersFileIgnoresUnknownEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "providers.yaml")
+	body := "providers:\n  missing:\n    - model\n  openai:\n    - missing\n    - gpt-beta\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := providerStateCatalog()
+	if err := ApplyProvidersFile(path, &cfg); err != nil {
+		t.Fatalf("ApplyProvidersFile: %v", err)
+	}
+	if cfg.Models[0].Available || !cfg.Models[1].Available || cfg.Models[2].Available {
+		t.Fatalf("availability = [%v %v %v]", cfg.Models[0].Available, cfg.Models[1].Available, cfg.Models[2].Available)
+	}
+}
+
+func TestProvidersFileRejectsDuplicateEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "providers.yaml")
+	if err := os.WriteFile(path, []byte("providers:\n  openai:\n    - gpt-alpha\n    - gpt-alpha\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := providerStateCatalog()
+	err := ApplyProvidersFile(path, &cfg)
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "more than once") {
+		t.Fatalf("ApplyProvidersFile error = %v", err)
 	}
 }
