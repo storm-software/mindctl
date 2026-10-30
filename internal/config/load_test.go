@@ -61,6 +61,8 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 		available                  bool
 	}{
 		"gpt-6-astra":         {input: 10, cachedInput: 1, output: 50, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6.1-sol":         {input: 2, cachedInput: .1, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6.1-terra":       {input: 1, cachedInput: .05, output: 5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-6-sol":           {input: 2, cachedInput: .2, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-6-luna":          {input: .1, cachedInput: .01, output: .5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
 		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
@@ -136,6 +138,7 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 		"claude-fable-5-1":  {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, cacheWrite: 12.5, output: 50},
 		"claude-opus-5-5":   {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, cacheWrite: 5, output: 20},
 		"claude-sonnet-5-5": {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .1, cacheWrite: 2.5, output: 10},
+		"claude-haiku-5-5":  {tier: "T2", context: 1_000_000, outputLimit: 128_000, input: .1, cachedInput: .01, cacheWrite: .125, output: .5},
 		"claude-haiku-4-5":  {tier: "T2", context: 200_000, outputLimit: 64_000, input: 1, cachedInput: .1, cacheWrite: 1.25, output: 5},
 	}
 	for _, model := range cfg.Models {
@@ -271,8 +274,8 @@ func TestShippedExampleIncludesEnabledDeepSeekV4ModelCatalog(t *testing.T) {
 		input, cachedInput, output float64
 		capabilities               []string
 	}{
-		"deepseek-v4-flash": {tier: "T3", input: .14, cachedInput: .028, output: .28, capabilities: []string{"chat", "tools", "images", "json_schema"}},
-		"deepseek-v4-pro":   {tier: "T5", input: 1.74, cachedInput: .145, output: 3.48, capabilities: []string{"chat", "tools", "json_schema"}},
+		"deepseek-flash":  {tier: "T3", input: .15, cachedInput: .003, output: .6, capabilities: []string{"chat", "tools", "images", "json_schema"}},
+		"deepseek-v4-pro": {tier: "T5", input: .66, cachedInput: .022, output: 1.98, capabilities: []string{"chat", "tools", "json_schema"}},
 	}
 	for _, model := range cfg.Models {
 		want, ok := wantModels[model.ID]

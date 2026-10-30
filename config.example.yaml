@@ -199,8 +199,23 @@ models:
     max_output_tokens: 16384
     available: true
     input_price: 2
-    cached_input_price_usd_per_million: 0.2
+    cached_input_price_usd_per_million: 0.1
     output_price: 10
+    per_request_price_usd: 0
+    latency_p95: 0s
+    success_prior: 1
+    task_success_priors: {}
+
+  - id: gpt-6.1-terra
+    provider: openai
+    tier: T4
+    capabilities: [chat, tools, images, json_schema, web_search]
+    context_window: 272000
+    max_output_tokens: 16384
+    available: true
+    input_price: 1
+    cached_input_price_usd_per_million: 0.05
+    output_price: 5
     per_request_price_usd: 0
     latency_p95: 0s
     success_prior: 1
@@ -505,20 +520,18 @@ models:
     success_prior: 1
     task_success_priors: {}
 
-  # DeepSeek V4 Preview has a 1M-token context window and 384K-token maximum
-  # output. Prices are the published USD-per-million-token API rates; cached
-  # input is billed independently of cache-miss input. DeepSeek retired the
-  # deepseek-chat and deepseek-reasoner aliases on 2026-07-24.
-  - id: deepseek-v4-flash
+  # Prices are off-peak USD per million tokens. Peak (Mon–Fri 01:00–04:00
+  # and 06:00–10:00 UTC) is double. deepseek-v4-flash still routes to flash.
+  - id: deepseek-flash
     provider: deepseek
     tier: T3
     capabilities: [chat, tools, images, json_schema]
     context_window: 1000000
     max_output_tokens: 384000
     available: true
-    input_price: 0.14
-    cached_input_price_usd_per_million: 0.028
-    output_price: 0.28
+    input_price: 0.15
+    cached_input_price_usd_per_million: 0.003
+    output_price: 0.6
     per_request_price_usd: 0
     latency_p95: 0s
     success_prior: 1
@@ -531,9 +544,9 @@ models:
     context_window: 1000000
     max_output_tokens: 384000
     available: true
-    input_price: 1.74
-    cached_input_price_usd_per_million: 0.145
-    output_price: 3.48
+    input_price: 0.66
+    cached_input_price_usd_per_million: 0.022
+    output_price: 1.98
     per_request_price_usd: 0
     latency_p95: 0s
     success_prior: 1
