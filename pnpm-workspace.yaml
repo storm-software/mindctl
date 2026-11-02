@@ -3,73 +3,73 @@ packages:
   - packages/*
   - docs/*
 catalog:
-  "@ls-lint/ls-lint": ^2.3.1
-  "@nx/devkit": 23.3.0
-  "@nx/docker": 23.3.0
-  "@nx/eslint-plugin": 23.3.0
-  "@nx/js": 23.3.0
-  "@nx/plugin": 23.3.0
-  "@nx/vite": 23.3.0
-  "@nx/vitest": 23.3.0
-  "@nx/workspace": 23.3.0
-  "@powerlines/nx": ^0.13.254
-  "@powerlines/tsconfig": ^0.4.258
-  "@powerlines/tsdoc": ^0.2.206
-  "@sourcebook/config": ^0.0.11
-  "@storm-software/config": ^1.138.86
-  "@storm-software/config-tools": ^1.190.150
-  "@storm-software/cspell": ^0.46.217
-  "@storm-software/eslint": ^0.170.185
-  "@storm-software/eslint-plugin-pnpm": ^0.0.113
-  "@storm-software/git-tools": ^2.132.7
-  "@storm-software/linting-tools": ^1.134.80
-  "@storm-software/markdownlint": ^0.30.305
-  "@storm-software/pnpm-tools": ^0.7.164
-  "@storm-software/prettier": ^0.59.203
-  "@storm-software/tsconfig": ^0.48.216
-  "@storm-software/untyped": ^0.24.292
-  "@storm-software/workspace-tools": ^1.297.19
-  "@swc-node/register": ^1.11.1
-  "@swc/core": ^1.15.41
+  "@ls-lint/ls-lint": ^2.3.2
+  "@nx/devkit": 23.3.1
+  "@nx/docker": 23.3.1
+  "@nx/eslint-plugin": 23.3.1
+  "@nx/js": 23.3.1
+  "@nx/plugin": 23.3.1
+  "@nx/vite": 23.3.1
+  "@nx/vitest": 23.3.1
+  "@nx/workspace": 23.3.1
+  "@powerlines/nx": ^0.13.258
+  "@powerlines/tsconfig": ^0.4.261
+  "@powerlines/tsdoc": ^0.2.209
+  "@sourcebook/config": ^0.0.12
+  "@storm-software/config": ^1.138.91
+  "@storm-software/config-tools": ^1.190.155
+  "@storm-software/cspell": ^0.46.222
+  "@storm-software/eslint": ^0.170.190
+  "@storm-software/eslint-plugin-pnpm": ^0.0.118
+  "@storm-software/git-tools": ^2.133.0
+  "@storm-software/linting-tools": ^1.134.85
+  "@storm-software/markdownlint": ^0.30.310
+  "@storm-software/pnpm-tools": ^0.7.169
+  "@storm-software/prettier": ^0.59.208
+  "@storm-software/tsconfig": ^0.48.221
+  "@storm-software/untyped": ^0.24.297
+  "@storm-software/workspace-tools": ^1.297.25
+  "@swc-node/register": ^1.12.1
+  "@swc/core": ^1.16.21
   "@swc/helpers": ^0.5.23
   "@taplo/cli": ^0.7.0
   "@types/node": ^25.9.9
-  "@typescript/native-preview": 7.0.0-dev.20251218.3
+  "@typescript/native-preview": 7.0.0-dev.20260707.2
   copyfiles: ^2.4.1
-  esbuild: ^0.27.7
-  eslint: ^10.12.0
+  esbuild: ^0.28.2
+  eslint: ^10.14.0
   lefthook: ^1.13.6
   log4brains: ^1.1.0
   nx: 23.3.0
   prettier: ^3.9.10
   rimraf: ^6.1.3
-  sherif: ^1.0.0
-  tsdown: ^0.22.14
+  sherif: ^1.13.0
+  tsdown: ^0.23.4
   typescript: ^6.0.3
-  verdaccio: 6.0.5
-  vite: ^8.3.4
-  vitest: ~4.1.11
+  verdaccio: 6.11.1
+  vite: ^8.3.5
+  vitest: ~4.1.12
   zx: ^8.8.5
 overrides:
   "@mindctl/tools-config": workspace:*
   "@mindctl/tools-scripts": workspace:*
   "@mindctl/tools-cspell": workspace:*
-  cookie: ">=0.7.0"
-  debug: ">=4.4.0"
-  follow-redirects: ">=1.15.9"
-  got: ">=14.4.5"
+  cookie: ">=0.7.2"
+  debug: ">=4.4.3"
+  follow-redirects: ">=1.16.2"
+  got: ">=14.6.6"
   ip: ">=2.0.1"
   loader-utils: ">=3.3.1"
-  markdown-it: ">=14.1.0"
+  markdown-it: ">=14.3.3"
   micromatch: ">=4.0.8"
   node-fetch: ">=3.3.2"
   nth-check: ">=2.1.1"
-  parse-path: ">=7.0.0"
+  parse-path: ">=7.1.0"
   parse-url: ">=9.2.0"
-  path-to-regexp: ">=0.1.12"
-  postcss: ">=8.5.1"
-  shell-quote: ">=1.8.2"
-  simple-git: ">=3.27.0"
+  path-to-regexp: ">=0.2.5"
+  postcss: ">=8.5.32"
+  shell-quote: ">=1.12.0"
+  simple-git: ">=3.36.0"
 shamefullyHoist: true
 engineStrict: true
 fetchTimeout: 240000

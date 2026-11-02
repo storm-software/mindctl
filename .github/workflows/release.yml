@@ -218,7 +218,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: "24.22.2"
           package-manager-cache: false
       - uses: actions/setup-go@v6
         with:
@@ -226,7 +226,7 @@ jobs:
       - run: go test ./...
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.15.2"
       - uses: astral-sh/setup-uv@v5
       - run: uv run --locked --project sidecar/laya pytest -q
       - uses: goreleaser/goreleaser-action@v6
@@ -296,7 +296,7 @@ jobs:
       - run: go test ./...
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.15.2"
       - uses: astral-sh/setup-uv@v5
       - run: uv run --locked --project sidecar/laya pytest -q
       - id: build
@@ -310,7 +310,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: "24.22.2"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       - name: Stage npm package
