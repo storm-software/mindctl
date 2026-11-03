@@ -5,21 +5,21 @@
 class Mindctl < Formula
   desc "An LLM router that uses built-in logic and system 1 decision models to intelligently route requests to the appropriate LLM based on the input prompt"
   homepage "https://github.com/storm-software/mindctl"
-  version "0.1.58"
+  version "0.1.60"
   license "Apache-2.0"
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/storm-software/mindctl/releases/download/v0.1.58/mindctl_0.1.58_darwin-amd64.tar.gz"
-      sha256 "6b5090d7685ad68d408230a0f70a54f2cd8a901f4b4e000f5611ef4e0856b958"
+      url "https://github.com/storm-software/mindctl/releases/download/v0.1.60/mindctl_0.1.60_darwin-amd64.tar.gz"
+      sha256 "2691766216a0108567d5e0320fde2436ef2cb11987aca9ccf60dcbfdc608d520"
 
       define_method(:install) do
         bin.install "mindctl"
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/storm-software/mindctl/releases/download/v0.1.58/mindctl_0.1.58_darwin-arm64.tar.gz"
-      sha256 "67d42e223c5d0097814e6e2afe6f3750f78e84e7b132f233809e1e064d75d195"
+      url "https://github.com/storm-software/mindctl/releases/download/v0.1.60/mindctl_0.1.60_darwin-arm64.tar.gz"
+      sha256 "8bb66ba6c3070b03f78a9fc73373641920dbe8ff240909685360bc9eee04c440"
 
       define_method(:install) do
         bin.install "mindctl"
@@ -29,15 +29,15 @@ class Mindctl < Formula
 
   on_linux do
     if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/storm-software/mindctl/releases/download/v0.1.58/mindctl_0.1.58_linux-amd64.tar.gz"
-      sha256 "7a9ddaaac7e49c2f8360d9a9d2fe1d2a8e491180bb1709a572a0e5bd3be54ab8"
+      url "https://github.com/storm-software/mindctl/releases/download/v0.1.60/mindctl_0.1.60_linux-amd64.tar.gz"
+      sha256 "c598354f0c8aea68a81b04acb931cf150bb81faf467d4fae71f70afc9996fa56"
       define_method(:install) do
         bin.install "mindctl"
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/storm-software/mindctl/releases/download/v0.1.58/mindctl_0.1.58_linux-arm64.tar.gz"
-      sha256 "a9a623bba725647dc460cee24a7928098f4c0de55a7af9940335c75ab9ceb887"
+      url "https://github.com/storm-software/mindctl/releases/download/v0.1.60/mindctl_0.1.60_linux-arm64.tar.gz"
+      sha256 "e9611bf49483c01627c103b0a7965c5a6a76ad90f6dfd109b7a33c2fc13b85e4"
       define_method(:install) do
         bin.install "mindctl"
       end
