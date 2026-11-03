@@ -108,6 +108,31 @@ func TestStreamDoesNotRetryAfterVisibleEvent(t *testing.T) {
 	}
 }
 
+func TestStreamTracesReadFailureAfterVisibleOutputWithoutRetrying(t *testing.T) {
+	upstream := &scriptedStream{
+		events: []inference.Event{{Type: "response.output_text.delta", Delta: "partial"}},
+		err: &provider.Error{
+			Kind: provider.ErrorRetryable, RequestID: "upstream-request",
+			FailureStage: "stream_read", Err: io.ErrUnexpectedEOF,
+		},
+	}
+	deps := newStreamDependencies(upstream, successfulStream("replacement"))
+	var logs bytes.Buffer
+	deps.executor.logger = slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	err := deps.executor.Stream(context.Background(), deps.input(), deps.writer)
+	if err == nil || deps.provider.calls != 1 || !deps.writer.hasTerminalError {
+		t.Fatalf("calls=%d terminal=%v err=%v", deps.provider.calls, deps.writer.hasTerminalError, err)
+	}
+	for _, want := range []string{
+		`"failure_stage":"stream_read"`, `"failure_cause":"unexpected_eof"`,
+		`"visible_output":true`, `"provider_request_id":"upstream-request"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("trace missing %s", want)
+		}
+	}
+}
+
 func TestStreamRejectsPrematureEOFAfterVisibleOutput(t *testing.T) {
 	stream := &scriptedStream{events: []inference.Event{{Type: "response.output_text.delta", Delta: "partial", ProviderRequestID: "upstream-request"}}, err: io.EOF}
 	deps := newStreamDependencies(stream)

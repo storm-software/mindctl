@@ -2,8 +2,12 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"net"
+	"syscall"
 
 	"github.com/storm-software/mindctl/internal/classifier"
 	"github.com/storm-software/mindctl/internal/domain"
@@ -92,9 +96,45 @@ func errorDiagnostic(err error) []any {
 		return nil
 	}
 	return []any{
+		"failure_stage", providerErr.FailureStage,
+		"failure_cause", failureCause(providerErr.Err),
 		"upstream_status", providerErr.Status,
 		"upstream_code", providerErr.UpstreamCode,
 		"upstream_param", providerErr.UpstreamParam,
 		"upstream_message", providerErr.UpstreamMessage,
 	}
+}
+
+func failureCause(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, io.ErrUnexpectedEOF):
+		return "unexpected_eof"
+	case errors.Is(err, io.EOF):
+		return "eof"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection_reset"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection_refused"
+	case errors.Is(err, syscall.EPIPE):
+		return "broken_pipe"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "timeout"
+	}
+	var dnsError *net.DNSError
+	if errors.As(err, &dnsError) {
+		return "dns"
+	}
+	var syntaxError *json.SyntaxError
+	if errors.As(err, &syntaxError) {
+		return "invalid_json"
+	}
+	return "other"
 }

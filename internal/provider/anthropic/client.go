@@ -83,7 +83,10 @@ func (c *Client) Execute(ctx context.Context, model domain.Model, request infere
 	defer response.Body.Close()
 	var wire messagesResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&wire); err != nil {
-		return inference.Result{}, &provider.Error{Kind: provider.ErrorRetryable, Status: response.StatusCode, RequestID: requestID, Err: errors.New("invalid provider response")}
+		return inference.Result{}, &provider.Error{
+			Kind: provider.ErrorRetryable, Status: response.StatusCode, RequestID: requestID,
+			FailureStage: "response_decode", Err: err,
+		}
 	}
 	return fromMessagesResponse(wire, model, requestID), nil
 }
@@ -181,7 +184,7 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveVa
 	}
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return nil, "", &provider.Error{Kind: provider.ErrorRetryable, Err: err}
+		return nil, "", &provider.Error{Kind: provider.ErrorRetryable, FailureStage: "transport", Err: err}
 	}
 	requestID := response.Header.Get("request-id")
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
@@ -193,6 +196,7 @@ func (c *Client) post(ctx context.Context, body []byte, stream bool, sensitiveVa
 			RequestID:       requestID,
 			UpstreamCode:    diagnostic.UpstreamCode,
 			UpstreamMessage: diagnostic.UpstreamMessage,
+			FailureStage:    "http_status",
 			Err:             errors.New("provider returned an error status"),
 		}
 	}
@@ -297,16 +301,24 @@ func (s *stream) Next(ctx context.Context) (inference.Event, error) {
 	frame, err := s.reader.Next(ctx)
 	if err != nil {
 		if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("provider stream read failed")}
+			return inference.Event{}, &provider.Error{
+				Kind: provider.ErrorRetryable, RequestID: s.requestID, FailureStage: "stream_read", Err: err,
+			}
 		}
 		return inference.Event{}, err
 	}
 	if frame.Type == "error" {
-		return inference.Event{}, &provider.Error{Kind: streamErrorKind(frame.Data), RequestID: s.requestID, Err: errors.New("provider stream returned an error")}
+		return inference.Event{}, &provider.Error{
+			Kind: streamErrorKind(frame.Data), RequestID: s.requestID,
+			FailureStage: "stream_error", UpstreamCode: streamErrorCode(frame.Data),
+			Err: errors.New("provider stream returned an error"),
+		}
 	}
 	event, responseID, usage, err := parseStreamEvent(frame.Type, frame.Data, s.responseID, s.status)
 	if err != nil {
-		return inference.Event{}, &provider.Error{Kind: provider.ErrorRetryable, RequestID: s.requestID, Err: errors.New("invalid provider stream event")}
+		return inference.Event{}, &provider.Error{
+			Kind: provider.ErrorRetryable, RequestID: s.requestID, FailureStage: "stream_decode", Err: err,
+		}
 	}
 	if responseID != "" {
 		s.responseID = responseID
@@ -356,15 +368,7 @@ func contentBlockIndex(data []byte) (int, bool) {
 }
 
 func streamErrorKind(data []byte) provider.ErrorKind {
-	var frame struct {
-		Error struct {
-			Type string `json:"type"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(data, &frame) != nil {
-		return provider.ErrorRetryable
-	}
-	switch frame.Error.Type {
+	switch streamErrorCode(data) {
 	case "rate_limit_error":
 		return provider.ErrorRateLimit
 	case "overloaded_error":
@@ -375,6 +379,24 @@ func streamErrorKind(data []byte) provider.ErrorKind {
 		return provider.ErrorInvalidRequest
 	default:
 		return provider.ErrorRetryable
+	}
+}
+
+func streamErrorCode(data []byte) string {
+	var frame struct {
+		Error struct {
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(data, &frame) != nil {
+		return ""
+	}
+	switch frame.Error.Type {
+	case "rate_limit_error", "overloaded_error", "authentication_error", "permission_error",
+		"invalid_request_error", "not_found_error", "api_error", "request_too_large":
+		return frame.Error.Type
+	default:
+		return ""
 	}
 }
 

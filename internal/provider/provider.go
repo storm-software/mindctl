@@ -44,6 +44,7 @@ type Error struct {
 	UpstreamCode    string
 	UpstreamParam   string
 	UpstreamMessage string
+	FailureStage    string
 	Err             error
 }
 
@@ -61,7 +62,10 @@ func IsSuccessfulCompletion(status string) bool {
 // UnsuccessfulCompletionError keeps an unacceptable terminal state safe for
 // callers while leaving it retryable until stream output becomes visible.
 func UnsuccessfulCompletionError(requestID string) *Error {
-	return &Error{Kind: ErrorRetryable, RequestID: requestID, Err: errors.New("provider did not complete successfully")}
+	return &Error{
+		Kind: ErrorRetryable, RequestID: requestID, FailureStage: "stream_incomplete",
+		Err: errors.New("provider did not complete successfully"),
+	}
 }
 
 // UnsupportedFeatureError reports a portable feature the concrete model does

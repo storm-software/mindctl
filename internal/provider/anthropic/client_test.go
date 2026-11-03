@@ -310,6 +310,82 @@ func TestAnthropicStreamPreservesRequestIDOnMalformedFrames(t *testing.T) {
 	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorRetryable || normalized.RequestID != "anthropic-stream-req" {
 		t.Fatalf("err=%v", err)
 	}
+	if normalized.FailureStage != "stream_decode" {
+		t.Fatalf("failure stage=%q", normalized.FailureStage)
+	}
+}
+
+func TestAnthropicStreamPreservesReadFailure(t *testing.T) {
+	upstream := &stream{
+		reader:    provider.NewSSEReader(failingReader{err: io.ErrUnexpectedEOF}),
+		requestID: "anthropic-stream-req",
+	}
+	_, err := upstream.Next(context.Background())
+	var normalized *provider.Error
+	if !errors.As(err, &normalized) || normalized.FailureStage != "stream_read" ||
+		normalized.RequestID != "anthropic-stream-req" || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+type failingReader struct{ err error }
+
+func (reader failingReader) Read([]byte) (int, error) { return 0, reader.err }
+
+func TestAnthropicExecutePreservesFailureStageAndCause(t *testing.T) {
+	for _, test := range []struct {
+		stage          string
+		transportError error
+	}{
+		{stage: "transport", transportError: errors.New("SECRET transport detail")},
+		{stage: "response_decode"},
+	} {
+		t.Run(test.stage, func(t *testing.T) {
+			client := NewClient("https://provider.invalid", "SECRET", &http.Client{
+				Transport: diagnosticTransport{err: test.transportError},
+			})
+			_, err := client.Execute(context.Background(), anthropicModel(), textRequest())
+			var normalized *provider.Error
+			if !errors.As(err, &normalized) || normalized.FailureStage != test.stage || strings.Contains(err.Error(), "SECRET") {
+				t.Fatalf("err=%v", err)
+			}
+			cause := test.transportError
+			if cause == nil {
+				cause = io.ErrUnexpectedEOF
+			}
+			if !errors.Is(err, cause) {
+				t.Fatal("underlying cause was discarded")
+			}
+		})
+	}
+}
+
+type diagnosticTransport struct{ err error }
+
+func (transport diagnosticTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	if transport.err != nil {
+		return nil, transport.err
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(failingReader{err: io.ErrUnexpectedEOF}),
+	}, nil
+}
+
+func TestAnthropicStreamErrorCodeDoesNotRetainUnknownContent(t *testing.T) {
+	for _, test := range []struct {
+		data string
+		want string
+	}{
+		{`{"error":{"type":"api_error","message":"SECRET"}}`, "api_error"},
+		{`{"error":{"type":"overloaded_error","message":"SECRET"}}`, "overloaded_error"},
+		{`{"error":{"type":"SECRET","message":"SECRET"}}`, ""},
+		{`{SECRET`, ""},
+	} {
+		if got := streamErrorCode([]byte(test.data)); got != test.want {
+			t.Fatalf("code=%q want=%q", got, test.want)
+		}
+	}
 }
 
 func TestAnthropicStreamNormalizesProviderErrorWithoutBody(t *testing.T) {
@@ -327,6 +403,9 @@ func TestAnthropicStreamNormalizesProviderErrorWithoutBody(t *testing.T) {
 	var normalized *provider.Error
 	if !errors.As(err, &normalized) || normalized.Kind != provider.ErrorRateLimit || normalized.RequestID != "anthropic-stream-req" || strings.Contains(normalized.Error(), "secret") {
 		t.Fatalf("err=%v", err)
+	}
+	if normalized.FailureStage != "stream_error" || normalized.UpstreamCode != "rate_limit_error" || normalized.UpstreamMessage != "" {
+		t.Fatalf("diagnostic=%+v", normalized)
 	}
 }
 
