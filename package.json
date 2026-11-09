@@ -25,7 +25,7 @@
   "private": true,
   "packageManager": "pnpm@11.1.2",
   "engines": {
-    "node": ">=26.3.0",
+    "node": ">=26.13.0",
     "pnpm": ">=11.1.2"
   },
   "keywords": ["ai-agents", "llm", "ai-router", "storm-software"],
