@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
   -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
   -o /out/mindctl ./cmd/mindctl
 
-FROM python:3.13-slim AS runtime
+FROM python:3.15-slim AS runtime
 LABEL org.opencontainers.image.title="mindctl" \
   org.opencontainers.image.description="An LLM router that uses built-in logic and system 1 decision models to intelligently route requests to the appropriate LLM based on the input prompt" \
   org.opencontainers.image.licenses="Apache-2.0" \
