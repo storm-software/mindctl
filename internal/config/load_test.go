@@ -60,20 +60,32 @@ func TestShippedExampleIncludesChatGPTProModelCatalog(t *testing.T) {
 		capabilities               []string
 		available                  bool
 	}{
-		"gpt-6-astra":         {input: 10, cachedInput: 1, output: 50, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-6.1-sol":         {input: 2, cachedInput: .1, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-6.1-terra":       {input: 1, cachedInput: .05, output: 5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-6-sol":           {input: 2, cachedInput: .2, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-6-luna":          {input: .1, cachedInput: .01, output: .5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-5.6-sol":         {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-5.6-terra":       {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-5.6-luna":        {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
-		"gpt-5.3-codex":       {input: 1.75, cachedInput: .175, output: 14, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
-		"gpt-5.3-codex-spark": {input: 0, cachedInput: 0, output: 0, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
+		"gpt-6.2-astra": {
+			input: 8, cachedInput: .4, output: 40,
+			capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"},
+			available:    true,
+		},
+		"gpt-6.2-sol": {
+			input: 2, cachedInput: .1, output: 10,
+			capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"},
+			available:    true,
+		},
+		"gpt-6-astra":   {input: 10, cachedInput: 1, output: 50, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6.1-sol":   {input: 2, cachedInput: .1, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6.1-terra": {input: 1, cachedInput: .05, output: 5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6-sol":     {input: 2, cachedInput: .2, output: 10, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-6-luna":    {input: .1, cachedInput: .01, output: .5, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.6-sol":   {input: 4, cachedInput: .4, output: 20, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.6-terra": {input: 2, cachedInput: .2, output: 12, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.6-luna":  {input: .2, cachedInput: .02, output: 1.2, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: true},
+		"gpt-5.3-codex": {input: 1.75, cachedInput: .175, output: 14, capabilities: []string{"chat", "tools", "images", "json_schema", "web_search"}, available: false},
 	}
 	wantModelCount := len(wantPrices)
 	matchedModels := 0
 	for _, model := range cfg.Models {
+		if model.ID == "gpt-5.3-codex-spark" {
+			t.Error("retired Codex-Spark is still in the shipped catalog")
+		}
 		want, ok := wantPrices[model.ID]
 		if !ok {
 			continue
@@ -135,6 +147,10 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 		context, outputLimit                   int
 		input, cachedInput, cacheWrite, output float64
 	}{
+		"claude-fable-5-2": {
+			tier: "T6", context: 1_000_000, outputLimit: 128_000,
+			input: 8, cachedInput: .2, cacheWrite: 10, output: 40,
+		},
 		"claude-fable-5-1":  {tier: "T6", context: 1_000_000, outputLimit: 128_000, input: 10, cachedInput: .25, cacheWrite: 12.5, output: 50},
 		"claude-opus-5-5":   {tier: "T5", context: 1_000_000, outputLimit: 128_000, input: 4, cachedInput: .2, cacheWrite: 5, output: 20},
 		"claude-sonnet-5-5": {tier: "T4", context: 1_000_000, outputLimit: 128_000, input: 2, cachedInput: .1, cacheWrite: 2.5, output: 10},
@@ -168,7 +184,7 @@ func TestShippedExampleIncludesClaudeSubscriptionModelCatalog(t *testing.T) {
 	}
 }
 
-func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
+func TestShippedExampleIncludesMetaModelCatalog(t *testing.T) {
 	cfg, err := Read("../../config.example.yaml")
 	if err != nil {
 		t.Fatalf("Read shipped example: %v", err)
@@ -179,9 +195,13 @@ func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
 	}{
 		"muse-spark-1.3":             {input: 1.25, cachedInput: .15, output: 4.25},
 		"muse-spark-1.3-contributor": {input: .1, cachedInput: .002, output: .2},
-		"muse-wonder":                {input: 4, cachedInput: .2, output: 20},
+		"muse-wonder-1.0":            {input: 4, cachedInput: .2, output: 20},
+		"muse-ember-1.0":             {input: .1, cachedInput: .004, output: .5},
 	}
 	for _, model := range cfg.Models {
+		if model.ID == "muse-wonder" {
+			t.Error("unversioned Muse Wonder is still in the shipped catalog")
+		}
 		want, ok := wantPrices[model.ID]
 		if !ok {
 			continue
@@ -198,8 +218,8 @@ func TestShippedExampleIncludesMetaMuseSparkModelCatalog(t *testing.T) {
 		t.Errorf("missing shipped Meta model %q", modelID)
 	}
 	for _, model := range cfg.Models {
-		if model.ID == "muse-wonder" && model.CacheWriteInputPrice() != 0 {
-			t.Errorf("muse-wonder cache write price = %g, want 0", model.CacheWriteInputPrice())
+		if model.Provider == "meta" && model.CacheWriteInputPrice() != 0 {
+			t.Errorf("%s cache write price = %g, want 0", model.ID, model.CacheWriteInputPrice())
 		}
 	}
 }
@@ -226,11 +246,16 @@ func TestShippedExampleIncludesGeminiModelCatalog(t *testing.T) {
 		tier                       string
 		input, cachedInput, output float64
 	}{
-		"gemini-3.1-pro":   {tier: "T5", input: 2, cachedInput: .2, output: 12},
-		"gemini-4-argon":   {tier: "T5", input: 2, cachedInput: .1, output: 10},
-		"gemini-3.8-flash": {tier: "T3", input: .75, cachedInput: .075, output: 3.75},
+		"gemini-4-carbon":        {tier: "T6", input: 2, cachedInput: .1, output: 10},
+		"gemini-4-hydrogen":      {tier: "T3", input: 1.5, cachedInput: .075, output: 7.5},
+		"gemini-3.1-pro-preview": {tier: "T5", input: 2, cachedInput: .2, output: 12},
+		"gemini-4-argon":         {tier: "T5", input: 2, cachedInput: .1, output: 10},
+		"gemini-3.8-flash":       {tier: "T3", input: .75, cachedInput: .075, output: 3.75},
 	}
 	for _, model := range cfg.Models {
+		if model.ID == "gemini-3.1-pro" {
+			t.Error("Cursor's Gemini 3.1 Pro alias is still in the direct API catalog")
+		}
 		want, ok := wantModels[model.ID]
 		if !ok {
 			continue
@@ -294,6 +319,9 @@ func TestShippedExampleIncludesEnabledDeepSeekV4ModelCatalog(t *testing.T) {
 		}
 		if model.InputPrice != want.input || model.CachedInputPrice() != want.cachedInput || model.OutputPrice != want.output {
 			t.Errorf("model %s prices = input %g cached %g output %g, want input %g cached %g output %g", model.ID, model.InputPrice, model.CachedInputPrice(), model.OutputPrice, want.input, want.cachedInput, want.output)
+		}
+		if model.CacheWriteInputPrice() != 0 {
+			t.Errorf("%s cache write price = %g, want 0", model.ID, model.CacheWriteInputPrice())
 		}
 	}
 	for modelID := range wantModels {

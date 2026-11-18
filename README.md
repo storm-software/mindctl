@@ -286,10 +286,13 @@ request-scoped credential only to the configured ChatGPT Codex endpoint.
 
 Available models, workspace access, rate limits, and usage limits remain
 subject to the selected ChatGPT account and subscription. The shipped
-ChatGPT Pro catalog includes `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`,
-`gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.3-codex`, and the
-Pro-only research preview `gpt-5.3-codex-spark`. GPT-6 model access is
-currently rolling out and may not yet appear for every Pro account.
+ChatGPT Pro catalog includes `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6-astra`,
+`gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`,
+`gpt-5.6-terra`, and `gpt-5.6-luna`. Model access depends on the account and
+client. The deprecated `gpt-5.3-codex` entry remains disabled; API-key users
+can enable it until its scheduled API retirement on April 1, 2027.
+`gpt-5.3-codex-spark` was removed after its September 14, 2026 retirement.
+See the [current Codex models](https://developers.openai.com/codex/models).
 
 <div align="right">[ <a href="#table-of-contents">Back to top ▲</a> ]</div>
 <br />
@@ -318,8 +321,8 @@ request context only, makes subscription-backed Anthropic models eligible for
 that request, and forwards it to the configured Anthropic endpoint as a bearer
 credential. Mindctl does not store, refresh, or log the token.
 
-The shipped catalog includes Claude Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5,
-and Haiku 4.5 with comparable Claude API prices for routing decisions. Actual usage is
+The shipped catalog includes Claude Fable 5.2 and 5.1, Opus 5.5, Sonnet 5.5,
+Haiku 5.5, and Haiku 4.5 with comparable Claude API prices for routing decisions. Actual usage is
 governed by the selected Claude subscription's model access and plan limits,
 not API token billing.
 
@@ -678,6 +681,25 @@ Streams that fail after their `200` header has been sent are not captured.
 
 ## Model and provider availability
 
+The catalog was checked against provider documentation on November 18, 2026.
+It covers OpenAI, Anthropic, Gemini, Meta, and DeepSeek. Gemini includes
+Carbon, Argon, and Hydrogen from the Gemini 4 family, Gemini 3.1 Pro Preview, and
+Gemini 3.8 Flash. Meta includes Muse Spark 1.3 and its Contributor variant,
+the Model API ID `muse-wonder-1.0`, and `muse-ember-1.0`. Contributor mode
+permits Meta to use prompts and responses for training.
+The direct Gemini API uses `gemini-3.1-pro-preview`, so replace any
+`gemini-3.1-pro` entries copied from Cursor's model list.
+
+Prices in [`config.example.yaml`](config.example.yaml) are flat USD rates per
+million tokens. They do not automatically change with dates, context length,
+or service tiers. [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
+lists GPT-5.6 Sol's promotion through November 30, 2026.
+[Gemini pricing](https://aistudio.google.com/docs/pricing) doubles Carbon and
+Argon token prices on December 1, 2026, and Flash 3.8 prices on January 1, 2027.
+The example uses base rates for Haiku 5.5, Gemini 3.1 Pro, and Muse Ember;
+their longer prompts cost more. DeepSeek entries use off-peak rates; peak
+rates are double. The example comments record thresholds and source links.
+
 Mindctl can keep the routable model allow-list separate from the gateway
 catalog. The gateway reads
 `${XDG_STATE_HOME:-$HOME/.local/state}/mindctl/providers.yaml` once during
@@ -688,6 +710,8 @@ When the file exists, only the models listed in it are available:
 ```yaml
 providers:
   openai:
+    - gpt-6.2-astra
+    - gpt-6.2-sol
     - gpt-6-astra
     - gpt-6.1-sol
     - gpt-6.1-terra
@@ -697,7 +721,6 @@ providers:
     - gpt-5.6-terra
     - gpt-5.6-luna
     - gpt-5.3-codex
-    - gpt-5.3-codex-spark
   deepseek:
     - deepseek-flash
 ```
@@ -705,6 +728,9 @@ providers:
 Use the catalog commands to inspect or update the file. The first update
 initializes it from the current `available` values, and changes take effect in
 the gateway after restart.
+Existing installations must copy the catalog changes into their own gateway
+configuration. If `providers.yaml` exists, enable new models there as well;
+updating the example does not change an existing configuration or allow-list.
 
 ```sh
 mindctl model list
